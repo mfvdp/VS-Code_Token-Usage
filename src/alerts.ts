@@ -33,6 +33,7 @@
 import { PROVIDER_NAME } from './adapters'
 import { BudgetPeriod, BudgetRow } from './budget'
 import { AlertConfig } from './config'
+import { showMessage } from './hostUi'
 import { t } from './i18n'
 import { heldReset } from './resetRule'
 import { MementoLike } from './storage'
@@ -679,10 +680,10 @@ export class Alerts {
   }
 }
 
-/** The editor notification, required lazily so the class itself stays vscode-free. */
-const defaultNotify: Notify = (message, actions, level) => {
-  const vscode = require('vscode') as typeof import('vscode')
-  return level === 'info'
-    ? vscode.window.showInformationMessage(message, ...actions)
-    : vscode.window.showWarningMessage(message, ...actions)
-}
+/**
+ * The editor notification, through the door (src/hostUi.ts, 1.13 A3 rule 8 — the message and its buttons isolated in
+ * a right-to-left language, the answer the caller's own label); `vscode` is required when it is shown, so the class
+ * itself stays vscode-free.
+ */
+const defaultNotify: Notify = (message, actions, level) =>
+  showMessage(level === 'info' ? 'info' : 'warning', message, {}, ...actions)

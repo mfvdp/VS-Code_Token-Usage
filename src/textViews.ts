@@ -13,6 +13,7 @@
 
 import type { AgentTally, AgentTreeVm, AgentWeek, NodeState, RunningItem, TreeNode } from './agentTree'
 import { tallySpoken, tallyText } from './agentTreeBuild'
+import { rangeArrow } from './bidi'
 import { t } from './i18n'
 import { DEFAULT_BAR, estimate, full, renderBar } from './render'
 import type { Forecast, Source } from './types'
@@ -220,7 +221,8 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
   const shown = viewTitle(vm)
   add({
     label: t('Open dashboard'),
-    description: `${shown !== null ? `${shown} · ` : ''}${vm.range.label} · ${vm.range.from} → ${vm.range.to}`,
+    // 1.13 (Review 1 F1): a Quick Pick's range the way the words read (bidi.ts rangeArrow); the markdown keeps →.
+    description: `${shown !== null ? `${shown} · ` : ''}${vm.range.label} · ${vm.range.from}${rangeArrow()}${vm.range.to}`,
     detail: t('generated {0}', vm.generatedAt),
     command: 'tokenPace.showDashboard',
   })
@@ -528,7 +530,7 @@ function recordLines(vm: ViewModel): PickItem[] {
   })
   out.push({
     label: t('Record streak: {0}', r.streak ? dayCount(r.streak.days) : '–'),
-    description: r.streak ? `${r.streak.from} → ${r.streak.to}` : undefined,
+    description: r.streak ? `${r.streak.from}${rangeArrow()}${r.streak.to}` : undefined,
   })
   // The heading is passed in whole, never assembled from "Top" plus a noun: a language that
   // inflects the noun after "Top" cannot be served by a phrase glued together here.
@@ -611,7 +613,7 @@ function budgetLines(vm: ViewModel): PickItem[] {
   return vm.budgets.map((b) => ({
     label: b.text,
     description: [
-      `${b.from} → ${b.last}`,
+      `${b.from}${rangeArrow()}${b.last}`,
       // A lower bound, said the way every other lower bound in this extension is said.
       b.partial ? `⚠ ${t('lower bound')}` : null,
       b.over ? t('over budget') : null,

@@ -178,6 +178,10 @@ cache that status line last reported — warm or cold, its TTL, the countdown to
 ratio, each part a `–` where the reading did not carry it —, unless its session is one of the rows
 above: one row per session. The compact tooltip leaves all of them out.
 
+In Arabic, Hebrew and Persian every entry's text, name and tooltip carry invisible direction marks, so that its words
+read from the right while its figures and names stay left to right, and its icon stays at the entry's left edge
+([Languages](languages.md#right-to-left)); the words a screen reader says carry none.
+
 Only this extension's own argument-less commands are ever linked from the tooltip, and a link
 that would do nothing in the current state — *Fetch now* while consent is denied, in
 `quotaSource: cache`, or while another window polls — is rendered as plain text instead of

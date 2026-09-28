@@ -22,6 +22,7 @@
  */
 
 import { keychainService } from './credentials'
+import { HostUi, hostUi } from './hostUi'
 import { t } from './i18n'
 import { MementoLike } from './storage'
 
@@ -36,20 +37,14 @@ export const KEYCHAIN_CONSENT_KEY = 'networkConsentKeychain'
 export type ConsentState = 'granted' | 'denied' | 'unasked'
 
 /**
- * The one `vscode.window` method the dialogs need. Injectable so the classes
- * can be exercised without an editor; the real module is required lazily.
+ * The one question the dialogs put: a modal message through the door (src/hostUi.ts, 1.13 A3 rule 8 — its texts
+ * isolated in a right-to-left language, the answer the caller's own label). Injectable so the classes can be
+ * exercised without an editor; the real window is required when a dialog is shown.
  */
-export interface ConsentUi {
-  showInformationMessage(
-    message: string,
-    options: { modal: boolean; detail?: string },
-    ...items: string[]
-  ): PromiseLike<string | undefined>
-}
+export type ConsentUi = Pick<HostUi, 'showMessage'>
 
 function windowUi(): ConsentUi {
-  const vscode = require('vscode') as typeof import('vscode')
-  return vscode.window
+  return hostUi()
 }
 
 /** Default poll interval of the manifest — used when no live value is supplied. */
@@ -228,7 +223,7 @@ export class NetworkConsent {
     // One value, shown and compared — the network dialog's two buttons.
     const allow = t('Allow')
     const never = t('Never')
-    const choice = await ui.showInformationMessage(
+    const choice = await ui.showMessage('info',
       t('Also read Claude Code\'s access token from the macOS Keychain?'),
       { modal: true, detail: keychainDisclosure() },
       allow,
@@ -264,7 +259,7 @@ export class NetworkConsent {
     // string nobody ever showed.
     const allow = t('Allow')
     const never = t('Never')
-    const choice = await ui.showInformationMessage(
+    const choice = await ui.showMessage('info',
       t('Allow Token Pace to fetch quota figures?'),
       { modal: true, detail: this.disclosure() },
       allow,
@@ -466,7 +461,7 @@ export class WriteConsent {
     // Same rule as the network dialog: one value, shown and compared.
     const allow = t('Allow')
     const never = t('Never')
-    const choice = await ui.showInformationMessage(
+    const choice = await ui.showMessage('info',
       writeTitle(this.kind),
       { modal: true, detail: this.disclosure() },
       allow,
@@ -505,14 +500,8 @@ export const KEEP_WARM_CONSENT_KEY = 'tokenPace.keepWarmConsent'
  */
 export const KEEP_WARM_TERMS_PASSAGE = 'Except when you are accessing our Services via an Anthropic API Key or where we otherwise explicitly permit it, to access the Services through automated or non-human means, whether through a bot, script, or otherwise.'
 
-/** The one `vscode.window` method the keep-warm dialog needs: a modal warning. */
-export interface KeepWarmConsentUi {
-  showWarningMessage(
-    message: string,
-    options: { modal: boolean; detail?: string },
-    ...items: string[]
-  ): PromiseLike<string | undefined>
-}
+/** The one question the keep-warm dialog puts: a modal warning, through the door (src/hostUi.ts). */
+export type KeepWarmConsentUi = Pick<HostUi, 'showMessage'>
 
 /**
  * The keep-warm dialog's text (§3 B2 "Consent", §7a Q19, §7c probe P-4): what is typed, where and when
@@ -537,8 +526,7 @@ export function keepWarmDisclosure(line: string): string {
 }
 
 function warningUi(): KeepWarmConsentUi {
-  const vscode = require('vscode') as typeof import('vscode')
-  return vscode.window
+  return hostUi()
 }
 
 /**
@@ -589,7 +577,7 @@ export class KeepWarmConsent {
     const ui = this.opts.ui ?? warningUi()
     // One value, shown and compared — as in the other two dialogs.
     const allow = t('Allow keep-warm')
-    const choice = await ui.showWarningMessage(
+    const choice = await ui.showMessage('warning',
       t('Let Token Pace type a keep-warm line into Claude Code\'s terminal?'),
       { modal: true, detail: this.disclosure() },
       allow,

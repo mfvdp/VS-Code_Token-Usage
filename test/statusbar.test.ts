@@ -1834,6 +1834,61 @@ test('the bar hands the entry\'s words to VS Code as its accessibility label, ke
   }
 })
 
+test('1.13 A3 rules 1, 6, 8: in a right-to-left language the bar hands VS Code each item\'s isolated text, name and tooltip and an accessible name without a control — the entry\'s own words, or the name VS Code would derive from the plain text; the menu\'s Quick Pick goes through the door, its texts isolated, its chosen item the caller\'s', async () => {
+  const { StatusBar, showMenu } = loadStatusBar()
+  const bidi = require('../src/bidi') as typeof import('../src/bidi')
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  const { pseudoRtlBundle } = require('./helpers/nls') as typeof import('./helpers/nls')
+  const stub = barStub()
+  try {
+    i18n.setBundle(pseudoRtlBundle())
+    i18n.setLocale('he-u-ca-gregory-nu-latn')
+    i18n.setLang('he')
+    i18n.setDir('rtl')
+    const bar = new StatusBar()
+    const agg = fakeAgg() as unknown as Parameters<typeof bar.update>[0]['agg']
+    bar.update({ ...input({ cfg: cfg(CACHE_ON), cacheWatch: [watched({ left: COOL })] }), agg })
+    const live = stub.items.filter((i) => !i.disposed)
+    assert.ok(live.length >= 2)
+    for (const item of live) {
+      const rest = String(item.text).replace(/^(?:\$\([\w~-]+\)[  ]*)*/u, '')
+      assert.equal(rest.codePointAt(0), 0x2067, item.text)
+      assert.equal(String(item.name).codePointAt(0), 0x2067, item.name)
+      assert.ok(String(item.tooltip.value).includes(bidi.RLI), item.id)
+      const label = item.accessibilityInformation?.label
+      assert.equal(typeof label, 'string', `${item.id}: no accessible name of its own`)
+      assert.doesNotMatch(label, bidi.BIDI_CONTROLS, item.id)
+    }
+    // The cache entry keeps its own words; another entry is named as VS Code names an item without any.
+    const cache = live.find((i) => i.id === 'tokenPace.cache')
+    assert.equal(cache?.accessibilityInformation?.label, i18n.t('Prompt cache of {0} cools in {1}', 'Session Thu 11:05 · 9d0eb37a', '4 m 10 s'))
+    const other = live.find((i) => i.id !== 'tokenPace.cache')
+    assert.ok(other)
+    assert.equal(other.accessibilityInformation?.label, bidi.itemAriaLabel(bidi.stripBidi(other.text), bidi.stripBidi(other.tooltip.value)))
+    bar.dispose()
+    // The menu: every label through the door, the chosen copy's command run.
+    let captured: any[] = []
+    let options: any
+    const previous = VSCODE_STUB.window.showQuickPick
+    VSCODE_STUB.window.showQuickPick = async (list: any[], o: unknown) => { captured = list; options = o; return list[0] }
+    const ran: string[] = []
+    try {
+      await showMenu({ role: 'single', consent: 'granted', cfg: cfg(), quotas: [state()] }, async (c) => { ran.push(c) })
+    } finally {
+      VSCODE_STUB.window.showQuickPick = previous
+    }
+    assert.equal(captured[0].label, `$(dashboard) ${bidi.RLI}${bidi.stripBidi(captured[0].label).slice('$(dashboard) '.length)}${bidi.PDI}`)
+    assert.equal(String(options.placeHolder).codePointAt(0), 0x2067)
+    assert.deepEqual(ran, ['tokenPace.showDashboard'])
+  } finally {
+    i18n.setBundle(undefined)
+    i18n.setLocale(undefined)
+    i18n.setLang(undefined)
+    i18n.setDir(undefined)
+    stub.restore()
+  }
+})
+
 test('the Claude quota tooltip lists the cooling and cold sessions as the card does, and the 1.3 row only for a session it does not list (1.8 A5, §3.0 b)', () => {
   const reading = {
     warm: true, ttl: '1h' as const, expiresAt: NOW + COOL, hitRatio: 0.9, readAt: Math.floor(NOW / 1000) - 60,

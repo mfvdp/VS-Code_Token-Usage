@@ -3,6 +3,7 @@
 
 /** Pure presentation helpers, with no dependency on vscode. */
 
+import { stripBidi } from './bidi'
 import { locale, t } from './i18n'
 import {
   lastDays as lastDaysIn, SYSTEM_TIME_CONFIG,
@@ -360,6 +361,12 @@ export function usd(n: number): string {
 /**
  * Money in the provider's currency, or a plain number when none is stated.
  * Same cents-below-100 rule as {@link usd} so the two never disagree in one view.
+ *
+ * 1.13 A3 rule 3 (§0a.3): without the direction marks ICU writes around a currency in Arabic, Hebrew and Persian
+ * (RLM, LRM — "RLM 12.50 US$"; no other language of the registry writes one, test/render.test.ts holds it): the figure is
+ * one left-to-right unit on every surface that lays it out right to left — an LRI … PDI on VS Code's (src/bidi.ts),
+ * an element with `dir="ltr"` on the page (P4's isolateFigures) —, which does what the marks did, and the text stays
+ * plain for the view model, the markdown document and every accessible name (the leak test of §0a.3).
  */
 export function money(n: number, currency: string | null): string {
   const f = digitsFor(n)
@@ -367,7 +374,7 @@ export function money(n: number, currency: string | null): string {
   const lang = locale()
   if (!currency) return n.toLocaleString(lang, d)
   try {
-    return n.toLocaleString(lang, { style: 'currency', currency, ...d })
+    return stripBidi(n.toLocaleString(lang, { style: 'currency', currency, ...d }))
   } catch {
     // Unknown ISO code — better a readable fallback than a thrown RangeError.
     return `${n.toLocaleString(lang, d)} ${currency}`

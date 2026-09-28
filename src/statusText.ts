@@ -16,11 +16,12 @@ import { LABEL, SOURCES, SOURCE_TITLE as TITLE, USAGE_PAGE } from './adapters'
 // Type only: the status bar is handed the running list the agent tree built, never the tree builder.
 import type { RunningItem } from './agentTree'
 import { billable, BucketFilter, CostSummary } from './agg'
+import { isolate, isolateMarkdown, itemAriaLabel } from './bidi'
 import { BudgetRow, worstBudget } from './budget'
 import { CACHE_WATCH_MAX, CachePhase, CacheWatchEntry, cacheCostText, cacheLineText, cacheMoreText } from './cacheWatch'
 import { Config, oneLine, planNameOf, readPaceConfig, readTimeConfig } from './config'
 import { lockoutText } from './forecast'
-import { t } from './i18n'
+import { dir, t } from './i18n'
 import { paceVerdict, windowDisplay, WindowDisplay, windowElapsed } from './pace'
 import { isCustomPricing, PRICES_AS_OF, PricingOptions } from './prices'
 import { countdownText, promptCacheText } from './promptCache'
@@ -1832,7 +1833,27 @@ export function buildItems(input: StatusTextInput): ItemModel[] {
     }
   }
   // Descending priority keeps the entries together and in the configured order.
-  return out.map((m, i) => ({ ...m, priorityKey: String(1000 - i) }))
+  return finishItems(out.map((m, i) => ({ ...m, priorityKey: String(1000 - i) })))
+}
+
+/**
+ * 1.13 A3 rules 1–6: the bar's items as VS Code draws them — in a right-to-left language each `text` and `name`
+ * isolated (src/bidi.ts `isolate`: the leading `$(icon)` tokens outside, RLI … PDI around the words, each figure a
+ * left-to-right unit inside) and each tooltip isolated inside its markdown (`isolateMarkdown`); the accessible name
+ * never (§7a Q10): an `ariaLabel` stays as it is, and an item without one gets the name VS Code would have derived from
+ * its text and tooltip before they were isolated (`itemAriaLabel`), so that no screen reader meets a format character.
+ * The items themselves, unchanged, for a left-to-right language. `buildItems` and `previewItems` return through here;
+ * the bar's two other owners (the keep-warm item, the scan's item) isolate their own texts.
+ */
+export function finishItems(items: ItemModel[], d = dir()): ItemModel[] {
+  if (d !== 'rtl') return items
+  return items.map((m) => ({
+    ...m,
+    text: isolate(m.text, d),
+    name: isolate(m.name, d),
+    tooltipMarkdown: isolateMarkdown(m.tooltipMarkdown, d),
+    ariaLabel: m.ariaLabel ?? itemAriaLabel(m.text, m.tooltipMarkdown),
+  }))
 }
 
 // ---------------------------------------------------------------------------
@@ -2018,7 +2039,7 @@ export function previewItems(cfg: Config, now: number): ItemModel[] {
 
   // Own id space, own label, one command: clicking any of them ends the preview.
   const mark = previewMark()
-  return out.map((m, i) => ({
+  return finishItems(out.map((m, i) => ({
     ...m,
     id: `tokenPace.preview.${i}`,
     text: `${mark} ${m.text}`,
@@ -2027,5 +2048,5 @@ export function previewItems(cfg: Config, now: number): ItemModel[] {
     command: 'tokenPace.previewStatusBar',
     commandArgs: undefined,
     priorityKey: String(1000 - i),
-  }))
+  })))
 }

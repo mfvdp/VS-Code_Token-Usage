@@ -124,6 +124,11 @@ your zone and hour cycle:
 
 > Claude, 5 h window: 64% used, runs out at ~13:30 — before it resets at 14:00.
 
+In Arabic, Hebrew and Persian the title and each line of the text begin with an invisible right-to-left mark
+(U+200F), so that a chat or push client that takes a message's direction from its first letter lays out a sentence
+that begins with a Latin name — *Claude Code …* — from the right. Nothing else of a message carries a mark: the
+JSON's other fields are English data, and an e-mail's subject carries the mark inside its encoded word.
+
 The webhook's `generic` format posts the same facts as JSON with English keys — times in ISO 8601 UTC, `null` where
 a figure is absent (never `0`), `items` with one entry per window when a message names several:
 

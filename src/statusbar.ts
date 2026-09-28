@@ -14,6 +14,7 @@ import * as vscode from 'vscode'
 import { SOURCES, SOURCE_TITLE } from './adapters'
 import { Aggregator } from './agg'
 import { Config } from './config'
+import { showPick } from './hostUi'
 import { t } from './i18n'
 import {
   ALARM_BACKGROUND, buildItems, ConsentState, ItemModel, previewItems, Role, StatusTextInput,
@@ -221,7 +222,8 @@ export async function showMenu(
     { label: `$(trash) ${t('Clear Stored Data…')}`, command: 'tokenPace.clearStoredData' },
   ]
 
-  const picked = await vscode.window.showQuickPick(items, {
+  // 1.13 A3 rule 8: through the door — each label, description and detail isolated in a right-to-left language.
+  const picked = await showPick(items, {
     title: 'Token Pace',
     placeHolder: t('Pick an action'),
     matchOnDetail: true,

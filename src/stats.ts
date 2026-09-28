@@ -18,6 +18,7 @@
 import { SOURCES, SOURCE_TITLE, maybeAdapterFor } from './adapters'
 import { AGENT_RETENTION_DAYS, SESSION_ACTIVE_MS } from './agentTree'
 import { Aggregator, BucketFilter, HourQuery, Metric, billable } from './agg'
+import { rangeArrow } from './bidi'
 import { locale, t } from './i18n'
 // Type only: the chart carries the setting's value, not the module that reads settings.
 import type { ChartModelStyle } from './config'
@@ -801,7 +802,8 @@ export function totalRow(
     // Whole days are summed from the day buckets, which outlive the hour buckets: a row
     // bounded by dates is never a lower bound for want of an hour.
     approx: false,
-    spanText: from === to ? from : `${from} → ${to}`,
+    // 1.13 (Review 1 F1): the arrow the way the words read (bidi.ts rangeArrow).
+    spanText: from === to ? from : `${from}${rangeArrow()}${to}`,
   }
 }
 
@@ -833,7 +835,7 @@ function spanTextOf(ctx: StatsCtx, fromMs: number, toMs: number): string {
     const day = dayOf(ms, ctx.tcfg)
     return day === today ? formatTime(ms, ctx.tcfg) : `${day} ${formatTime(ms, ctx.tcfg)}`
   }
-  return `${at(fromMs)} → ${toMs >= ctx.now ? t('now') : at(toMs)}`
+  return `${at(fromMs)}${rangeArrow()}${toMs >= ctx.now ? t('now') : at(toMs)}`
 }
 
 /**
@@ -1067,8 +1069,9 @@ function howUsage(): string {
   return t('fresh input + cache write + output')
 }
 
+/** The days of a range; its arrow the way the words read (1.13 Review 1 F1) — time.ts's custom label is written alike. */
 function spanOf(from: string, to: string): string {
-  return from === to ? from : `${from} → ${to}`
+  return from === to ? from : `${from}${rangeArrow()}${to}`
 }
 
 /**

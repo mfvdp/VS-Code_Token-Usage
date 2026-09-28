@@ -45,6 +45,7 @@ import {
 import { AgentTreeVm, hookKey, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
 import { AGENT_TABLES_REVISION, Aggregator, cleanAgentId, IngestChanges } from './agg'
 import { Alerts } from './alerts'
+import { isolate, itemAriaLabel } from './bidi'
 import {
   BRIDGE_SCRIPT_NAME, BridgePaths, migrateBridge, narrowMirrorFile, refreshBridgeScript, registerBridgeCommands,
   state as bridgeState,
@@ -62,7 +63,8 @@ import {
 } from './diagnostics'
 import { CLAUDE_ROOTS, CODEX_ROOTS, configureRoots } from './discover'
 import { DEFAULT_FORECAST_CONFIG, ForecastConfig } from './forecast'
-import { locale, setBundle, setDir, setLang, setLocale, t } from './i18n'
+import { hostUi, showMessage, showPick, showPickMany, showProgress } from './hostUi'
+import { dir, locale, setBundle, setDir, setLang, setLocale, t } from './i18n'
 import { hookPermissionOpen, KEEP_WARM_LINE } from './keepWarm'
 import { folderSessions, KEEPWARM_CANCEL_COMMAND, KEEPWARM_FILE_NAME, KeepWarmHost } from './keepWarmHost'
 import { availableLanguages, bundleFileName, readBundle } from './languageLoad'
@@ -394,7 +396,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   // into a terminal of this window that the watch finds running Claude Code or Codex, on the reader's click.
   const promptLog = { info: (m: string) => log.info(m), debug: (m: string) => log.debug(m), warn: (m: string) => log.warn(m) }
   const promptStore = new PromptStore(paths.prompts, promptLog)
-  const prompts = new PromptsHost({ store: promptStore, window: vscode.window, watch: terminalWatch, keepWarm, log: promptLog })
+  const prompts = new PromptsHost({ store: promptStore, window: vscode.window, ui: hostUi(), watch: terminalWatch, keepWarm, log: promptLog })
   context.subscriptions.push({ dispose: () => prompts.dispose() })
   /**
    * 1.10 A3 rule 10 (§0a.3 "Listening"): the watch listens for the prompt tool while the Prompts section is
@@ -1493,8 +1495,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     await consent.markOffered()
     if (disposed) return
     const showWhatIsSent = t('Show what is sent')
-    const pick = await vscode.window.showInformationMessage(
+    const pick = await showMessage('info',
       t('No quota data found. Token Pace can fetch it from the provider — that needs your Claude Code access token.'),
+      {},
       showWhatIsSent,
       t('Not now'),
     )
@@ -1524,8 +1527,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       // no watcher started, no fetch and no further line.
       if (disposed) return
       if (!allowed) {
-        void vscode.window.showInformationMessage(
-          t('Quota is not fetched. Run "Token Pace: Reset Network Access Decision" to be asked again.'),
+        void showMessage('info',
+          t('Quota is not fetched. Run "Token Pace: Reset Network Access Decision" to be asked again.'), {},
         )
         return
       }
@@ -1576,11 +1579,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     // The one-click fix, and the buttons it is compared with — the same values, once.
     const moveHere = t('Run Token Pace locally')
     const openSettings = t('Open Settings')
-    const pick = await vscode.window.showInformationMessage(
+    const pick = await showMessage('info',
       t(
         'Token Pace found no Claude Code or Codex transcripts on this host (remote "{0}"). The extension runs on one side of the connection only. If your transcripts are on the local machine, Token Pace can be moved there (one click writes "remote.extensionKind" into your user settings and offers a reload); if they are on this host, point tokenPace.claudeDir / tokenPace.codexDir at them.',
         remote,
       ),
+      {},
       moveHere,
       openSettings,
       t('Not now'),
@@ -1609,8 +1613,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       await config.update('remote.extensionKind', merged, vscode.ConfigurationTarget.Global)
     } catch (err) {
       log.warn(`remote.extensionKind could not be written: ${err}`)
-      void vscode.window.showWarningMessage(
-        t('Token Pace: "remote.extensionKind" could not be written. Set it by hand in your user settings.'),
+      void showMessage('warning',
+        t('Token Pace: "remote.extensionKind" could not be written. Set it by hand in your user settings.'), {},
       )
       return
     }
@@ -1619,8 +1623,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     // and a window that has gone neither asks it nor reloads on its answer (1.6 R3).
     if (disposed) return
     const reloadWindow = t('Reload Window')
-    const reload = await vscode.window.showInformationMessage(
+    const reload = await showMessage('info',
       t('Token Pace will run on the local machine after a window reload.'),
+      {},
       reloadWindow,
       t('Later'),
     )
@@ -1642,7 +1647,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   }
 
   async function rescan(): Promise<void> {
-    await vscode.window.withProgress(
+    await showProgress(
       { location: vscode.ProgressLocation.Notification, title: t('Token Pace: re-reading token history…') },
       async () => {
         // A replay still at work belongs to the aggregator about to be dropped: it ends first,
@@ -1728,8 +1733,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       home,
     }
     await vscode.env.clipboard.writeText(buildDiagnostics(input))
-    void vscode.window.showInformationMessage(
-      t('Token Pace: diagnostics copied. They contain no token, no transcript content and no full paths.'),
+    void showMessage('info',
+      t('Token Pace: diagnostics copied. They contain no token, no transcript content and no full paths.'), {},
     )
   }
 
@@ -1745,7 +1750,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   async function copyAgentId(): Promise<void> {
     const key = ui.agentSelected
     if (key === null) {
-      void vscode.window.showInformationMessage(t('Select a node in the Agents section first.'))
+      void showMessage('info', t('Select a node in the Agents section first.'), {})
       return
     }
     const id = idOfAgentKey(key)
@@ -1754,7 +1759,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       return
     }
     await vscode.env.clipboard.writeText(id)
-    void vscode.window.showInformationMessage(t('Token Pace: ID copied to the clipboard.'))
+    void showMessage('info', t('Token Pace: ID copied to the clipboard.'), {})
   }
 
   /**
@@ -1769,8 +1774,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       installHookScript(hookBundle, storage)
     } catch (err) {
       log.warn(`Agent hook: the script could not be copied into the extension storage (${errorKind(err)}).`)
-      void vscode.window.showWarningMessage(
-        t('Token Pace: the agent hook script could not be copied into the extension\'s storage ({0}).', errorKind(err)),
+      void showMessage('warning',
+        t('Token Pace: the agent hook script could not be copied into the extension\'s storage ({0}).', errorKind(err)), {},
       )
       return
     }
@@ -1822,7 +1827,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         { label: `$(warning) ${t('The Claude status line is still connected')}`, detail: bridgeBlocksDelete() },
       )
     }
-    const chosen = await vscode.window.showQuickPick(picks, {
+    const chosen = await showPickMany(picks, {
       canPickMany: true,
       title: t('Token Pace — clear stored data'),
       placeHolder: t('Pick what to delete'),
@@ -1835,7 +1840,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       ? `${deleteWarning()}\n\n${deleteWarningExternal()}`
       : deleteWarning()
     const deleteLabel = t('Delete')
-    const confirm = await vscode.window.showWarningMessage(
+    const confirm = await showMessage('warning',
       t('Delete {0} stored item(s)? This cannot be undone.', keys.length),
       { modal: true, detail },
       deleteLabel,
@@ -1870,7 +1875,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       }
     }
     if (result.failed.length > 0) {
-      void vscode.window.showWarningMessage(t('Token Pace: could not delete {0}.', result.failed.join(', ')))
+      void showMessage('warning', t('Token Pace: could not delete {0}.', result.failed.join(', ')), {})
     }
     if (result.deleted.includes('state')) {
       dirty = false
@@ -1895,15 +1900,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   function restoreDefaultPrompts(): void {
     const r = prompts.apply({ op: 'restore' })
     if (r.result === 'restored') {
-      void vscode.window.showInformationMessage(t('Token Pace: {0} default prompt(s) restored.', r.restored))
+      void showMessage('info', t('Token Pace: {0} default prompt(s) restored.', r.restored), {})
     } else if (r.result === 'unchanged') {
-      void vscode.window.showInformationMessage(t('Token Pace: every default prompt is there already.'))
+      void showMessage('info', t('Token Pace: every default prompt is there already.'), {})
     } else if (r.result === 'readOnly') {
-      void vscode.window.showInformationMessage(t('Token Pace: prompts.json cannot be read; nothing was restored.'))
+      void showMessage('info', t('Token Pace: prompts.json cannot be read; nothing was restored.'), {})
     } else if (r.result === 'full') {
-      void vscode.window.showWarningMessage(t('Token Pace: the list is full (at most {0} prompts), so nothing was restored.', PROMPTS_MAX))
+      void showMessage('warning', t('Token Pace: the list is full (at most {0} prompts), so nothing was restored.', PROMPTS_MAX), {})
     } else {
-      void vscode.window.showWarningMessage(t('Token Pace: prompts.json could not be written ({0}); nothing was restored.', r.error ?? 'error'))
+      void showMessage('warning', t('Token Pace: prompts.json could not be written ({0}); nothing was restored.', r.error ?? 'error'), {})
     }
     render(true)
   }
@@ -1911,7 +1916,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   async function openUsagePage(arg?: unknown): Promise<void> {
     let source: Source | null = SOURCES.some((s) => s === arg) ? (arg as Source) : null
     if (source === null) {
-      const pick = await vscode.window.showQuickPick(
+      const pick = await showPick(
         ADAPTERS.map((a) => ({ label: a.title, description: a.usagePageUrl, value: a.id })),
         { title: t('Open the official usage page'), placeHolder: t('Pick a provider') },
       )
@@ -1935,7 +1940,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         .update('language', id === 'auto' ? undefined : id, vscode.ConfigurationTarget.Global)
     } catch (err) {
       log.warn(`Language: the setting could not be written (${errorKind(err)}).`)
-      void vscode.window.showWarningMessage(t('Token Pace: the language could not be written to your user settings.'))
+      void showMessage('warning', t('Token Pace: the language could not be written to your user settings.'), {})
     }
   }
 
@@ -1944,7 +1949,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     const next = WINDOW_SELECT_CYCLE[(at + 1) % WINDOW_SELECT_CYCLE.length]
     await vscode.workspace.getConfiguration('tokenPace')
       .update('windowSelect', next, vscode.ConfigurationTarget.Global)
-    void vscode.window.showInformationMessage(t('Token Pace: status bar windows — {0}.', next))
+    void showMessage('info', t('Token Pace: status bar windows — {0}.', next), {})
   }
 
   function setRange(arg?: unknown): void {
@@ -1975,8 +1980,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       // the Keychain gate goes back to untried.
       quotaMgr.enforceGates()
       ensureCredentialsWatcher()
-      void vscode.window.showInformationMessage(
-        t('Token Pace: network access decision reset. The next quota fetch will ask again.'),
+      void showMessage('info',
+        t('Token Pace: network access decision reset. The next quota fetch will ask again.'), {},
       )
       render(true)
     }),
@@ -2045,8 +2050,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       // mix two histories, so this one asks rather than guesses.
       if (!sameList(cfg.claudeDir, before.claudeDir) || !sameList(cfg.codexDir, before.codexDir)) {
         const reloadWindow = t('Reload Window')
-        void vscode.window.showInformationMessage(
+        void showMessage('info',
           t('Token Pace: the transcript directories changed. Reload the window to read them.'),
+          {},
           reloadWindow,
         ).then((pick) => {
           if (pick === reloadWindow) void vscode.commands.executeCommand('workbench.action.reloadWindow')
@@ -2227,10 +2233,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         'tokenPace.scan', vscode.StatusBarAlignment.Left, 999,
       )
       context.subscriptions.push(progress)
-      progress.text = `$(sync~spin) ${t('Reading token history…')}`
+      // 1.13 A3 rules 1, 4, 6: the text and the tooltip isolated in a right-to-left language (the icon outside), the
+      // accessible name without a mark — the one VS Code derives, from the text before it was isolated.
+      const scanText = `$(sync~spin) ${t('Reading token history…')}`
+      progress.text = isolate(scanText)
+      if (dir() === 'rtl') progress.accessibilityInformation = { label: itemAriaLabel(scanText) }
       progress.show()
       try {
-        await coldScan((done, total) => { progress.tooltip = t('{0} of {1} files', done, total) })
+        await coldScan((done, total) => {
+          const tip = t('{0} of {1} files', done, total)
+          progress.tooltip = isolate(tip)
+          if (dir() === 'rtl') progress.accessibilityInformation = { label: itemAriaLabel(scanText, tip) }
+        })
       } finally {
         progress.dispose()
       }

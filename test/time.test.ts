@@ -115,6 +115,19 @@ test('rangeFor covers every preset', () => {
   assert.equal(rangeFor('all', NOW, utc).preset, 'all')
 })
 
+test('1.13 (Review 1 F1): a custom range\'s label takes its arrow from the words\' direction — ← right to left, → left to right, the days as they are', () => {
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  try {
+    i18n.setDir('rtl')
+    const r = rangeFor({ from: '2026-01-01', to: '2026-01-31' }, NOW, utc)
+    assert.equal(r.label, '2026-01-01 ← 2026-01-31')
+    assert.deepEqual([r.from, r.to, r.preset], ['2026-01-01', '2026-01-31', 'custom'])
+  } finally {
+    i18n.setDir(undefined)
+  }
+  assert.equal(rangeFor({ from: '2026-01-01', to: '2026-01-31' }, NOW, utc).label, '2026-01-01 → 2026-01-31')
+})
+
 test('custom ranges are validated, ordered and clamped to five years', () => {
   const ok = rangeFor({ from: '2026-01-01', to: '2026-01-31' }, NOW, utc)
   assert.equal(ok.preset, 'custom')

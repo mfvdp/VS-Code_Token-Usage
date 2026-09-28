@@ -1192,6 +1192,23 @@ test('a range with no period before it has nothing to compare against', () => {
   assert.equal(kpis(ctxOf(buildAgg()), custom, null)[1].explain.period, '2026-08-01 → 2026-08-03')
 })
 
+test('1.13 (Review 1 F1): the host\'s ranges take their arrow from the words\' direction — a calendar row\'s and a window row\'s span, a key figure\'s period, which still prints a hand-picked range\'s days once', () => {
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  const windows = [{ id: 'session:300', label: '5 h', resetsAt: NOW + 2 * 3_600_000, windowMinutes: 300 }]
+  const spans = (): string[] => {
+    const rows = totalsFor(ctxOf(buildAgg()), 'claude', range('30d'), null, '2026-07-01', false, windows)
+    const custom = rangeFor({ from: '2026-08-01', to: '2026-08-03' }, NOW, tcfg)
+    return [rows[1].spanText, String(rows.find((r) => r.label === 'Last 7 days')?.spanText), kpis(ctxOf(buildAgg()), custom, null)[1].explain.period]
+  }
+  try {
+    i18n.setDir('rtl')
+    assert.deepEqual(spans(), ['09:00 ← now', '2026-08-28 ← 2026-09-03', '2026-08-01 ← 2026-08-03'])
+  } finally {
+    i18n.setDir(undefined)
+  }
+  assert.deepEqual(spans(), ['09:00 → now', '2026-08-28 → 2026-09-03', '2026-08-01 → 2026-08-03'])
+})
+
 test('the cache TTL countdown is an estimate and expires', () => {
   const base: SessionRec = {
     source: 'claude', sessionId: 's', project: 'p', projectHash: 'h', isSub: false, parent: null,

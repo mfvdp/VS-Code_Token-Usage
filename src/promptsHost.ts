@@ -34,6 +34,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type * as vscode from 'vscode'
 import { SOURCE_TITLE } from './adapters'
+import type { HostUi } from './hostUi'
 import { t } from './i18n'
 import {
   applyPromptOp, cleanPromptText, PROMPTS_FILE_MAX_BYTES, PROMPTS_FILE_NAME, parsePromptsText, promptFieldProblem, PromptFieldProblem,
@@ -204,14 +205,17 @@ function errorCode(err: unknown): string {
 /** The store's file name in `globalStorage` — re-exported for the wiring, beside the keep-warm file's. */
 export { PROMPTS_FILE_NAME }
 
-/** The slice of `vscode.window` the send flow uses — the real one in the extension, a fake in the tests. */
+/** The slice of `vscode.window` the send flow reads — the real one in the extension, a fake in the tests. */
 export interface PromptsWindow {
   readonly terminals: readonly vscode.Terminal[]
   readonly activeTerminal: vscode.Terminal | undefined
-  showQuickPick<T extends vscode.QuickPickItem>(items: readonly T[], options?: vscode.QuickPickOptions): Thenable<T | undefined>
-  showInformationMessage(message: string, ...items: string[]): Thenable<string | undefined>
-  showWarningMessage(message: string, options: vscode.MessageOptions, ...items: string[]): Thenable<string | undefined>
 }
+
+/**
+ * The send flow's questions — the terminal pick, the "send anyway" dialog, the refusal —, through the door
+ * (src/hostUi.ts, 1.13 A3 rule 8): the extension's `hostUi()`, a test's `hostUiOf(fake window)`.
+ */
+export type PromptsUi = Pick<HostUi, 'showMessage' | 'showPick'>
 
 /**
  * §0a.5: what a decision reads beside the terminal — gathered by the extension when it is asked for, fresh
@@ -281,6 +285,7 @@ function riskText(kind: AgentKind): string {
 export class PromptsHost {
   private readonly store: PromptStore
   private readonly window: PromptsWindow
+  private readonly ui: PromptsUi
   private readonly watch: TerminalWatch
   private readonly keepWarm: PromptsKeepWarm
   private readonly log: PromptsLog
@@ -299,6 +304,7 @@ export class PromptsHost {
   constructor(opts: {
     store: PromptStore
     window: PromptsWindow
+    ui: PromptsUi
     watch: TerminalWatch
     keepWarm: PromptsKeepWarm
     log: PromptsLog
@@ -307,6 +313,7 @@ export class PromptsHost {
   }) {
     this.store = opts.store
     this.window = opts.window
+    this.ui = opts.ui
     this.watch = opts.watch
     this.keepWarm = opts.keepWarm
     this.log = opts.log
@@ -445,7 +452,7 @@ export class PromptsHost {
     if (!d.verdict.send) {
       const block = d.verdict.block
       const sendAnyway = t('Send anyway')
-      const answer = await this.window.showWarningMessage(t('Send “{0}” anyway?', title),
+      const answer = await this.ui.showMessage('warning', t('Send “{0}” anyway?', title),
         { modal: true, detail: `${promptBlockText(block)}\n\n${riskText(d.candidate?.kind ?? 'claude')}` }, sendAnyway)
       if (this.disposed) return
       if (answer !== sendAnyway) {
@@ -477,7 +484,7 @@ export class PromptsHost {
         at,
       }
     })
-    const chosen = await this.window.showQuickPick(items, {
+    const chosen = await this.ui.showPick(items, {
       title: t('Send “{0}” to…', title),
       placeHolder: t('Pick the terminal that runs Claude Code or Codex'),
     })
@@ -505,7 +512,7 @@ export class PromptsHost {
   private refuse(block: PromptSendBlock): void {
     this.log.info(`Prompts: not sent (${block})`)
     this.flash = { op: null, sent: { ok: false, block }, at: this.clock() }
-    void this.window.showInformationMessage(t('Token Pace: the prompt was not sent. {0}', promptBlockText(block)))
+    void this.ui.showMessage('info', t('Token Pace: the prompt was not sent. {0}', promptBlockText(block)), {})
   }
 
   /**

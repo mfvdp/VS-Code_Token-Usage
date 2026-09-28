@@ -44,6 +44,43 @@ function fullVm(): ViewModel {
   }))
 }
 
+/**
+ * 1.13 A3 rule 10 (§7a Q9), Review 1 F1: the markdown document of a right-to-left language (the pseudo-RTL bundle, its
+ * direction set) carries no bidi control — it opens in a text editor, which shows them — and keeps its own ranges' →;
+ * the Quick Pick's ranges take the words' arrow (←), which the door then isolates.
+ */
+test('1.13 A3 rule 10, Review 1 F1: the markdown document of a right-to-left language holds no bidi control and keeps its own →; the Quick Pick\'s ranges read ←, and → again left to right', () => {
+  const bidi = require('../src/bidi') as typeof import('../src/bidi')
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  const { pseudoRtlBundle } = require('./helpers/nls') as typeof import('./helpers/nls')
+  const RANGE = /\d{4}-\d{2}-\d{2} ([←→]) \d{4}-\d{2}-\d{2}/g
+  const arrows = (items: PickItem[]): string[] => items.flatMap((i) => [...`${i.description ?? ''} ${i.detail ?? ''}`.matchAll(RANGE)].map((m) => m[1]))
+  const ltrItems = quickPickItems(fullVm())
+  try {
+    i18n.setBundle(pseudoRtlBundle())
+    i18n.setLocale('ar-u-ca-gregory-nu-latn')
+    i18n.setLang('ar')
+    i18n.setDir('rtl')
+    const vm = fullVm()
+    const md = markdownDocument(vm)
+    assert.match(md, /كلمة/)
+    const at = md.search(bidi.BIDI_CONTROLS)
+    assert.equal(at, -1, JSON.stringify(md.slice(Math.max(0, at - 60), at + 40)))
+    assert.ok(md.includes(`${vm.range.from} → ${vm.range.to}`), 'the document keeps its own arrow')
+    const rtl = arrows(quickPickItems(vm))
+    assert.ok(rtl.length >= 2, rtl.join(''))
+    assert.deepEqual([...new Set(rtl)], ['←'])
+  } finally {
+    i18n.setBundle(undefined)
+    i18n.setLocale(undefined)
+    i18n.setLang(undefined)
+    i18n.setDir(undefined)
+  }
+  const ltr = arrows(ltrItems)
+  assert.ok(ltr.length >= 2)
+  assert.deepEqual([...new Set(ltr)], ['→'])
+})
+
 /** The fixture's aggregator after a roll-up that keeps no hour buckets at all. */
 function rolledUp(): Aggregator {
   const snap = buildAgg().toSnapshot()

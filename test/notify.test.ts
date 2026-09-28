@@ -595,6 +595,61 @@ test('the texts in German: whole keys of the host part, the page\'s clock and pe
   })
 })
 
+test('1.13 A3 rule 7 (§7a Q11): in Arabic, Hebrew and Persian (the pseudo-RTL bundle) the title and each line of the text of every kind\'s message and of the test message begin with RLM, and the JSON\'s title and text with them — no other field, no isolate, the twelve fields as they were; in English and German none; the e-mail\'s Subject carries the mark in its encoded word', () => {
+  const bidi = require('../src/bidi') as typeof import('../src/bidi')
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  const { pseudoRtlBundle } = require('./helpers/nls') as typeof import('./helpers/nls')
+  const { messageOf } = require('../src/notifySmtp') as typeof import('../src/notifySmtp')
+  const english = everyKind().map((g) => payloadOf(g, WORDS))
+  const pseudo = pseudoRtlBundle()
+  for (const id of ['ar', 'he', 'fa']) {
+    try {
+      i18n.setBundle(pseudo)
+      i18n.setLang(id)
+      i18n.setLocale(`${id}-u-ca-gregory-nu-latn`)
+      i18n.setDir('rtl')
+      const payloads = [...everyKind().map((g) => payloadOf(g, WORDS)), testPayload(WORDS)]
+      assert.equal(payloads.length, 7)
+      payloads.forEach((p, n) => {
+        for (const text of [p.title, p.text]) {
+          for (const line of text.split('\n')) {
+            assert.equal(line.codePointAt(0), 0x200f, `${id}: ${JSON.stringify(line)}`)
+            assert.equal(bidi.stripBidi(line.slice(1)), line.slice(1), `${id}: a second mark in ${JSON.stringify(line)}`)
+          }
+        }
+        assert.equal(p.json.title, p.title)
+        assert.equal(p.json.text, p.text)
+        assert.deepEqual(Object.keys(p.json).filter((k) => k !== 'items'), JSON_KEYS)
+        for (const [k, v] of Object.entries(p.json)) {
+          if (k === 'title' || k === 'text') continue
+          assert.equal(JSON.stringify(v).search(bidi.BIDI_CONTROLS), -1, `${id}: ${k}`)
+        }
+        // The twelve fields are the English payload's (the JSON is English data).
+        if (n < english.length) {
+          const strip = (j: Record<string, unknown>): string => JSON.stringify(Object.fromEntries(Object.entries(j).filter(([k]) => k !== 'title' && k !== 'text')))
+          assert.equal(strip(p.json), strip(english[n].json))
+        }
+      })
+      // The e-mail: the Subject an encoded word whose text is the title, mark and all (RFC 2047 carries it).
+      const mail = messageOf('a@example.invalid', 'b@example.invalid', payloads[0], NOW, '<x@example.invalid>')
+      const subject = /^Subject: (.*(?:\r\n .*)*)$/m.exec(mail)?.[1] ?? ''
+      const decoded = subject.split('\r\n ').map((w) => Buffer.from(/^=\?UTF-8\?B\?(.*)\?=$/.exec(w)?.[1] ?? '', 'base64').toString('utf8')).join('')
+      assert.equal(decoded, payloads[0].title)
+      assert.equal(decoded.codePointAt(0), 0x200f)
+    } finally {
+      i18n.setBundle(undefined)
+      i18n.setLang(undefined)
+      i18n.setLocale(undefined)
+      i18n.setDir(undefined)
+    }
+  }
+  // English and German: no mark anywhere.
+  for (const p of [...english, testPayload(WORDS)]) assert.equal(JSON.stringify(p).search(bidi.BIDI_CONTROLS), -1)
+  withGerman(() => {
+    for (const p of [...everyKind().map((g) => payloadOf(g, WORDS)), testPayload(WORDS)]) assert.equal(JSON.stringify(p).search(bidi.BIDI_CONTROLS), -1)
+  })
+})
+
 test('the test message: its title, the time it was sent, the generic JSON with event test and every figure null (1.12 C13, C4 rule 7)', () => {
   const p = testPayload(WORDS)
   assert.equal(p.title, 'Token Pace: test message')

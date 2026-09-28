@@ -131,6 +131,28 @@ test('deltaBadge: growth from nothing is "new", noise is a dot', () => {
   assert.deepEqual(deltaBadge(NaN, 100), { glyph: '•', text: '–' })
 })
 
+test('1.13 A3 rule 3 (§0a.3): money() writes no bidi mark — ICU writes RLM/LRM around a currency in Arabic, Hebrew and Persian alone, and money() takes them off (a surface that lays the figure out right to left makes it a left-to-right unit); every other registry locale\'s figure is ICU\'s own, unchanged', () => {
+  const MARKS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u
+  try {
+    for (const e of LANGUAGES) {
+      const tag = intlTag(e.locale, e.id)
+      setLocale(tag)
+      for (const [n, c] of [[12.5, 'USD'], [1234, 'EUR'], [3, 'ILS'], [0.5, 'GBP']] as const) {
+        const f = n >= 100 ? 0 : 2
+        const icu = n.toLocaleString(tag, { style: 'currency', currency: c, minimumFractionDigits: f, maximumFractionDigits: f })
+        const out = money(n, c)
+        assert.doesNotMatch(out, MARKS, `${e.id} ${c}`)
+        if (['ar', 'he', 'fa'].includes(e.id)) assert.equal(out, icu.replace(new RegExp(MARKS.source, 'gu'), ''), `${e.id} ${c}`)
+        else assert.equal(out, icu, `${e.id} ${c}: ICU wrote a mark in a left-to-right locale`)
+      }
+    }
+    setLocale(intlTag('ar', 'ar'))
+    assert.equal(money(12.5, 'USD'), `12.50${String.fromCharCode(0xa0)}US$`)
+  } finally {
+    setLocale(undefined)
+  }
+})
+
 test('money and counts keep their existing behaviour', () => {
   assert.equal(usd(0), '–')
   assert.equal(usd(0.004), '<$0.01')

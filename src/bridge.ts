@@ -35,6 +35,7 @@ import { execFile } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { WriteConsent } from './consent'
+import { showMessage, showPick } from './hostUi'
 import { t } from './i18n'
 import { BRIDGE_SCRIPT_NAME, MIRROR_SCHEMA_VERSION, narrowPayload, writeMirror } from './statuslineBridge'
 import { isTempSiblingOf, MementoLike } from './storage'
@@ -886,15 +887,15 @@ export function registerBridgeCommands(context: ExtensionContextLike, deps: Brid
 
   const connect = vscode.commands.registerCommand('tokenPace.connectStatusLine', async () => {
     if (deps.restricted()) {
-      void vscode.window.showWarningMessage(
-        t('Token Pace: the status line bridge is disabled in Restricted Mode.'),
+      void showMessage('warning',
+        t('Token Pace: the status line bridge is disabled in Restricted Mode.'), {},
       )
       return
     }
     const read = readSettings(deps.paths.settingsFile)
     if (read.kind === 'unparsable') {
-      void vscode.window.showWarningMessage(
-        t('Token Pace: {0} is not valid JSON, so it was left untouched.', deps.paths.settingsFile),
+      void showMessage('warning',
+        t('Token Pace: {0} is not valid JSON, so it was left untouched.', deps.paths.settingsFile), {},
       )
       return
     }
@@ -904,10 +905,11 @@ export function registerBridgeCommands(context: ExtensionContextLike, deps: Brid
     if (previous !== null) {
       const keep = t('Keep it and chain Token Pace')
       const replace = t('Replace it (a backup is written)')
-      const choice = await vscode.window.showQuickPick([keep, replace], {
+      // 1.13 A3 rule 8: the placeholder is the reader's own command, shown as typed (never isolated).
+      const choice = await showPick([keep, replace], {
         title: t('A status line command is already configured'),
         placeHolder: previous.length > 80 ? `${previous.slice(0, 80)}…` : previous,
-      })
+      }, ['placeHolder'])
       if (choice === undefined) return
       mode = choice === keep ? 'preserve' : 'replace'
     }
@@ -920,31 +922,33 @@ export function registerBridgeCommands(context: ExtensionContextLike, deps: Brid
     }, () => consent.request())
 
     if (!result.ok) {
-      if (result.reason !== 'consent') void vscode.window.showWarningMessage(t('Token Pace: {0}', result.message))
+      if (result.reason !== 'consent') void showMessage('warning', t('Token Pace: {0}', result.message), {})
       return
     }
     deps.onChange?.()
     const shadow = result.shadowed === 'configuration-shadowed'
       ? ` ${t('Another settings file also defines a status line and takes precedence (configuration-shadowed).')}`
       : ''
-    void vscode.window.showInformationMessage(
+    void showMessage('info',
       result.status === 'already'
         ? `${t('Token Pace: the status line is already connected.')}${shadow}`
         : `${t('Token Pace: status line connected. Backup: {0}.', result.backup ?? t('none needed'))}${shadow}`,
+      {},
     )
   })
 
   const disconnect = vscode.commands.registerCommand('tokenPace.disconnectStatusLine', async () => {
     const result = await restore(deps.paths, deps.memento)
     if (!result.ok) {
-      void vscode.window.showWarningMessage(t('Token Pace: {0}', result.message))
+      void showMessage('warning', t('Token Pace: {0}', result.message), {})
       return
     }
     deps.onChange?.()
-    void vscode.window.showInformationMessage(
+    void showMessage('info',
       result.restored === 'previous'
         ? t('Token Pace: the previous status line was restored.')
         : t('Token Pace: the status line entry was removed.'),
+      {},
     )
   })
 

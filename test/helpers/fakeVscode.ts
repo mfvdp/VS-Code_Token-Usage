@@ -54,6 +54,26 @@ export interface RecordedMessage {
   options?: Record<string, unknown>
 }
 
+/**
+ * 1.13 A3 rule 8: one text VS Code would draw on a status bar item — every assignment of `text`, `tooltip`, `name` and
+ * `accessibilityInformation`, in order, of every item (the bar's, the keep-warm countdown's, the scan's), so that a
+ * test reads what each owner handed over and not only what an item shows at the end.
+ */
+export interface RecordedItemSet {
+  id: string
+  field: 'text' | 'tooltip' | 'name' | 'accessibilityInformation'
+  value: unknown
+}
+
+/** 1.13 A3 rule 8: one `withProgress` call — its options and every message reported to it. */
+export interface RecordedProgress {
+  options: Record<string, unknown>
+  reported: unknown[]
+}
+
+/** At most this many item assignments are kept (the oldest go first): an activation renders many times a second. */
+export const MAX_ITEM_SETS = 20_000
+
 /** One `showQuickPick` call: what it offered, so a test can assert the list itself. */
 export interface RecordedQuickPick {
   items: Array<Record<string, unknown>>
@@ -112,6 +132,10 @@ export interface FakeVscodeState {
   executedArgs: Array<{ id: string; args: unknown[] }>
   /** Every status bar item ever created, disposed ones included. */
   items: FakeStatusBarItem[]
+  /** 1.13 A3 rule 8: every text, tooltip, name and accessible name set on an item, in order (at most MAX_ITEM_SETS). */
+  itemSets: RecordedItemSet[]
+  /** 1.13 A3 rule 8: every `withProgress` call, in order. */
+  progress: RecordedProgress[]
   clipboard: string[]
   messages: RecordedMessage[]
   quickPicks: RecordedQuickPick[]
@@ -298,6 +322,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
   const executed: string[] = []
   const executedArgs: Array<{ id: string; args: unknown[] }> = []
   const items: FakeStatusBarItem[] = []
+  const itemSets: RecordedItemSet[] = []
+  const progress: RecordedProgress[] = []
   const clipboard: string[] = []
   const messages: RecordedMessage[] = []
   const quickPicks: RecordedQuickPick[] = []
@@ -384,6 +410,20 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       show(): void { this.visible = true },
       hide(): void { this.visible = false },
       dispose(): void { this.visible = false; this.disposed = true },
+    }
+    // 1.13 A3 rule 8: the four fields a test reads as VS Code would draw them, each assignment recorded (itemSets).
+    const fields: Record<RecordedItemSet['field'], unknown> = { text: '', tooltip: undefined, name: undefined, accessibilityInformation: undefined }
+    for (const field of Object.keys(fields) as Array<RecordedItemSet['field']>) {
+      Object.defineProperty(item, field, {
+        enumerable: true,
+        configurable: true,
+        get: () => fields[field],
+        set: (value: unknown) => {
+          fields[field] = value
+          itemSets.push({ id, field, value })
+          if (itemSets.length > MAX_ITEM_SETS) itemSets.splice(0, itemSets.length - MAX_ITEM_SETS)
+        },
+      })
     }
     items.push(item)
     return item
@@ -544,9 +584,12 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
         return Promise.resolve(nextAnswer())
       },
       showTextDocument: (doc: unknown): Promise<unknown> => Promise.resolve(doc),
-      withProgress<T>(_options: unknown, task: (p: unknown, t: unknown) => PromiseLike<T>): PromiseLike<T> {
+      withProgress<T>(options: unknown, task: (p: unknown, t: unknown) => PromiseLike<T>): PromiseLike<T> {
+        // 1.13 A3 rule 8: the options and every report recorded (`progress`); nothing is rendered.
+        const call: RecordedProgress = { options: (options ?? {}) as Record<string, unknown>, reported: [] }
+        progress.push(call)
         return task(
-          { report: () => { /* progress is not rendered */ } },
+          { report: (v: unknown) => { call.reported.push(v) } },
           { isCancellationRequested: false, onCancellationRequested: () => disposable() },
         )
       },
@@ -608,6 +651,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     executed,
     executedArgs,
     items,
+    itemSets,
+    progress,
     clipboard,
     messages,
     quickPicks,
@@ -651,6 +696,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       executed.length = 0
       executedArgs.length = 0
       items.length = 0
+      itemSets.length = 0
+      progress.length = 0
       clipboard.length = 0
       messages.length = 0
       quickPicks.length = 0

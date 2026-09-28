@@ -592,7 +592,9 @@ test('the consent: the dialog names the cost, the draft that is sent with the li
   const shown: Array<{ message: string; detail?: string; items: string[] }> = []
   const answers: Array<string | undefined> = []
   const ui = {
-    showWarningMessage(message: string, options: { modal: boolean; detail?: string }, ...items: string[]): Promise<string | undefined> {
+    // 1.13 P5 (pinned and changed: the dialog goes through the door's showMessage — src/hostUi.ts — as a warning).
+    showMessage(kind: string, message: string, options: { modal?: boolean; detail?: string }, ...items: string[]): Promise<string | undefined> {
+      assert.equal(kind, 'warning')
       assert.equal(options.modal, true)
       shown.push({ message, detail: options.detail, items })
       return Promise.resolve(answers.shift())
@@ -652,7 +654,7 @@ test('the consent: the dialog names the cost, the draft that is sent with the li
   }
   const title = inGerman(() => {
     const seen: string[] = []
-    const c = new KeepWarmConsent(memento, () => {}, { ui: { showWarningMessage: (m: string, _o: unknown, ...items: string[]) => { seen.push(m, ...items); return Promise.resolve(undefined) } } })
+    const c = new KeepWarmConsent(memento, () => {}, { ui: { showMessage: (_k: string, m: string, _o: unknown, ...items: string[]) => { seen.push(m, ...items); return Promise.resolve(undefined) } } })
     void c.request()
     return seen
   })
@@ -671,6 +673,54 @@ test('the countdown item speaks German with a German bundle', () => {
   run(r, NOW + SEC, NOW + KEEPWARM_COUNTDOWN_MS - SEC)
   inGerman(() => r.tick(NOW + KEEPWARM_COUNTDOWN_MS))
   assert.equal(r.item()?.text, '$(watch) Warmhalte-Zeile gesendet')
+})
+
+test('1.13 A3 rule 9 (c), the keep-warm item (the bar\'s second owner): in the pseudo-RTL language under ar its text, name and tooltip are isolated — the icon outside, RLI … PDI, each figure a left-to-right unit — at every draw, and its accessible name carries no control, the countdown\'s own words and the sent line\'s the plain text', () => {
+  const bidi = require('../src/bidi') as typeof import('../src/bidi')
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  const { pseudoRtlBundle } = require('./helpers/nls') as typeof import('./helpers/nls')
+  const r = rig()
+  const inArabic = <T>(fn: () => T): T => {
+    i18n.setBundle(pseudoRtlBundle())
+    i18n.setLocale('ar-u-ca-gregory-nu-latn')
+    i18n.setDir('rtl')
+    try {
+      return fn()
+    } finally {
+      i18n.setBundle({})
+      i18n.setLocale('en')
+      i18n.setDir(undefined)
+    }
+  }
+  inArabic(() => {
+    r.tick(NOW)
+    run(r, NOW + SEC, NOW + KEEPWARM_COUNTDOWN_MS)
+  })
+  const sets = r.state.itemSets.filter((x) => x.id === 'tokenPace.keepWarm')
+  assert.ok(sets.length >= 8, String(sets.length))
+  const drawn = (v: unknown): boolean => {
+    const text = String(v)
+    const rest = text.replace(/^(?:\$\([\w~-]+\)[  ]*)*/u, '')
+    return rest.codePointAt(0) === 0x2067 && rest.endsWith(bidi.PDI)
+  }
+  for (const x of sets) {
+    if (x.field === 'text' || x.field === 'name' || (x.field === 'tooltip' && x.value !== undefined)) assert.ok(drawn(x.value), `${x.field}: ${JSON.stringify(x.value)}`)
+    if (x.field === 'accessibilityInformation' && x.value !== undefined) assert.doesNotMatch(String((x.value as { label: string }).label), bidi.BIDI_CONTROLS)
+  }
+  const first = sets.find((x) => x.field === 'text')
+  assert.ok(String(first?.value).startsWith('$(watch) '), 'the icon stays outside, at the start')
+  assert.ok(String(first?.value).includes(`${bidi.LRI}60 s${bidi.PDI}`), String(first?.value))
+  // The sent line has no words of its own for a screen reader: the name VS Code would derive, from the plain text.
+  const item = r.item()
+  assert.equal(r.state.sent.length, 1, 'the line went')
+  assert.equal(bidi.stripBidi(String(item?.text)).startsWith('$(watch) '), true)
+  // VS Code's own rule (its workbench's getCodiconAriaLabel): each $(icon) becomes " icon ", the whole trimmed.
+  assert.equal((item as { accessibilityInformation?: { label: string } } | undefined)?.accessibilityInformation?.label, `watch  ${bidi.stripBidi(String(item?.text)).slice('$(watch) '.length)}`)
+  // In English the sent line keeps VS Code's own derivation: no accessible name of ours.
+  const en = rig()
+  en.tick(NOW)
+  run(en, NOW + SEC, NOW + KEEPWARM_COUNTDOWN_MS)
+  assert.equal((en.item() as { accessibilityInformation?: unknown } | undefined)?.accessibilityInformation, undefined)
 })
 
 // ---------------------------------------------------------------------------

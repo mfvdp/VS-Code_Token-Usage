@@ -37,6 +37,7 @@
 import { httpsOnly } from './config'
 import type { ChannelKind, NotifyConfig, NotifyEventKind, WebhookFormat } from './config'
 import type { NotificationsDiag, NotifyChannelDiag } from './diagnostics'
+import { hostUi } from './hostUi'
 import { t } from './i18n'
 import {
   Admission, ChannelLast, droppedLines, loadNotifyState, newNotifyTables, NOTIFY_CHANNELS, NOTIFY_HOURLY_CAP, NOTIFY_STATE_KEY,
@@ -798,15 +799,19 @@ export function notifyHostFor(
   return new NotifyHost({ ...deps, secrets: context.secrets, memento: context.globalState, ui: vscodeNotifyUi() })
 }
 
+/**
+ * The questions through the door (src/hostUi.ts, 1.13 A3 rule 8): each text isolated in a right-to-left language —
+ * the pick's items and placeholder, the InputBox's title, prompt, placeholder and validation message (never the value
+ * typed), a dialog's message, its detail line by line and its buttons —, each answer the caller's own.
+ */
 function vscodeNotifyUi(): NotifyUi {
   const vscode = require('vscode') as typeof import('vscode')
+  const door = hostUi()
   return {
-    pick: (items, options) => vscode.window.showQuickPick([...items], { placeHolder: options.placeHolder, ignoreFocusOut: true }),
-    input: (options) => vscode.window.showInputBox(options),
-    modal: (kind, message, detail, ...buttons) => (kind === 'warning'
-      ? vscode.window.showWarningMessage(message, { modal: true, detail }, ...buttons)
-      : vscode.window.showInformationMessage(message, { modal: true, detail }, ...buttons)),
-    info: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
+    pick: (items, options) => door.showPick([...items], { placeHolder: options.placeHolder, ignoreFocusOut: true }),
+    input: (options) => door.showInput(options),
+    modal: (kind, message, detail, ...buttons) => door.showMessage(kind, message, { modal: true, detail }, ...buttons),
+    info: (message, ...buttons) => door.showMessage('info', message, {}, ...buttons),
     openSettings: (query) => vscode.commands.executeCommand('workbench.action.openSettings', query),
   }
 }

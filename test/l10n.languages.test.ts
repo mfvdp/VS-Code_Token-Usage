@@ -94,9 +94,10 @@ import { after, test } from 'node:test'
 import { budgetRows } from '../src/budget'
 import { readTimeConfig, sanitize } from '../src/config'
 import { KEEP_WARM_TERMS_PASSAGE, KeepWarmConsent } from '../src/consent'
-import { setBundle, setLang, setLocale } from '../src/i18n'
+import { BIDI_CONTROLS, stripBidi } from '../src/bidi'
+import { setBundle, setDir, setLang, setLocale } from '../src/i18n'
 import { KEEP_WARM_LINE } from '../src/keepWarm'
-import { isLanguageId, LANGUAGE_IDS, languageDir, languageEntry, languageName, LANGUAGES } from '../src/languages'
+import { intlTag, isLanguageId, LANGUAGE_IDS, languageDir, languageEntry, languageName, LANGUAGES } from '../src/languages'
 import type { StatsCtx } from '../src/stats'
 import { buildItems, makeContext, UsageSource } from '../src/statusText'
 import type { MementoLike } from '../src/storage'
@@ -468,6 +469,7 @@ function pristine(): void {
   setBundle(undefined)
   setLocale(undefined)
   setLang(undefined)
+  setDir(undefined)
 }
 
 /** dashboard.ts imports `vscode`; the module is required behind the stub dashboard.test.ts uses. */
@@ -871,8 +873,12 @@ function barTexts(v: BarVariant): string[] {
   return out
 }
 
-/** U+00A0 and U+202F read as a space (1.10 B3): Intl writes them, a manifest may write a plain space. */
-const barSpaces = (s: string): string => s.replace(/[  ]/g, ' ').trim()
+/**
+ * U+00A0 and U+202F read as a space (1.10 B3): Intl writes them, a manifest may write a plain space. 1.13 P5 (A4 rule 7 —
+ * pinned and changed: the bar's text is compared without its bidi controls): in Arabic, Hebrew and Persian the bar
+ * carries the code's isolates (src/bidi.ts), a manifest example none (T16 a) — so both sides lose them first.
+ */
+const barSpaces = (s: string): string => stripBidi(s).replace(/[  ]/g, ' ').trim()
 /**
  * The examples a value quotes: the text between two of T11's quotation marks. An apostrophe between two letters
  * (aujourd’hui, dell’ora) is a letter of the word, not a closing mark (1.10 P8's finding): it is masked before the
@@ -894,11 +900,14 @@ export function barExampleProblems(id: string, file: string, nls: Record<string,
   skip: (key: string) => boolean = () => false): string[] {
   const out: string[] = []
   const english = src().english
-  const locale = isLanguageId(id) ? languageEntry(id).locale : id
+  // 1.13 P5 (A4 rule 7 — pinned and changed: the bar as it prints in the language — its pinned Intl tag, intlTag, and its
+  // direction, so that a right-to-left language's bar carries the isolates barSpaces takes off again).
+  const locale = isLanguageId(id) ? intlTag(languageEntry(id).locale, id) : id
   try {
     setBundle(bundle ?? {})
     setLocale(locale)
     setLang(id)
+    setDir(isLanguageId(id) ? languageDir(id) : 'ltr')
     for (const [key, variants] of Object.entries(BAR_EXAMPLE_KEYS)) {
       if (skip(key) || typeof nls[key] !== 'string') continue
       const examples = quotedExamples(nls[key])
@@ -927,7 +936,7 @@ type Rule = (s: Source, l: LangFiles) => string[]
  * LRE … RLO U+202A–U+202E, LRI … PDI U+2066–U+2069 (src/bidi.ts's BIDI_CONTROLS from P5 on; written as escapes, the Trojan
  * Source rule of VS Code 1.62). ZWNJ U+200C and ZWJ U+200D are not among them: Persian writes ZWNJ inside words (سه‌شنبه).
  */
-const BIDI_CONTROL_CHARS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu
+const BIDI_CONTROL_CHARS = new RegExp(BIDI_CONTROLS.source, 'gu')
 /** T16 (b): a decimal digit of another script — any \p{Nd} but 0–9 (Arabic-Indic, Extended Arabic-Indic, Devanagari, fullwidth …). */
 const FOREIGN_DIGITS = /(?![0-9])\p{Nd}/gu
 /** T16 (c): an Arabic presentation form — the shaped letters of U+FB50–U+FDFF and U+FE70–U+FEFF. */
@@ -1872,6 +1881,39 @@ test('T15: the fixture builds the English examples of package.nls.json word for 
     'Budget 63%',
   ])
   assert.deepEqual(barExampleProblems('de', 'package.nls.de.json', de, readTable(join(ROOT, 'l10n', 'bundle.l10n.de.json'))), [])
+})
+
+test('1.13 P5 (A4 rule 7): T15 in a right-to-left language — the bar there carries the code\'s isolates, a manifest example none (T16 a), and barSpaces takes them off: a pseudo-RTL manifest under ar that quotes what the Arabic bar prints passes, each example as the English quotes it', () => {
+  const english = src().english
+  const bundle = pseudoRtlBundle()
+  /** Every text the bar builds for each key's variants, under one language's words, formats and direction. */
+  const barOf = (id: 'en' | 'ar', words: Record<string, string>): Record<string, string[]> => {
+    try {
+      setBundle(words)
+      setLocale(intlTag(languageEntry(id).locale, id))
+      setLang(id)
+      setDir(languageDir(id))
+      return Object.fromEntries(Object.entries(BAR_EXAMPLE_KEYS).map(([k, variants]) => [k, variants.flatMap((v) => barTexts(v))]))
+    } finally {
+      pristine()
+    }
+  }
+  const en = barOf('en', {})
+  const ar = barOf('ar', bundle)
+  // The Arabic bar carries the isolates — the comparison is not vacuous.
+  assert.ok(Object.values(ar).flat().some((x) => BIDI_CONTROLS.test(x)), 'the pseudo-RTL bar carries no isolate')
+  // The manifest: the English values, each example the Arabic bar's text at the English example's place, marks off.
+  const nls: Record<string, string> = { ...english }
+  for (const key of Object.keys(BAR_EXAMPLE_KEYS)) {
+    let value = english[key]
+    for (const ex of quotedExamples(english[key])) {
+      const at = en[key].findIndex((x) => barSpaces(x) === ex)
+      assert.ok(at >= 0, `${key}: ${ex}`)
+      value = value.replace(ex, stripBidi(ar[key][at]).replace(/[\u00a0\u202f]/g, ' ').trim())
+    }
+    nls[key] = value
+  }
+  assert.deepEqual(barExampleProblems('ar', 'package.nls.ar.json', nls, bundle), [])
 })
 
 test('T15 catches an example the bar does not print — the English relative example without its "resets", cs\'s "Σ 3.1M" where the Czech bar prints 3,1M, an example dropped — and exempts a key on the pending list until the join (1.10 B3)', () => {

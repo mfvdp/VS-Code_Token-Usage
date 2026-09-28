@@ -25,6 +25,7 @@ import {
   newPromptId, PROMPT_ENTER_DELAY_MS, PROMPT_FLASH_MS, PROMPT_SEND_MIN_GAP_MS, PromptHostFacts, PromptsHost, PromptsLog, PromptStore,
   PromptsWindow, PromptTimers,
 } from '../src/promptsHost'
+import { hostUiOf, WindowApi } from '../src/hostUi'
 import type { PromptSession } from '../src/promptSend'
 import { TerminalWatch, TerminalWindow } from '../src/terminalWatch'
 import { scratchDir } from './fixtures/helpers'
@@ -364,7 +365,8 @@ const settle = (): Promise<void> => new Promise((r) => setImmediate(r))
 
 interface SendRig {
   state: FakeVscodeState
-  window: PromptsWindow & TerminalWindow
+  /** 1.13 P5 (pinned and changed: the window's message and pick members are the door's now — hostUiOf(window)). */
+  window: PromptsWindow & TerminalWindow & WindowApi
   watch: TerminalWatch
   host: PromptsHost
   store: PromptStore
@@ -401,7 +403,7 @@ function factsWith(sessions: PromptSession[], over: Partial<Omit<PromptHostFacts
 
 function sendRig(): SendRig {
   const { api, state } = createFakeVscode()
-  const window = (api as { window: PromptsWindow & TerminalWindow }).window
+  const window = (api as { window: PromptsWindow & TerminalWindow & WindowApi }).window
   const clock = { now: T0 }
   const watch = new TerminalWatch(window, () => clock.now)
   watch.want('prompts', true, clock.now)
@@ -409,7 +411,8 @@ function sendRig(): SendRig {
   const timers = fakeTimers(clock)
   const yields: SendRig['yields'] = []
   const keepWarm = { yieldTo: (terminal: unknown): boolean => { yields.push({ terminal, sentBefore: state.sent.length }); return false } }
-  const host = new PromptsHost({ store, window, watch, keepWarm: keepWarm as never, log, clock: () => clock.now, timers })
+  // 1.13 P5 (pinned and changed: the host's questions go through the door over the same fake window, `ui`).
+  const host = new PromptsHost({ store, window, ui: hostUiOf(window), watch, keepWarm: keepWarm as never, log, clock: () => clock.now, timers })
   let calls = 0
   let make: (call: number) => PromptHostFacts = () => factsWith([idle()])
   const open = (o: { shell?: string | undefined; commandLine?: string; cwd?: string | null; refuse?: boolean }): FakeTerminal => {

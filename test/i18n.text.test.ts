@@ -256,7 +256,8 @@ test('a reset that has passed keeps its own sentence in any language', () => {
 test('the consent dialog asks, and compares its answer, in the bundle language', async () => {
   const shown: { message: string; detail: string; items: string[] }[] = []
   const ui: ConsentUi = {
-    showInformationMessage(message, options, ...items) {
+    // 1.13 P5 (pinned and changed: the dialog goes through the door's showMessage — src/hostUi.ts — with its kind).
+    showMessage(_kind, message, options, ...items) {
       shown.push({ message, detail: options.detail ?? '', items })
       // The user clicks the button as it was labelled — which is the German one.
       return Promise.resolve(items[0])

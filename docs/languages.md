@@ -224,6 +224,33 @@ and Traditional Chinese, the plain `:` everywhere else, Japanese included. Since
 space after a plain colon and none after a full-width one, whose glyph carries its own blank, so the
 gap before the value is one gap in every language.
 
+## Right to left
+
+Arabic, Hebrew and Persian are written from right to left. VS Code itself has no right-to-left layout: the status
+bar, its tooltips, the Quick Pick, the notifications and the dialogs lay every text out from left to right, whatever
+the display language. So that a right-to-left sentence with a Latin name or a figure in it still reads in its own
+order there, Token Pace marks each text it hands to one of those surfaces with invisible Unicode direction
+characters: the text becomes a right-to-left paragraph of its own (RLI … PDI) — even when it begins with a Latin name,
+as *Claude* does —, and each figure, clock time, day, amount and name inside it one left-to-right unit (LRI … PDI),
+so that `~18 h 46 min`, `claude-haiku-3-5` and `12.50 US$` read as they do in English; an icon at the start stays
+outside, at the entry's left edge, where VS Code draws its own. That holds for the status bar's entries (their text,
+their name and their tooltip — inside the tooltip's markdown, in each table cell, after a list item's `-`, inside
+`**…**`, `_…_` and a link's brackets, since VS Code's hover allows no `dir` attribute), the Quick Pick (its title,
+placeholder and every item), the messages and dialogs with their buttons (a dialog's text line by line), the
+InputBox's title, prompt and placeholder — never what you type — and the progress notifications. **A text copied from
+the status bar or a message may carry invisible direction marks** — one pair around the text, one around each figure
+or name in it.
+
+No mark goes where it would be read rather than laid out: into a translation, into the dashboard (the page carries
+its own direction, `dir="rtl"`), into an accessible name (a screen reader reads the words in their order; an entry
+without words of its own for one gets the name VS Code would give it, without marks), into the markdown document (a
+text editor shows direction characters; its lines are laid out by the editor, readable but not mirrored), into the
+log, the diagnostics report, an export or a notification's JSON fields. A notification's title and text begin with
+one right-to-left mark instead ([Notifications](notifications.md#what-a-message-holds)). A range of days that Token
+Pace writes itself — a hand-picked range's name, the span behind a row of the totals table, a key figure's period, a
+Quick Pick's period — takes the arrow the line reads in: `2026-08-05 ← 2026-09-03` right to left; the markdown
+document and the exports keep `→`.
+
 ## How the translations were made
 
 English is the source: every text is written in English first, and the German — the manifest since

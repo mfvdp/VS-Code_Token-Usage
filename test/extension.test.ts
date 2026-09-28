@@ -998,6 +998,96 @@ test('1.13 A1: applyLanguage hands the words\' direction to the seam with the ot
   }
 })
 
+/**
+ * 1.13 A3 rule 9 (c): a text VS Code draws, as the door must have made it — its leading `$(icon)` tokens, RLI (never FSI),
+ * …, PDI — or, without a word, as it was; the problems.
+ */
+function drawnIsolated(s: unknown, what: string): string[] {
+  const bidi = require('../src/bidi') as typeof import('../src/bidi')
+  if (typeof s !== 'string' || s === '') return []
+  return s.split('\n').flatMap((line, i) => {
+    const icons = /^(?:\$\([\w~-]+\)[  ]*)*/u.exec(line)?.[0] ?? ''
+    const rest = line.slice(icons.length)
+    if (!/\p{L}/u.test(bidi.stripBidi(rest).replace(/\$\([\w~-]+\)/g, ''))) return []
+    return rest.codePointAt(0) === 0x2067 && rest.endsWith(bidi.PDI) ? [] : [`${what} line ${i + 1}: ${JSON.stringify(line)}`]
+  })
+}
+
+test('1.13 A3 rule 9 (c): the fake vscode in Arabic, the pseudo-RTL bundle in a folder of the test\'s own — the scan\'s item and the bar, a fetch and its consent dialog, the click menu\'s Quick Pick, Clear Stored Data\'s pick of several and its dialog: every text VS Code would draw isolated, every button and item handed back as the caller\'s own, every accessible name and every log line without a control', async () => {
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  const bidi = require('../src/bidi') as typeof import('../src/bidi')
+  const { pseudoRtlBundle } = require('./helpers/nls') as typeof import('./helpers/nls')
+  try {
+    // The pseudo language writes every word كلمة, so the dialog's two buttons would be one label (a caller could not
+    // tell them apart, with or without the door): they get two words of their own here.
+    const ext = languageFolder({ ar: JSON.stringify({ ...pseudoRtlBundle(), Allow: 'سماح', Never: 'أبدا' }) })
+    const host = await activateHost(makeFixture(), ext, { settings: { 'tokenPace.language': 'ar', 'tokenPace.quotaSource': 'poll' } })
+    await waitColdStartLine(state, host.coldLinesAtStart, 'the cold scan')
+    assert.deepEqual([i18n.dir(), i18n.lang()], ['rtl', 'ar'])
+    const problems: string[] = []
+    // The scan's item (the third owner): each text isolated, its accessible name the plain one.
+    const scan = state.itemSets.filter((x) => x.id === 'tokenPace.scan')
+    assert.ok(scan.some((x) => x.field === 'text'), 'the scan item was never drawn')
+    for (const x of scan) {
+      if (x.field === 'text' || x.field === 'tooltip') problems.push(...drawnIsolated(x.value, `scan ${x.field}`))
+      if (x.field === 'accessibilityInformation') assert.doesNotMatch(String((x.value as { label?: string })?.label ?? ''), bidi.BIDI_CONTROLS)
+    }
+    // The bar (statusbar.ts through finishItems): each text and name, each accessible name plain.
+    const live = state.live('tokenPace.')
+    assert.ok(live.length > 0)
+    for (const item of live) {
+      problems.push(...drawnIsolated(item.text, `${item.id} text`), ...drawnIsolated(item.name, `${item.id} name`))
+      const aria = (item as unknown as { accessibilityInformation?: { label?: string } }).accessibilityInformation?.label ?? ''
+      assert.doesNotMatch(aria, bidi.BIDI_CONTROLS, item.id)
+      assert.notEqual(aria, '', `${item.id}: a right-to-left item carries an accessible name of its own`)
+    }
+    // A fetch: the consent dialog in the words, the reader answers with the button as shown — "Never", isolated —, and
+    // the consent reads it as its own label: the decision is recorded.
+    const never = bidi.isolate(i18n.t('Never'))
+    assert.notEqual(never, i18n.t('Never'))
+    state.answers.push(never)
+    await state.execute('tokenPace.refreshQuota')
+    const dialog = state.messages.find((m) => bidi.stripBidi(m.text) === i18n.t('Allow Token Pace to fetch quota figures?'))
+    assert.ok(dialog, state.messages.map((m) => m.text).join(' | '))
+    assert.equal(dialog.options?.modal, true)
+    problems.push(...drawnIsolated(dialog.text, 'dialog'), ...drawnIsolated(dialog.options?.detail, 'dialog detail'))
+    for (const a of dialog.actions) problems.push(...drawnIsolated(a, 'dialog button'))
+    assert.equal(host.ctx.globalState.get('networkConsent'), 'denied', 'the shown "Never" was not the consent\'s own label')
+    await waitFor('the answer', () => state.messages.some((m) => bidi.stripBidi(m.text).startsWith(i18n.t('Quota is not fetched. Run "Token Pace: Reset Network Access Decision" to be asked again.'))))
+    // The click menu: a Quick Pick whose items and placeholder are isolated; the chosen copy runs the caller's command.
+    state.answers.push((offered: Array<{ command?: string }>) => offered.find((i) => i.command === 'tokenPace.showOutput'))
+    await state.execute('tokenPace.menu')
+    const menu = state.quickPicks[state.quickPicks.length - 1]
+    for (const i of menu.items) for (const f of ['label', 'description', 'detail']) problems.push(...drawnIsolated(i[f], `menu ${f}`))
+    problems.push(...drawnIsolated(menu.options.placeHolder, 'menu placeholder'), ...drawnIsolated(menu.options.title, 'menu title'))
+    assert.equal(state.executed[state.executed.length - 1], 'tokenPace.showOutput')
+    // Clear Stored Data: a pick of several, then its dialog — the caller's items and its own "Delete" come back.
+    state.answers.push((offered: Array<{ key?: string }>) => offered.filter((i) => i.key === 'consent'), bidi.isolate(i18n.t('Delete')))
+    await state.execute('tokenPace.clearStoredData')
+    const clear = state.quickPicks[state.quickPicks.length - 1]
+    for (const i of clear.items) for (const f of ['label', 'description', 'detail']) problems.push(...drawnIsolated(i[f], `clear ${f}`))
+    const confirm = state.messages[state.messages.length - 1]
+    problems.push(...drawnIsolated(confirm.text, 'confirm'), ...drawnIsolated(confirm.options?.detail, 'confirm detail'))
+    assert.equal(host.ctx.globalState.get('networkConsent'), undefined, 'the consent decisions were not deleted: the pick or the "Delete" was not the caller\'s')
+    // Every message this activation showed: its text and its buttons isolated.
+    for (const m of state.messages) {
+      problems.push(...drawnIsolated(m.text, `message ${m.kind}`))
+      for (const a of m.actions) problems.push(...drawnIsolated(a, 'button'))
+    }
+    assert.deepEqual(problems, [])
+    // §0a.3: no log line carries a control — the log stays plain English data.
+    const logged = state.logText()
+    assert.equal(logged.search(bidi.BIDI_CONTROLS), -1, logged.slice(Math.max(0, logged.search(bidi.BIDI_CONTROLS) - 80), logged.search(bidi.BIDI_CONTROLS) + 40))
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    const { setBundle, setDir, setLang, setLocale } = i18n
+    setBundle(undefined)
+    setLocale(undefined)
+    setLang(undefined)
+    setDir(undefined)
+  }
+})
+
 test('a language the build has no file for, a file that does not parse and a setting that is no language are English, and the log says why in English — never the setting\'s text (1.9 A1 rule 3, A2 rules 2–3)', async () => {
   const i18n = require('../src/i18n') as typeof import('../src/i18n')
   try {

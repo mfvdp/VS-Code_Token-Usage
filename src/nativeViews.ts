@@ -19,6 +19,8 @@ import { Config, readTimeConfig } from './config'
 import {
   AGENTS_FILE_SUFFIX, TOOLS_FILE_SUFFIX, agentsCsv, companionPath, toCsv, toJson, toMarkdownSummary, toolsCsv,
 } from './exporter'
+import { isolate } from './bidi'
+import { createPick, pickItems, showMessage } from './hostUi'
 import { t } from './i18n'
 import { markdownDocument, quickPickItems } from './textViews'
 import { DayRange } from './time'
@@ -128,28 +130,35 @@ async function save(
   // Every file that was written, by name — one sentence per count, so a translator has the
   // whole sentence each time.
   const [second, third] = written.map((u) => u.fsPath)
-  const open = await vscode.window.showInformationMessage(
+  const open = await showMessage('info',
     third !== undefined
       ? t('Token Pace: exported to {0}, {1} and {2}', uri.fsPath, second, third)
       : second !== undefined
         ? t('Token Pace: exported to {0} and {1}', uri.fsPath, second)
         : t('Token Pace: exported to {0}', uri.fsPath),
+    {},
     openLabel,
   )
   if (open === openLabel) await vscode.window.showTextDocument(uri)
 }
 
-async function showQuickPick(deps: NativeViewDeps): Promise<void> {
+/**
+ * *Show Usage (Quick Pick)*: the view model as a list. 1.13 A3 rules 1 and 8: the control comes from the door, and
+ * every text it shows — the title, the placeholder, each item's label, description and detail, each button's tooltip —
+ * is isolated in a right-to-left language; the items keep their command and a button is looked up by the tooltip it
+ * shows.
+ */
+async function showUsagePick(deps: NativeViewDeps): Promise<void> {
   const vm = deps.getVm()
-  const pick = vscode.window.createQuickPick<vscode.QuickPickItem & { command?: string }>()
-  pick.title = t('Token Pace — {0}', vm.range.label)
-  pick.placeholder = t('Usage, quota windows and key figures (chart and heatmap need the dashboard)')
+  const pick = createPick<vscode.QuickPickItem & { command?: string }>()
+  pick.title = isolate(t('Token Pace — {0}', vm.range.label))
+  pick.placeholder = isolate(t('Usage, quota windows and key figures (chart and heatmap need the dashboard)'))
   pick.matchOnDescription = true
   pick.matchOnDetail = true
   // A `separator: true` item is a heading, not a row: it carries no command and the
   // QuickPick refuses to select it. Read defensively so an older `quickPickItems`
   // that does not set the flag still renders exactly as before.
-  pick.items = quickPickItems(vm).map((i) => {
+  pick.items = pickItems(quickPickItems(vm).map((i) => {
     const item = i as typeof i & { separator?: boolean }
     if (item.separator === true) {
       return { label: item.label, kind: vscode.QuickPickItemKind.Separator }
@@ -160,14 +169,14 @@ async function showQuickPick(deps: NativeViewDeps): Promise<void> {
       detail: i.detail,
       command: i.command,
     }
-  })
+  }))
   // The tooltip is both the label and the key the click is looked up under, so it is
   // translated exactly once and the table is built from those same four values.
   const buttons: Array<{ icon: string; tooltip: string; command: string }> = [
-    { icon: 'sync', tooltip: t('Fetch quota now'), command: 'tokenPace.refreshQuota' },
-    { icon: 'history', tooltip: t('Re-read token history'), command: 'tokenPace.rescan' },
-    { icon: 'output', tooltip: t('Show log'), command: 'tokenPace.showOutput' },
-    { icon: 'settings-gear', tooltip: t('Open settings'), command: 'tokenPace.openSettings' },
+    { icon: 'sync', tooltip: isolate(t('Fetch quota now')), command: 'tokenPace.refreshQuota' },
+    { icon: 'history', tooltip: isolate(t('Re-read token history')), command: 'tokenPace.rescan' },
+    { icon: 'output', tooltip: isolate(t('Show log')), command: 'tokenPace.showOutput' },
+    { icon: 'settings-gear', tooltip: isolate(t('Open settings')), command: 'tokenPace.openSettings' },
   ]
   pick.buttons = buttons.map((b) => ({ iconPath: new vscode.ThemeIcon(b.icon), tooltip: b.tooltip }))
   const byTooltip: Record<string, string> = {}
@@ -195,7 +204,7 @@ export function registerNativeViews(
     provider,
     vscode.workspace.registerTextDocumentContentProvider(MARKDOWN_SCHEME, provider),
 
-    vscode.commands.registerCommand('tokenPace.showUsageQuickPick', () => showQuickPick(deps)),
+    vscode.commands.registerCommand('tokenPace.showUsageQuickPick', () => showUsagePick(deps)),
 
     vscode.commands.registerCommand('tokenPace.showUsageMarkdown', async () => {
       provider.refresh(uri)
@@ -240,8 +249,8 @@ export function registerNativeViews(
 
     vscode.commands.registerCommand('tokenPace.copySummary', async () => {
       await vscode.env.clipboard.writeText(toMarkdownSummary(deps.getVm()))
-      void vscode.window.showInformationMessage(
-        t('Token Pace: usage summary copied as markdown (model names included).'),
+      void showMessage('info',
+        t('Token Pace: usage summary copied as markdown (model names included).'), {},
       )
     }),
   )

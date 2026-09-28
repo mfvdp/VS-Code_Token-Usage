@@ -52,9 +52,10 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type * as vscode from 'vscode'
 import { hookKey } from './agentTree'
+import { isolate, itemAriaLabel } from './bidi'
 import type { AgentTreeVm, HookEntry } from './agentTree'
 import type { CacheWatchEntry } from './cacheWatch'
-import { t } from './i18n'
+import { dir, t } from './i18n'
 import {
   KEEP_WARM_LINE, KEEPWARM_COUNTDOWN_MS, KEEPWARM_VERIFY_MS, KeepWarmBlock, KeepWarmFacts, KeepWarmSibling, keepWarmDecision,
   sameProjectDir,
@@ -753,10 +754,12 @@ export class KeepWarmHost {
     if (c === null) return
     const secs = Math.max(0, Math.ceil((c.endsAt - now) / 1000))
     const item = this.itemFor(alignment)
-    item.name = t('Token Pace — keep-warm countdown')
-    item.text = `$(watch) ${t('keep warm in {0} s · cancel', secs)}`
-    item.tooltip = t('Token Pace will type “{0}” into the terminal that runs {1} and press Enter, so that its prompt cache stays warm. Click to cancel.',
-      KEEP_WARM_LINE, c.name)
+    // 1.13 A3 rules 1, 4, 6: the name, the text and the tooltip isolated in a right-to-left language (the icon outside);
+    // the accessible name never.
+    item.name = isolate(t('Token Pace — keep-warm countdown'))
+    item.text = isolate(`$(watch) ${t('keep warm in {0} s · cancel', secs)}`)
+    item.tooltip = isolate(t('Token Pace will type “{0}” into the terminal that runs {1} and press Enter, so that its prompt cache stays warm. Click to cancel.',
+      KEEP_WARM_LINE, c.name))
     // 1.10 D8: the verb a person uses for a control — "press", never "activate".
     item.accessibilityInformation = { label: t('Keep-warm line for {0} in {1} seconds, press to cancel', c.name, secs) }
     item.command = KEEPWARM_CANCEL_COMMAND
@@ -768,10 +771,13 @@ export class KeepWarmHost {
   /** "$(watch) keep-warm line sent", for KEEPWARM_SENT_SHOWN_MS: nothing left to cancel. */
   private showSent(alignment: vscode.StatusBarAlignment): void {
     const item = this.itemFor(alignment)
-    item.name = t('Token Pace — keep-warm countdown')
-    item.text = `$(watch) ${t('keep-warm line sent')}`
+    const text = `$(watch) ${t('keep-warm line sent')}`
+    item.name = isolate(t('Token Pace — keep-warm countdown'))
+    item.text = isolate(text)
     item.tooltip = undefined
-    item.accessibilityInformation = undefined
+    // 1.13 A3 rule 6: without a name of its own VS Code reads the item's text — the isolated one in a right-to-left
+    // language; there the item gets the name VS Code derives, from the text before it was isolated.
+    item.accessibilityInformation = dir() === 'rtl' ? { label: itemAriaLabel(text) } : undefined
     item.command = undefined
     item.color = undefined
     item.backgroundColor = undefined

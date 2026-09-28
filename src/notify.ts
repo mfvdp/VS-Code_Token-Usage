@@ -33,6 +33,7 @@ import { PROVIDER_NAME, SOURCE_TITLE } from './adapters'
 import { freshReading, identityOf } from './alerts'
 import { HOOK_MAX_AGE_MS, HookEntry } from './agentTree'
 import { spanText } from './agentTreeBuild'
+import { leadRtl } from './bidi'
 import { ChannelKind, NOTIFY_CHANNELS, NOTIFY_EVENTS, NotifyConfig, NotifyEventKind } from './config'
 import { t } from './i18n'
 import { turnClosed } from './keepWarm'
@@ -709,8 +710,11 @@ export function payloadOf(events: readonly NotificationEvent[], words: NotifyWor
   }))
   if (facts.length === 0) throw new Error('payloadOf: a message needs one event at least')
   const same = facts.filter((f) => f.event === facts[0].event)
-  const title = titleOf(same[0])
-  const text = same.map((f) => sentenceOf(f, words)).join('\n')
+  // 1.13 A3 rule 7 (§7a Q11): in Arabic, Hebrew and Persian the title and each line of the text begin with RLM, so that
+  // a client that lays a message out by its first strong character reads "Claude Code …" right to left — no isolate,
+  // no other field touched.
+  const title = leadRtl(titleOf(same[0]))
+  const text = leadRtl(same.map((f) => sentenceOf(f, words)).join('\n'))
   const { event, ...rest } = jsonOf(same[0])
   const json: Record<string, NotifyJsonValue> = { v: 1, source: 'token-pace', event, title, text, ...rest }
   if (same.length > 1) json.items = same.map(jsonOf)
@@ -723,8 +727,9 @@ export function payloadOf(events: readonly NotificationEvent[], words: NotifyWor
  * every figure `null`.
  */
 export function testPayload(words: NotifyWords): NotificationPayload {
-  const title = t('Token Pace: test message')
-  const text = t('This channel works: Token Pace can reach it. Sent at {0}.', formatTime(words.now, words.tcfg))
+  // 1.13 A3 rule 7: the leading RLM of a right-to-left language, as in every message (payloadOf).
+  const title = leadRtl(t('Token Pace: test message'))
+  const text = leadRtl(t('This channel works: Token Pace can reach it. Sent at {0}.', formatTime(words.now, words.tcfg)))
   return {
     title,
     text,

@@ -18,6 +18,7 @@ import {
   ConsentUi, DEFAULT_QUOTA_CACHE_FILES, disclosure, NetworkConsent, WriteConsent,
   writeConsentDisclosure,
 } from '../src/consent'
+import type { MessageKind, MessageOpts } from '../src/hostUi'
 import { setBundle, setLocale } from '../src/i18n'
 import { MementoLike } from '../src/storage'
 
@@ -45,11 +46,14 @@ function ui(answers: Array<string | undefined>): ConsentUi & { shown: Shown[] } 
   const shown: Shown[] = []
   return {
     shown,
-    showInformationMessage(
+    // 1.13 P5 (pinned and changed: the dialog goes through the door's showMessage — src/hostUi.ts — with its kind).
+    showMessage(
+      kind: MessageKind,
       message: string,
-      options: { modal: boolean; detail?: string },
+      options: MessageOpts,
       ...items: string[]
-    ): PromiseLike<string | undefined> {
+    ): Promise<string | undefined> {
+      assert.equal(kind, 'info')
       shown.push({ message, detail: options.detail ?? '', items })
       return Promise.resolve(answers.shift())
     },

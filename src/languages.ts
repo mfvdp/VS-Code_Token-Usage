@@ -12,10 +12,15 @@
  * every Chinese system locale to one of the two). A file name is only ever built from an id of this
  * list, never from a setting's text (languageLoad.ts).
  *
- * No direction field: every language of 1.9 and 1.11 is written left to right (RTL is 1.13), and a test
- * holds that no entry carries one.
+ * 1.13 A1: the direction and the pinned formats are registry data too. Arabic, Hebrew and Persian are written right to
+ * left — `dir: 'rtl'`, absent on every other entry, which is left to right (`languageDir`) — and pin Intl's digits and
+ * calendar (`digits: 'latn'`, `calendar: 'gregory'`, `intlTag`): the digits 0–9 and the Gregorian calendar in every
+ * view, because the bar, the page and the tooltips put Token Pace's marks beside figures and the exports write 0–9, and
+ * because `fa` (and `ar-EG`, `ar-SA` under `auto`) would otherwise print other digits and `fa` the Solar Hijri calendar
+ * beside weeks and months computed in Gregorian days. A test holds that exactly these three carry the three fields and no
+ * entry carries another one.
  *
- * Pure: the one import is the localisation seam, for the twenty-six names in the reader's language.
+ * Pure: the one import is the localisation seam, for the twenty-nine names in the reader's language.
  */
 
 import { t } from './i18n'
@@ -23,16 +28,25 @@ import { t } from './i18n'
 /**
  * 1.9 A: the languages Token Pace ships — VS Code's display-language ids, lower-case as VS Code 1.138 spells them.
  * 1.11 A1: twelve more after `cs`; Norwegian is `nb` (Bokmål), the tag VS Code and ICU use for it.
+ * 1.13 A1: Arabic, Hebrew and Persian after `ro`, written right to left.
  */
 export type LanguageId =
   | 'en' | 'de' | 'fr' | 'es' | 'pt-br' | 'it' | 'ja' | 'ko' | 'zh-cn' | 'zh-tw' | 'ru' | 'tr' | 'pl' | 'cs'
   | 'nl' | 'uk' | 'sv' | 'nb' | 'da' | 'fi' | 'hi' | 'id' | 'vi' | 'el' | 'hu' | 'ro'
+  | 'ar' | 'he' | 'fa'
 /** `tokenPace.language`: `auto` follows VS Code's display language. */
 export type LanguageSetting = 'auto' | LanguageId
-/** The flag drawn beside a language — a country, not the language (§3 A3.2): Ukraine's for Ukrainian, India's for Hindi. */
+/**
+ * The flag drawn beside a language — a country, not the language (§3 A3.2): Ukraine's for Ukrainian, India's for Hindi;
+ * 1.13 §7a Q13: Egypt's for Arabic, Israel's for Hebrew, Iran's for Persian.
+ */
 export type FlagId =
   | 'us' | 'de' | 'fr' | 'es' | 'br' | 'it' | 'jp' | 'kr' | 'cn' | 'tw' | 'ru' | 'tr' | 'pl' | 'cz'
   | 'nl' | 'ua' | 'se' | 'no' | 'dk' | 'fi' | 'in' | 'id' | 'vn' | 'gr' | 'hu' | 'ro'
+  | 'eg' | 'il' | 'ir'
+
+/** 1.13 A1: the direction a language's words are written in. */
+export type TextDirection = 'ltr' | 'rtl'
 
 export interface LanguageEntry {
   /** The setting's value and the file tag: bundle.l10n.<id>.json, package.nls.<id>.json, l10n/parts/<part>.<id>.json. */
@@ -42,12 +56,22 @@ export interface LanguageEntry {
   /** The language's own name, never translated: "Deutsch", "日本語". */
   native: string
   flag: FlagId
+  /** 1.13 A1: written right to left — absent means left to right. Exactly ar, he, fa carry it (a test). */
+  dir?: 'rtl'
+  /** 1.13 A1 rule 4: Intl's numbering system, pinned where the locale's default is not the digits 0–9 (or may not be, under `auto`). */
+  digits?: 'latn'
+  /** 1.13 A1 rule 4: Intl's calendar, pinned where the locale's default is not the Gregorian one (fa: Solar Hijri). */
+  calendar?: 'gregory'
 }
 
 /**
  * The registry in the picker's order — the lead's list (collect "Vorschlag Sprachliste", tier 1), then 1.11's twelve
- * (tier 2) in the collect row's order. Written by 1.9 P1 and 1.11 P2; no translation package touches it. A language is
- * offered once its bundle exists (languageLoad.ts `availableLanguages`), so an entry without files is never chosen.
+ * (tier 2) in the collect row's order, then 1.13's three (collect row 9's order: Arabic, Hebrew, Persian). Written by 1.9
+ * P1, 1.11 P2 and 1.13 P2; no translation package touches it. A language is offered once its bundle exists
+ * (languageLoad.ts `availableLanguages`), so an entry without files is never chosen.
+ *
+ * The native names of 1.13 by code point (NFC; a test pins them): ar U+0627 0644 0639 0631 0628 064A 0629, he U+05E2 05D1
+ * 05E8 05D9 05EA, fa U+0641 0627 0631 0633 06CC — FARSI YEH, not the Arabic yeh U+064A.
  */
 export const LANGUAGES: readonly LanguageEntry[] = Object.freeze([
   { id: 'en', locale: 'en', native: 'English', flag: 'us' },
@@ -77,6 +101,10 @@ export const LANGUAGES: readonly LanguageEntry[] = Object.freeze([
   { id: 'el', locale: 'el', native: 'Ελληνικά', flag: 'gr' },
   { id: 'hu', locale: 'hu', native: 'Magyar', flag: 'hu' },
   { id: 'ro', locale: 'ro', native: 'Română', flag: 'ro' },
+  // 1.13 A1: written right to left, the digits 0–9 and the Gregorian calendar pinned (§7a Q6, Q13, Q14, Q16, Q33).
+  { id: 'ar', locale: 'ar', native: 'العربية', flag: 'eg', dir: 'rtl', digits: 'latn', calendar: 'gregory' },
+  { id: 'he', locale: 'he', native: 'עברית', flag: 'il', dir: 'rtl', digits: 'latn', calendar: 'gregory' },
+  { id: 'fa', locale: 'fa', native: 'فارسی', flag: 'ir', dir: 'rtl', digits: 'latn', calendar: 'gregory' },
 ].map((e) => Object.freeze(e as LanguageEntry)))
 
 /** Every id, in the registry's order — the manifest's enum after `auto`. */
@@ -92,11 +120,39 @@ export function languageEntry(id: LanguageId): LanguageEntry {
   return LANGUAGES.find((e) => e.id === id) ?? LANGUAGES[0]
 }
 
+/** 1.13 A1: the words' direction of a language — 'rtl' where the entry says so, else 'ltr'. */
+export function languageDir(id: LanguageId): TextDirection {
+  return languageEntry(id).dir === 'rtl' ? 'rtl' : 'ltr'
+}
+
+/**
+ * 1.13 A1 rule 4 (§0a.2): the Intl tag for `base` — the entry's locale for an explicit choice, VS Code's tag under
+ * `auto` — with the calendar and the digits the words' entry pins, as a `-u-ca-…-nu-…` extension: the base's own `ca` and
+ * `nu` keywords replaced, its other keywords (`hc`, …) kept, the tag canonicalised by ICU (`ar-eg` → `ar-EG-u-ca-gregory-
+ * nu-latn`). `base` as it stands when the entry pins nothing — every language but ar, he and fa, whose ICU defaults are
+ * the digits 0–9 and the Gregorian calendar already (a test holds it). Never throws: a base ICU cannot read comes back as
+ * it was, and setLocale decides what to do with it.
+ */
+export function intlTag(base: string, id: LanguageId): string {
+  const { calendar, digits } = languageEntry(id)
+  if (calendar === undefined && digits === undefined) return base
+  const options: Intl.LocaleOptions = {}
+  if (calendar !== undefined) options.calendar = calendar
+  if (digits !== undefined) options.numberingSystem = digits
+  try {
+    return new Intl.Locale(base, options).toString()
+  } catch {
+    // RangeError: not a BCP 47 tag; TypeError: not a string.
+    return base
+  }
+}
+
 /**
  * The language's name in the reader's language — one `t()` literal per id ('English', 'German', 'French', 'Spanish',
  * 'Portuguese (Brazil)', 'Italian', 'Japanese', 'Korean', 'Chinese (Simplified)', 'Chinese (Traditional)', 'Russian',
  * 'Turkish', 'Polish', 'Czech'; since 1.11 'Dutch', 'Ukrainian', 'Swedish', 'Norwegian', 'Danish', 'Finnish', 'Hindi',
- * 'Indonesian', 'Vietnamese', 'Greek', 'Hungarian', 'Romanian'): a switch, because the extract script reads literals only.
+ * 'Indonesian', 'Vietnamese', 'Greek', 'Hungarian', 'Romanian'; since 1.13 'Arabic', 'Hebrew', 'Persian' — Microsoft's
+ * and ICU's English name for `fa`, not "Farsi", §7a Q14): a switch, because the extract script reads literals only.
  */
 export function languageName(id: LanguageId): string {
   switch (id) {
@@ -126,6 +182,9 @@ export function languageName(id: LanguageId): string {
     case 'el': return t('Greek')
     case 'hu': return t('Hungarian')
     case 'ro': return t('Romanian')
+    case 'ar': return t('Arabic')
+    case 'he': return t('Hebrew')
+    case 'fa': return t('Persian')
   }
 }
 
@@ -165,16 +224,29 @@ export interface ResolvedLanguage {
   setting: LanguageSetting
   /** The language whose words are shown. */
   id: LanguageId
-  /** Intl: the entry's `locale` for an explicit choice; under `auto` VS Code's own tag, as 1.8 used it ('de-ch' keeps de-CH's formats). */
+  /**
+   * Intl: the entry's `locale` for an explicit choice; under `auto` VS Code's own tag, as 1.8 used it ('de-ch' keeps
+   * de-CH's formats). 1.13 A1 rule 4: through `intlTag` — with the words' entry's pinned calendar and digits ('ar' →
+   * 'ar-u-ca-gregory-nu-latn', VS Code's 'ar-eg' → 'ar-EG-u-ca-gregory-nu-latn'); every other language's tag unchanged.
+   */
   intl: string
-  /** The page's `lang`: always the words' language (the entry's `locale`) — never VS Code's tag when the words are English. */
+  /**
+   * The page's `lang`: always the words' language (the entry's `locale`) — never VS Code's tag when the words are English,
+   * and never the pinned tag (1.13 A1 rule 5: `setLang` takes no `-u-` extension; a `lang` needs none).
+   */
   htmlLang: string
+  /** 1.13 A1: the words' direction — `languageDir(id)`, never VS Code's: an English page under VS Code's `ar` is 'ltr'. */
+  dir: TextDirection
   /** Under `auto`: VS Code's display language as reported (through `[a-z0-9-]{1,20}`, else '') and whether Token Pace has it. */
   auto: { vscode: string; shipped: boolean } | null
 }
 
 /**
  * An explicit id whose bundle is not available resolves to English (a log line says why).
+ *
+ * 1.13 A1: the direction and the pinned formats follow the words' language (`id`), never VS Code's tag — an English
+ * page under VS Code's `ar` (no Arabic bundle) stays left to right with VS Code's own formats, and an Arabic page under
+ * VS Code's `ar-eg` takes Egypt's formats with the digits 0–9 and the Gregorian calendar pinned.
  *
  * Under `auto` the words follow `autoLanguage`, and the formats keep VS Code's own tag (`intl`), as
  * they did before 1.9: a `de-ch` window keeps Swiss number formats with German words, a `pt-pt` window
@@ -190,7 +262,7 @@ export function resolveLanguage(
   if (setting !== 'auto') {
     const id: LanguageId = setting === 'en' || available.includes(setting) ? setting : 'en'
     const entry = languageEntry(id)
-    return { setting, id, intl: entry.locale, htmlLang: entry.locale, auto: null }
+    return { setting, id, intl: intlTag(entry.locale, id), htmlLang: entry.locale, dir: languageDir(id), auto: null }
   }
   const vscode = vscodeLanguageTag(vscodeLanguage)
   const { id, found } = autoLookup(vscodeLanguage, available)
@@ -198,8 +270,9 @@ export function resolveLanguage(
   return {
     setting,
     id,
-    intl: raw,
+    intl: intlTag(raw, id),
     htmlLang: languageEntry(id).locale,
+    dir: languageDir(id),
     auto: { vscode, shipped: found || vscode === '' },
   }
 }

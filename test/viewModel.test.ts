@@ -3052,10 +3052,11 @@ test('the picker offers Automatic, then every available language in the registry
     setBundle(undefined)
   }
 
-  // Every language of the registry on disk (1.11: twenty-six): twenty-seven options in the registry's order, exactly one
-  // checked — the setting's.
+  // Every language of the registry on disk (1.11: twenty-six; 1.13: twenty-nine): Automatic and each in the registry's
+  // order, exactly one checked — the setting's. 1.13 P2 (pinned and changed: the literal 27): thirty options.
   const all = pick('ja', [...LANGUAGE_IDS])
-  assert.equal(all.options.length, 27)
+  assert.equal(all.options.length, 30)
+  assert.equal(all.options.length, LANGUAGE_IDS.length + 1)
   assert.deepEqual(all.options.map((o) => o.id), ['auto', ...LANGUAGE_IDS])
   assert.deepEqual(all.options.filter((o) => o.checked).map((o) => o.id), ['ja'])
   assert.deepEqual(all.options.find((o) => o.id === 'zh-tw'), { id: 'zh-tw', native: '繁體中文', name: 'Chinese (Traditional)', lang: 'zh-TW', flag: 'tw', checked: false })

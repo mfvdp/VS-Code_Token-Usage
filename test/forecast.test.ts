@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { Cycle, ForecastConfig, calibration, forecast, lockoutText, resetForecast, retrospective } from '../src/forecast'
 import { QuotaSample, QuotaWindow } from '../src/types'
 import { setLocale } from '../src/i18n'
-import { LANGUAGES } from '../src/languages'
+import { intlTag, LANGUAGES } from '../src/languages'
 
 const NOW = 1_700_000_000_000
 const H = 3_600_000
@@ -313,7 +313,10 @@ test('hours under ten are written to a tenth in the reader\'s decimal mark, a wh
   assert.equal(text(75 * MIN), 'measuring · 3 readings over 2.5 h')
   assert.equal(text(60 * MIN), 'measuring · 3 readings over 2 h')
   assert.equal(text(6 * H), 'measuring · 3 readings over 12 h')
-  for (const { id, locale } of LANGUAGES) {
+  // 1.13 P2 (pinned and changed: the plain locale): each language under the tag the host sets for it — its locale through
+  // intlTag, which pins Arabic's, Hebrew's and Persian's digits to 0–9 (§0a.2); Persian's own default writes ۲٫۵.
+  for (const { id, locale: base } of LANGUAGES) {
+    const locale = intlTag(base, id)
     const m = new Intl.NumberFormat(locale).formatToParts(1.5).find((p) => p.type === 'decimal')?.value
     setLocale(locale)
     try {

@@ -96,8 +96,7 @@ import { readTimeConfig, sanitize } from '../src/config'
 import { KEEP_WARM_TERMS_PASSAGE, KeepWarmConsent } from '../src/consent'
 import { setBundle, setLang, setLocale } from '../src/i18n'
 import { KEEP_WARM_LINE } from '../src/keepWarm'
-import { isLanguageId, LANGUAGE_IDS, languageEntry, languageName, LANGUAGES } from '../src/languages'
-import * as registry from '../src/languages'
+import { isLanguageId, LANGUAGE_IDS, languageDir, languageEntry, languageName, LANGUAGES } from '../src/languages'
 import type { StatsCtx } from '../src/stats'
 import { buildItems, makeContext, UsageSource } from '../src/statusText'
 import type { MementoLike } from '../src/storage'
@@ -248,16 +247,11 @@ export const NON_LATIN: ReadonlySet<string> = new Set(['ja', 'ko', 'zh-cn', 'zh-
 export const NEW_IN_1_13: ReadonlyArray<readonly [string, string]> = [['ar', 'العربية'], ['he', 'עברית'], ['fa', 'فارسی']]
 
 /**
- * 1.13 A4 rules 2–3: the languages written right to left — read from the registry (src/languages.ts `languageDir`, P2),
- * never a literal of the frame's own. Until P2 exports languageDir the module has none, and the frame reads the ids of
- * NEW_IN_1_13 instead; P2 retires the fallback. T4 counts → and ← as one mark in these languages.
+ * 1.13 A4 rules 2–3: the languages written right to left — read from the registry (src/languages.ts `languageDir`),
+ * never a literal of the frame's own. T4 counts → and ← as one mark in these languages. (1.13 P1 read NEW_IN_1_13's ids
+ * while the registry had no languageDir; 1.13 P2 exported it and retired that fallback with RTL_FROM_REGISTRY.)
  */
-const languageDirOf = (registry as unknown as { languageDir?: (id: string) => string }).languageDir
-export const RTL_LANGUAGES: ReadonlySet<string> = new Set(typeof languageDirOf === 'function'
-  ? LANGUAGE_IDS.filter((id) => languageDirOf(id) === 'rtl')
-  : NEW_IN_1_13.map(([id]) => id))
-/** Where RTL_LANGUAGES came from: the registry's languageDir, or the fallback until P2. */
-export const RTL_FROM_REGISTRY: boolean = typeof languageDirOf === 'function'
+export const RTL_LANGUAGES: ReadonlySet<string> = new Set(LANGUAGE_IDS.filter((id) => languageDir(id) === 'rtl'))
 
 /**
  * T5: a backtick span of the manifest that is words, not code — a formula spelled in words or a
@@ -2711,7 +2705,7 @@ test('the brief\'s 1.12 sections: your pending list — the ledger\'s start, the
 
 const codePoints = (x: string): string[] => [...x].map((c) => c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0'))
 
-test('NEW_IN_1_13 names Arabic, Hebrew and Persian by code point, and RTL_LANGUAGES is the three — read from the registry\'s languageDir once P2 exports it, from NEW_IN_1_13 until then (1.13 §2.1, A4 rules 2–3)', () => {
+test('NEW_IN_1_13 names Arabic, Hebrew and Persian by code point, and RTL_LANGUAGES is the three — read from the registry\'s languageDir (1.13 §2.1, A4 rules 2–3; P2 retired P1\'s fallback to NEW_IN_1_13\'s ids)', () => {
   assert.deepEqual(NEW_IN_1_13.map(([id]) => id), ['ar', 'he', 'fa'])
   assert.deepEqual(NEW_IN_1_13.map(([, native]) => codePoints(native)), [
     ['0627', '0644', '0639', '0631', '0628', '064A', '0629'],
@@ -2722,14 +2716,10 @@ test('NEW_IN_1_13 names Arabic, Hebrew and Persian by code point, and RTL_LANGUA
   for (const [, native] of NEW_IN_1_13) assert.equal(native.normalize('NFC'), native)
   assert.deepEqual([...RTL_LANGUAGES].sort(), ['ar', 'fa', 'he'])
   for (const id of RTL_LANGUAGES) assert.ok(NON_LATIN.has(id), `${id} is written right to left and not in NON_LATIN`)
-  // The source says which: the registry's function (P2 on — every other language of the registry left to right), or the
-  // fallback, which only stands while the registry has none of the three.
-  if (RTL_FROM_REGISTRY) {
-    const dirOf = (registry as unknown as { languageDir: (id: string) => string }).languageDir
-    for (const id of LANGUAGE_IDS) assert.equal(dirOf(id), RTL_LANGUAGES.has(id) ? 'rtl' : 'ltr', id)
-  } else {
-    assert.deepEqual(NEW_IN_1_13.filter(([id]) => isLanguageId(id)), [], 'the registry has a language of 1.13 and no languageDir')
-  }
+  // 1.13 P2 (pinned and changed: the registry's function, or P1's fallback while the registry had none of the three): the
+  // registry's languageDir — the three of NEW_IN_1_13 right to left, every other language of the registry left to right.
+  assert.deepEqual([...RTL_LANGUAGES].sort(), NEW_IN_1_13.map(([id]) => id).sort())
+  for (const id of LANGUAGE_IDS) assert.equal(languageDir(id), RTL_LANGUAGES.has(id) ? 'rtl' : 'ltr', id)
 })
 
 test('T16 catches a bidi control, a digit of another script, an Arabic presentation form and a turned placeholder in the arab fixture under ar — each clause with its own message — and lets ZWNJ and ZWJ stand (1.13 A4 rule 1)', () => {

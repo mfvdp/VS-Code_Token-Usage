@@ -145,11 +145,11 @@ test('the repository\'s l10n/ offers English and exactly the registry ids whose 
 })
 
 // ---------------------------------------------------------------------------
-// 1.11 §0a.1: twelve more bundle names — the same one read, by a registry id only
+// 1.11 §0a.1: twelve more bundle names — the same one read, by a registry id only (1.13: three more)
 // ---------------------------------------------------------------------------
 
-test('the twenty-six ids of 1.11: each reads exactly <dir>/bundle.l10n.<id>.json, English none — and a 1.11 lookalike (a path, another case, a region, Norwegian\'s macrolanguage, a number) reads nothing at all (1.11 §0a.1)', () => {
-  assert.equal(LANGUAGE_IDS.length, 26)
+test('the twenty-nine ids of 1.13: each reads exactly <dir>/bundle.l10n.<id>.json, English none — and a 1.11 or 1.13 lookalike (a path, another case, a region, Norwegian\'s macrolanguage, a number) reads nothing at all (1.11 §0a.1; 1.13 A1: 26 → 29)', () => {
+  assert.equal(LANGUAGE_IDS.length, 29)
   const reads: string[] = []
   for (const id of LANGUAGE_IDS) {
     const fs = fakeFs({ [join(DIR, `bundle.l10n.${id}.json`)]: '{"Refresh":"R"}' })
@@ -157,15 +157,16 @@ test('the twenty-six ids of 1.11: each reads exactly <dir>/bundle.l10n.<id>.json
     reads.push(...fs.paths)
     assert.deepEqual(fs.paths, id === 'en' ? [] : [join(DIR, `bundle.l10n.${id}.json`)], id)
   }
-  // Twenty-five files, each inside the directory, each once — the twelve of 1.11 among them.
-  assert.equal(reads.length, 25)
-  assert.equal(new Set(reads).size, 25)
+  // Twenty-eight files, each inside the directory, each once — the twelve of 1.11 and the three of 1.13 among them.
+  assert.equal(reads.length, 28)
+  assert.equal(new Set(reads).size, 28)
   assert.ok(reads.every(inside), reads.join(', '))
-  for (const id of ['nl', 'uk', 'sv', 'nb', 'da', 'fi', 'hi', 'id', 'vi', 'el', 'hu', 'ro']) {
+  for (const id of ['nl', 'uk', 'sv', 'nb', 'da', 'fi', 'hi', 'id', 'vi', 'el', 'hu', 'ro', 'ar', 'he', 'fa']) {
     assert.ok(reads.includes(join(DIR, `bundle.l10n.${id}.json`)), id)
   }
   // §7a Q11: no alias — `no` (Norwegian) and `nb-no` are no ids, nor is another case or a path through a new id.
-  for (const raw of ['nl/../../x', 'NL', 'nb-no', 'no', 'nn', 'Hi', 'el/', ' uk', 42]) {
+  // 1.13: Arabic's region, another case of Hebrew, Persian's other English name, a path through a new id.
+  for (const raw of ['nl/../../x', 'NL', 'nb-no', 'no', 'nn', 'Hi', 'el/', ' uk', 42, 'ar-eg', 'AR', 'He', 'iw', 'farsi', 'fa-IR', 'fa/../x', 'ar-u-nu-latn']) {
     const fs = fakeFs()
     const failures: string[] = []
     assert.equal(readBundle(DIR, raw as LanguageId, fs.read, (kind) => failures.push(kind)), null, JSON.stringify(raw))
@@ -194,6 +195,33 @@ test('availableLanguages over a temporary l10n/ holding the Dutch bundle alone o
     // What the setting's value then shows: a new language without its file is English, with it its own words.
     assert.equal(resolveLanguage('hu', 'en', availableLanguages(dir)).id, 'en')
     assert.equal(resolveLanguage('nl', 'en', availableLanguages(dir)).id, 'nl')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('availableLanguages over a temporary l10n/ holding the Arabic bundle alone offers English and Arabic — a language of 1.13 is offered once its file exists, and only then; its words right to left with the digits and the calendar pinned (1.13 A1)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'token-pace-l10n-113-'))
+  try {
+    assert.deepEqual(availableLanguages(dir), ['en'])
+    writeFileSync(join(dir, 'bundle.l10n.ar.json'), '{}')
+    assert.deepEqual(availableLanguages(dir), ['en', 'ar'])
+    // Another spelling of it is not the file: a region, another case, Hebrew's old code `iw`.
+    writeFileSync(join(dir, 'bundle.l10n.ar-eg.json'), '{}')
+    writeFileSync(join(dir, 'bundle.l10n.iw.json'), '{}')
+    assert.deepEqual(availableLanguages(dir), ['en', 'ar'])
+    // In the registry's order, whatever order the files were written in: the three after ro.
+    writeFileSync(join(dir, 'bundle.l10n.fa.json'), '{}')
+    writeFileSync(join(dir, 'bundle.l10n.ro.json'), '{}')
+    writeFileSync(join(dir, 'bundle.l10n.he.json'), '{}')
+    writeFileSync(join(dir, 'bundle.l10n.de.json'), '{}')
+    assert.deepEqual(availableLanguages(dir), ['en', 'de', 'ro', 'ar', 'he', 'fa'])
+    // What the setting's value then shows: without its file English, left to right; with it its own words, right to left.
+    rmSync(join(dir, 'bundle.l10n.fa.json'))
+    const fa = resolveLanguage('fa', 'en', availableLanguages(dir))
+    assert.deepEqual([fa.id, fa.dir, fa.intl], ['en', 'ltr', 'en'])
+    const ar = resolveLanguage('ar', 'en', availableLanguages(dir))
+    assert.deepEqual([ar.id, ar.dir, ar.intl, ar.htmlLang], ['ar', 'rtl', 'ar-u-ca-gregory-nu-latn', 'ar'])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

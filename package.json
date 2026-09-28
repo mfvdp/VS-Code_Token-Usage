@@ -348,7 +348,10 @@
               "vi",
               "el",
               "hu",
-              "ro"
+              "ro",
+              "ar",
+              "he",
+              "fa"
             ],
             "enumDescriptions": [
               "%config.language.enum.auto%",
@@ -377,7 +380,10 @@
               "%config.language.enum.vi%",
               "%config.language.enum.el%",
               "%config.language.enum.hu%",
-              "%config.language.enum.ro%"
+              "%config.language.enum.ro%",
+              "%config.language.enum.ar%",
+              "%config.language.enum.he%",
+              "%config.language.enum.fa%"
             ],
             "default": "auto",
             "markdownDescription": "%config.language.description%",

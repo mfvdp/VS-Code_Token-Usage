@@ -11,7 +11,7 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { setLocale } from '../src/i18n'
-import { LANGUAGES } from '../src/languages'
+import { intlTag, LANGUAGES } from '../src/languages'
 import { PaceConfig, paceVerdict, WindowDisplay, windowElapsed } from '../src/pace'
 import { EffectivePace, ExplainInput, explainWindow, paceThresholds } from '../src/paceExplain'
 
@@ -256,7 +256,10 @@ test('a threshold with a decimal is written in the reader\'s decimal mark; a who
   const line = (): string | undefined => explain(1, 4.95, pace, { resetsAt: null, windowMinutes: null }).lines
     .find((l) => l.startsWith('Measuring until'))
   assert.equal(line(), 'Measuring until 2.5 % of the window has passed; no verdict before that unless usage exceeds 10 %.')
-  for (const { id, locale } of LANGUAGES) {
+  // 1.13 P2 (pinned and changed: the plain locale): each language under the tag the host sets for it — its locale through
+  // intlTag, which pins Arabic's, Hebrew's and Persian's digits to 0–9 (§0a.2); Persian's own default writes ۲٫۵.
+  for (const { id, locale: base } of LANGUAGES) {
+    const locale = intlTag(base, id)
     const mark = new Intl.NumberFormat(locale).formatToParts(1.5).find((p) => p.type === 'decimal')?.value
     setLocale(locale)
     try {

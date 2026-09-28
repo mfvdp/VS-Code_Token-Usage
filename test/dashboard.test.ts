@@ -9179,8 +9179,9 @@ test('1.11 A1 rule 3: type-ahead in the open list — a letter moves the focus t
   assert.deepEqual(p.items().map((i) => i.dataset.id), ['auto', ...LANGUAGE_IDS])
   assert.equal(p.active()?.dataset.id, 'en')
   // `h` from English: हिन्दी by its English name Hindi, again: Magyar by Hungarian, again: round to Hindi. Each key is
-  // kept from the page (prevented), and nothing is chosen.
-  for (const want of ['hi', 'hu', 'hi']) {
+  // kept from the page (prevented), and nothing is chosen. 1.13 P2 (pinned and changed: hi, hu, hi): עברית by its English
+  // name Hebrew comes after Magyar now (the registry's three after ro), then round to Hindi.
+  for (const want of ['hi', 'hu', 'he', 'hi']) {
     assert.equal(p.key('h').prevented, true, want)
     assert.equal(p.active()?.dataset.id, want)
   }

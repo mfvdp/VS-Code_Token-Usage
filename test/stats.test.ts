@@ -7,7 +7,7 @@ import { Aggregator, billable } from '../src/agg'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { setBundle, setLocale } from '../src/i18n'
-import { LANGUAGES } from '../src/languages'
+import { intlTag, LANGUAGES } from '../src/languages'
 import { usd } from '../src/render'
 import {
   CHART_MODEL_SERIES_PER_PROVIDER, HourSums, MIN_P90_SAMPLES, StatsCtx, bucketsIn, cacheEconomy, cacheHitParts,
@@ -1326,7 +1326,10 @@ test('the plan factor, its bound and the heat map\'s variability are written in 
   const en = cv()
   assert.match(en, /^\d\.\d\d$/)
   assert.deepEqual([factor(5000), factor(200), factor(4)], ['<×0.01', '×0.03', '×1.3'])
-  for (const { id, locale } of LANGUAGES) {
+  // 1.13 P2 (pinned and changed: the plain locale): each language under the tag the host sets for it — its locale through
+  // intlTag, which pins Arabic's, Hebrew's and Persian's digits to 0–9 (§0a.2); Persian's own default writes ۲٫۵.
+  for (const { id, locale: base } of LANGUAGES) {
+    const locale = intlTag(base, id)
     const m = new Intl.NumberFormat(locale).formatToParts(1.5).find((p) => p.type === 'decimal')?.value ?? '?'
     setLocale(locale)
     try {

@@ -18,6 +18,8 @@ const FLAG_IDS: readonly FlagId[] = [
   'us', 'de', 'fr', 'es', 'br', 'it', 'jp', 'kr', 'cn', 'tw', 'ru', 'tr', 'pl', 'cz',
   // 1.11 A1 rule 2: the flags of tier 2, in the registry's order.
   'nl', 'ua', 'se', 'no', 'dk', 'fi', 'in', 'id', 'vn', 'gr', 'hu', 'ro',
+  // 1.13 A1 rule 3 (§7a Q13): Egypt, Israel, Iran.
+  'eg', 'il', 'ir',
 ]
 
 /** Every tag of a drawing: its name, and each attribute with its value. */
@@ -37,7 +39,7 @@ function tags(svg: string): Array<{ name: string; closing: boolean; attrs: Array
   return out
 }
 
-test('twenty-seven drawings: one per flag of the registry, and the globe for auto (1.9 A3b; 1.11 A1 rule 2: fifteen → twenty-seven)', () => {
+test('thirty drawings: one per flag of the registry, and the globe for auto (1.9 A3b; 1.11 A1 rule 2: fifteen → twenty-seven; 1.13 A1 rule 3: → thirty)', () => {
   assert.deepEqual(Object.keys(FLAG_SVG).sort(), [...FLAG_IDS, 'auto'].sort())
   assert.deepEqual([...new Set(LANGUAGES.map((e) => e.flag))].sort(), [...FLAG_IDS].sort())
   assert.ok(Object.isFrozen(FLAG_SVG))
@@ -266,7 +268,170 @@ test('the flags of 1.11 are the countries the spec names for the languages: a co
   const flagOf = (id: string): FlagId | undefined => LANGUAGES.find((e) => e.id === id)?.flag
   assert.deepEqual(['nl', 'uk', 'sv', 'nb', 'da', 'fi', 'hi', 'id', 'vi', 'el', 'hu', 'ro'].map(flagOf),
     ['nl', 'ua', 'se', 'no', 'dk', 'fi', 'in', 'id', 'vn', 'gr', 'hu', 'ro'])
-  // Byte sizes stay small: India's chakra is the largest drawing of the twelve.
-  const sizes = FLAG_IDS.slice(14).map((id) => Buffer.byteLength(FLAG_SVG[id], 'utf8'))
+  // Byte sizes stay small: India's chakra is the largest drawing of the twelve. 1.13 P2 (pinned and changed: every flag
+  // after the fourteen): the twelve of 1.11 only — the emblems of 1.13 are larger, and held to 1 KB by the rule above.
+  const sizes = FLAG_IDS.slice(14, 26).map((id) => Buffer.byteLength(FLAG_SVG[id], 'utf8'))
   assert.ok(Math.max(...sizes) === Buffer.byteLength(FLAG_SVG.in, 'utf8') && Math.max(...sizes) <= 1024, sizes.join(' '))
+})
+
+// ---------------------------------------------------------------------------
+// 1.13 A1 rule 3 (§7a Q13): Egypt, Israel and Iran, each against its construction
+// ---------------------------------------------------------------------------
+
+/** Every point of a drawing's `d` or `points` data, as numbers — absolute commands (M L H V Q A z) and the relative m/h. */
+function pointsOf(data: string): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  let x = 0
+  let y = 0
+  for (const m of data.matchAll(/([MLHVQAZmhz])([^MLHVQAZmhz]*)/g)) {
+    const n = (m[2].match(/-?(?:\d+\.?\d*|\.\d+)/g) ?? []).map(Number)
+    switch (m[1]) {
+      case 'M': case 'L': for (let i = 0; i + 1 < n.length; i += 2) out.push([x = n[i], y = n[i + 1]]); break
+      case 'm': for (let i = 0; i + 1 < n.length; i += 2) out.push([x += n[i], y += n[i + 1]]); break
+      case 'H': out.push([x = n[0], y]); break
+      case 'h': out.push([x += n[0], y]); break
+      case 'V': out.push([x, y = n[0]]); break
+      // A quadratic curve: its middle (t = ½ — where a symmetric curve like these turns) and its end; an arc: its end.
+      case 'Q': out.push([(x + 2 * n[0] + n[2]) / 4, (y + 2 * n[1] + n[3]) / 4], [x = n[2], y = n[3]]); break
+      case 'A': out.push([x = n[5], y = n[6]]); break
+    }
+  }
+  return out
+}
+const polygonPoints = (p: string): Array<[number, number]> => p.trim().split(/\s+/).map((xy) => xy.split(',').map(Number) as [number, number])
+/** The bounding box of every path and polygon of a drawing painted in `fill` — by its own attribute or its <g>'s. */
+function box(svg: string, fill: string): { x0: number; x1: number; y0: number; y1: number; pts: Array<[number, number]> } {
+  const pts: Array<[number, number]> = []
+  // A path or polygon takes its fill from its own attribute or from the <g> around it.
+  const g = new RegExp(`<g fill="${fill}">(.*?)</g>`).exec(svg)?.[1] ?? ''
+  for (const t of tags(g)) {
+    const a = Object.fromEntries(t.attrs)
+    if (t.name === 'path') pts.push(...pointsOf(a.d))
+    if (t.name === 'polygon') pts.push(...polygonPoints(a.points))
+  }
+  for (const p of all(svg, 'path').filter((a) => a.fill === fill)) pts.push(...pointsOf(p.d))
+  const xs = pts.map(([x]) => x)
+  const ys = pts.map(([, y]) => y)
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys), pts }
+}
+
+test('the flags of 1.13 are the countries §7a Q13 names for the languages — Egypt for Arabic, Israel for Hebrew, Iran for Persian — and each of them draws its bands in rects and its emblem in one colour (1.13 A1 rule 3)', () => {
+  const flagOf = (id: string): FlagId | undefined => LANGUAGES.find((e) => e.id === id)?.flag
+  assert.deepEqual(['ar', 'he', 'fa'].map(flagOf), ['eg', 'il', 'ir'])
+  for (const id of ['eg', 'il', 'ir'] as const) {
+    const size = Buffer.byteLength(FLAG_SVG[id], 'utf8')
+    assert.ok(size <= 1024, `${id}: ${size} bytes`)
+    // No fill="none" (the colours test holds it for every country flag): a stroked star is drawn as filled rings.
+    assert.equal(FLAG_SVG[id].includes('"none"'), false, id)
+  }
+})
+
+test('Israel: white, the two blue stripes 25 of 160 high at 15 from the edges, the Star of David of two equilateral triangles with horizontal bases, lines 5.5 of 160 wide, on the middle of the flag (1.13 A1 rule 3, the flag law of 1948)', () => {
+  const il = FLAG_SVG.il
+  const unit = 20 / 160
+  const [field, top, bottom] = all(il, 'rect')
+  assert.deepEqual(field, { width: '30', height: '20', fill: '#FFFFFF' })
+  for (const [stripe, y] of [[top, 15], [bottom, 160 - 15 - 25]] as const) {
+    assert.equal(stripe.fill, '#0038B8')
+    assert.equal(stripe.width, '30')
+    assert.ok(Math.abs(num(stripe.y) - y * unit) < 1e-9 && Math.abs(num(stripe.height) - 25 * unit) < 1e-9, `a stripe at ${stripe.y}, ${stripe.height} high`)
+  }
+  // The white between the stripes and the edges, and in the middle — the stripes are where the law puts them.
+  for (const y of [0.5, 1.8, 5.1, 10, 14.9, 18.2, 19.5]) assert.equal(colourAt(il, 5, y), '#FFFFFF', `y ${y}`)
+  for (const y of [2, 4.9, 15.1, 18]) assert.equal(colourAt(il, 5, y), '#0038B8', `y ${y}`)
+  // The star: one blue path of four triangles — for each of the two, its outer edge and its inner one (wound the other
+  // way, so the nonzero rule leaves the inside white).
+  const [star] = all(il, 'path')
+  assert.equal(star.fill, '#0038B8')
+  const triangles = star.d.split('z').filter((x) => x !== '').map((x) => pointsOf(x))
+  assert.equal(triangles.length, 4)
+  const side = (a: [number, number], b: [number, number]): number => Math.hypot(a[0] - b[0], a[1] - b[1])
+  const area = (t: Array<[number, number]>): number => t.reduce((sum, [x, y], i) => { const [x2, y2] = t[(i + 1) % 3]; return sum + x * y2 - x2 * y }, 0) / 2
+  const radii: number[] = []
+  triangles.forEach((t, i) => {
+    assert.equal(t.length, 3, `triangle ${i + 1}`)
+    const sides = [side(t[0], t[1]), side(t[1], t[2]), side(t[2], t[0])]
+    assert.ok(Math.max(...sides) - Math.min(...sides) < 0.03, `triangle ${i + 1} is not equilateral: ${sides.map((x) => x.toFixed(3))}`)
+    // Centred on the flag, its base parallel to the stripes (two corners on one height).
+    const cx = t.reduce((a, [x]) => a + x, 0) / 3
+    const cy = t.reduce((a, [, y]) => a + y, 0) / 3
+    assert.ok(Math.abs(cx - 15) < 0.01 && Math.abs(cy - 10) < 0.01, `triangle ${i + 1} is centred at ${cx.toFixed(3)} ${cy.toFixed(3)}`)
+    assert.ok(Math.abs(t[1][1] - t[2][1]) < 1e-9, `triangle ${i + 1}'s base is not horizontal`)
+    radii.push(side(t[0], [cx, cy]))
+    // Outer triangles (1st, 3rd) wound one way, inner ones (2nd, 4th) the other: the rings are drawn, not two solid stars.
+    assert.equal(Math.sign(area(t)), i % 2 === 0 ? 1 : -1, `triangle ${i + 1} is wound the wrong way`)
+  })
+  // The first pair points up, the second down: a hexagram, not one triangle drawn twice.
+  assert.ok(triangles[0][0][1] < 10 && triangles[2][0][1] > 10)
+  // Each line 5.5 of 160 wide (an equilateral triangle's outer and inner edges lie (R − r) / 2 apart), its middle on a
+  // circle of 29.141 of 160 — the common drawing's size, which the law leaves open.
+  for (const [outer, inner] of [[radii[0], radii[1]], [radii[2], radii[3]]]) {
+    assert.ok(Math.abs((outer - inner) / 2 - 5.5 * unit) < 0.01, `the star's line is ${((outer - inner) / 2).toFixed(3)} wide`)
+    assert.ok(Math.abs((outer + inner) / 2 - 29.141 * unit) < 0.01, `the star's line runs at ${((outer + inner) / 2).toFixed(3)} from the centre`)
+  }
+  // The star stays inside the white middle band.
+  const b = box(il, '#0038B8')
+  assert.ok(b.y0 > 5 && b.y1 < 15, `the star spans ${b.y0}–${b.y1}`)
+})
+
+test('Egypt: red, white and black in three equal bands, and the eagle as one golden silhouette in the middle of the white band — never Yemen\'s plain tricolour (1.13 A1 rule 3)', () => {
+  const eg = FLAG_SVG.eg
+  bands(eg, 'horizontal', ['#CE1126', '#FFFFFF', '#000000'])
+  assert.deepEqual(all(eg, 'rect')[0], { width: '30', height: '20', fill: '#000000' })
+  // The eagle: every shape of it golden, in one <g>, and nothing else golden or of another colour beside the bands.
+  const golden = /<g fill="#C09300">(.*?)<\/g>/.exec(eg)
+  assert.ok(golden, 'no golden eagle')
+  const shapes = tags(golden[1]).filter((t) => !t.closing)
+  assert.ok(shapes.length >= 3 && shapes.every((t) => t.name === 'path' && t.attrs.every(([n]) => n === 'd')), 'the eagle is not plain golden shapes')
+  assert.deepEqual([...eg.matchAll(/fill="([^"]*)"/g)].map((m) => m[1]).sort(), ['#000000', '#C09300', '#CE1126', '#FFFFFF'])
+  // Inside the white band, centred across the flag, about two thirds of the band high.
+  const b = box(eg, '#C09300')
+  assert.ok(b.y0 > 20 / 3 && b.y1 < 40 / 3, `the eagle spans ${b.y0}–${b.y1}`)
+  assert.ok(Math.abs((b.x0 + b.x1) / 2 - 15) < 0.1, `the eagle is not centred: ${b.x0}–${b.x1}`)
+  assert.ok(b.y1 - b.y0 > (2 / 3) * (20 / 3), `the eagle is ${(b.y1 - b.y0).toFixed(2)} high`)
+  // The wings are symmetric about the middle: every point of the wings' path has its mirror image.
+  const wings = tags(golden[1]).find((t) => t.name === 'path' && /V11/.test(t.attrs[0][1]))
+  assert.ok(wings, 'no wings')
+  const wp = pointsOf(wings.attrs[0][1])
+  for (const [x, y] of wp) assert.ok(wp.some(([x2, y2]) => Math.abs(x + x2 - 30) < 0.01 && Math.abs(y - y2) < 0.01), `the wing point ${x} ${y} has no mirror image`)
+})
+
+test('Iran: green, white and red in three equal bands, the emblem as one red silhouette a quarter of the height high in the middle, and the takbir as eleven short white strokes along each edge of the white band — inside the green band above it and the red band below it (1.13 A1 rule 3)', () => {
+  const ir = FLAG_SVG.ir
+  bands(ir, 'horizontal', ['#239F40', '#FFFFFF', '#DA0000'])
+  // The takbir: one white path of 22 strokes, eleven per row, all of one length, evenly spaced across the flag.
+  const [takbir] = all(ir, 'path').filter((p) => p.stroke === '#FFFFFF')
+  assert.ok(takbir, 'no takbir')
+  const pts = pointsOf(takbir.d)
+  assert.equal(pts.length, 44, 'not 22 strokes')
+  const strokes = Array.from({ length: 22 }, (_v, i) => [pts[2 * i], pts[2 * i + 1]] as const)
+  for (const [a, b] of strokes) assert.ok(Math.abs(a[1] - b[1]) < 1e-9 && Math.abs(b[0] - a[0] - 2) < 1e-9, 'a stroke is not a short horizontal line')
+  const rows = [strokes.slice(0, 11), strokes.slice(11)]
+  const halfWidth = num(takbir['stroke-width']) / 2
+  rows.forEach((row, r) => {
+    const y = row[0][0][1]
+    assert.ok(row.every(([a]) => a[1] === y), `row ${r + 1} is not one line`)
+    // Inside its band and close to the white band's edge: the green band's lower edge, the red band's upper edge.
+    const edge = r === 0 ? 20 / 3 : 40 / 3
+    const inside = r === 0 ? edge - (y + halfWidth) : (y - halfWidth) - edge
+    assert.ok(inside > 0 && inside < 1, `row ${r + 1} is ${inside.toFixed(2)} from its edge`)
+    const gaps = row.slice(1).map(([a], i) => a[0] - row[i][0][0])
+    assert.ok(gaps.every((g) => Math.abs(g - 30 / 11) < 0.01), `row ${r + 1}: the strokes are not evenly spaced across the flag`)
+    assert.ok(Math.abs(row[0][0][0] - (30 - row[10][1][0])) < 0.05, `row ${r + 1} is not centred`)
+  })
+  // The emblem: red, in one <g>; inside the white band, centred, a quarter of the flag's height from its top to its foot.
+  const b = box(ir, '#DA0000')
+  assert.ok(b.y0 > 20 / 3 && b.y1 < 40 / 3, `the emblem spans ${b.y0}–${b.y1}`)
+  assert.ok(Math.abs((b.x0 + b.x1) / 2 - 15) < 0.01, `the emblem is not centred: ${b.x0}–${b.x1}`)
+  assert.ok(Math.abs(b.y1 - b.y0 - 20 / 4) < 0.05, `the emblem is ${(b.y1 - b.y0).toFixed(2)} high, not a quarter of the flag`)
+  // Its two halves mirror each other: the left half's path is the right half's with x → 30 − x.
+  const halves = /<g fill="#DA0000"><path d="([^"]*)"\/><path d="([^"]*)"\/>/.exec(ir)
+  assert.ok(halves, 'the emblem is not two halves')
+  const [right, left] = [pointsOf(halves[1]), pointsOf(halves[2])]
+  assert.equal(right.length, left.length)
+  right.forEach(([x, y], i) => assert.ok(Math.abs(x + left[i][0] - 30) < 0.01 && Math.abs(y - left[i][1]) < 0.01, `point ${i + 1} of the emblem's halves is not mirrored`))
+  // The sword between them, on the middle line.
+  const [sword] = all(ir, 'polygon')
+  const sp = polygonPoints(sword.points)
+  assert.ok(sp.every(([x]) => Math.abs(x - 15) < 0.35) && Math.abs(Math.max(...sp.map(([, y]) => y)) - 12.5) < 0.01, 'the sword is not on the middle line down to the emblem\'s foot')
 })

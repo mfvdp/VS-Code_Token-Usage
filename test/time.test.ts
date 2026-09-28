@@ -12,7 +12,8 @@ import {
   previousRange, rangeFor, refreshWords, relativeShort, relativeTime, resetClock, resetTimeMemos, resolveZone, retryWords, TimeConfig,
   weekdayOf, weekdayWords, formatDay,
 } from '../src/time'
-import { LANGUAGES } from '../src/languages'
+import { intlTag, LanguageId, LANGUAGES, resolveLanguage } from '../src/languages'
+import { compact, decimalText, full, percentOf } from '../src/render'
 import { QuotaState } from '../src/types'
 import { ROOT } from './helpers/nls'
 
@@ -283,7 +284,11 @@ function digitMonth(locale: string): boolean {
 
 test('the weekday in front of a clock time is the language\'s own short name, seven apart in every shipped locale; English and German keep their two letters (1.9 A5 fix 1, P19 §7c item 9)', () => {
   try {
-    for (const { id, locale } of LANGUAGES) {
+    // 1.13 P2 (pinned and changed: setLocale(locale)): each language under the tag the host sets for it — its locale
+    // through intlTag, which pins the digits and the calendar of Arabic, Hebrew and Persian (§0a.2) and leaves every
+    // other locale as it is; `fa`'s own default would write ۱۴:۲۰.
+    for (const { id, locale: base } of LANGUAGES) {
+      const locale = intlTag(base, id)
       setLocale(locale)
       // 1.11 P2 (pinned and changed: ' 14:20' in every locale): the clock as the language writes it — Danish, Finnish
       // and Indonesian write 14.20 (ICU's pattern for da, fi and id), every other language writes 14:20 (Review 1 F2:
@@ -330,7 +335,10 @@ test('the weekday in front of a clock time is the language\'s own short name, se
 test('the day label carries its digits in every shipped locale, and a locale whose month is digits gets the formatter\'s own date (1.9 A5 fix 2)', () => {
   try {
     let digitLocales = 0
-    for (const { locale } of LANGUAGES) {
+    // 1.13 P2 (pinned and changed: setLocale(locale)): under the tag the host sets (intlTag) — `fa`'s own default counts
+    // the Solar Hijri calendar, whose day is not the Gregorian one this test reads from the instant.
+    for (const { id, locale: base } of LANGUAGES) {
+      const locale = intlTag(base, id)
       setLocale(locale)
       for (const ms of WEEK) {
         const day = formatDay(ms, utc)
@@ -682,4 +690,55 @@ test('before 1973 the parts are formatted every time: Liberia\'s −0:44:30 puts
   assert.equal(resetTimeMemos(), 0, 'an instant before PARTS_MEMO_FROM_MS is kept')
   // From 1973 on every zone's offset is whole minutes; the zone lost its seconds on 1972-01-07.
   assert.ok(refParts(PARTS_MEMO_FROM_MS, 'Africa/Monrovia').offsetMs % 60_000 === 0)
+})
+
+// ---------------------------------------------------------------------------
+// 1.13 A1 rule 4 (§0a.2): the digits 0–9 and the Gregorian calendar in Arabic, Hebrew and Persian
+// ---------------------------------------------------------------------------
+
+/** 2026-09-26, a Saturday, 14:20 UTC — 4 Mehr 1405 in the Solar Hijri calendar. */
+const SEP_26 = Date.UTC(2026, 8, 26, 14, 20)
+/** A digit of any script but 0–9 (Arabic-Indic, Extended Arabic-Indic, Devanagari …). */
+const FOREIGN_DIGIT = /(?![0-9])\p{Nd}/u
+
+test('the formatters under the three languages write the digits 0–9 and the Gregorian day — the clock, the day label, a percentage, a token count, a decimal —, Persian 26 سپتامبر and not ۴ مهر, Egypt\'s Arabic under auto 0–9 (1.13 A1 rule 4, §0a.2)', () => {
+  const all = ['ar', 'he', 'fa'] as LanguageId[]
+  // What the host sets: resolveLanguage's intl for an explicit choice and under auto with VS Code's regional tags.
+  const tags: Array<[string, string]> = [
+    ...all.map((id): [string, string] => [id, resolveLanguage(id, 'en', ['en', ...all]).intl]),
+    ['ar under auto, VS Code ar-eg', resolveLanguage('auto', 'ar-eg', ['en', 'ar']).intl],
+    ['ar under auto, VS Code ar-sa', resolveLanguage('auto', 'ar-sa', ['en', 'ar']).intl],
+    ['fa under auto, VS Code fa-ir', resolveLanguage('auto', 'fa-ir', ['en', 'fa']).intl],
+  ]
+  try {
+    for (const [name, tag] of tags) {
+      setLocale(tag)
+      const texts = [
+        formatTime(SEP_26, utc), formatTime(SEP_26, utc, true), formatTime(SEP_26, { ...utc, hourCycle: 'h12' }, true),
+        formatDay(SEP_26, utc), percentOf(1, 4), compact(1234567), compact(987), full(1234567), decimalText(0.75, 2),
+      ]
+      for (const x of texts) assert.doesNotMatch(x, FOREIGN_DIGIT, `${name}: ${x}`)
+      assert.ok(formatTime(SEP_26, utc).includes('14:20'), `${name}: ${formatTime(SEP_26, utc)}`)
+      // The Gregorian day of the month: 26, never Mehr's 4.
+      assert.match(formatDay(SEP_26, utc), /(?<![0-9])26(?![0-9])/, `${name}: ${formatDay(SEP_26, utc)}`)
+      assert.ok(percentOf(1, 4).startsWith('25'), `${name}: ${percentOf(1, 4)}`)
+    }
+    // The tags themselves (checked after the figures, so that a pin dropped names the figure it changes).
+    assert.deepEqual(tags.map(([, t]) => t), ['ar-u-ca-gregory-nu-latn', 'he-u-ca-gregory-nu-latn', 'fa-u-ca-gregory-nu-latn',
+      'ar-EG-u-ca-gregory-nu-latn', 'ar-SA-u-ca-gregory-nu-latn', 'fa-IR-u-ca-gregory-nu-latn'])
+    // Persian by name: the Gregorian month September (سپتامبر), not the Solar Hijri Mehr (مهر).
+    setLocale(resolveLanguage('fa', 'en', ['en', 'fa']).intl)
+    assert.ok(formatDay(SEP_26, utc).includes('26 سپتامبر'), formatDay(SEP_26, utc))
+    assert.equal(formatDay(SEP_26, utc).includes('مهر'), false)
+    // Without the pin — what Intl's defaults would print: the reason the pin exists (and the mutation it catches:
+    // dropping -nu-latn gives Egypt's Arabic-Indic digits, dropping -ca-gregory gives Persian the Solar Hijri day).
+    setLocale('ar-EG-u-ca-gregory')
+    assert.match(formatTime(SEP_26, utc), FOREIGN_DIGIT)
+    setLocale('fa-u-nu-latn')
+    assert.equal(formatDay(SEP_26, utc).includes('26'), false, formatDay(SEP_26, utc))
+    setLocale('fa')
+    assert.match(formatDay(SEP_26, utc), FOREIGN_DIGIT)
+  } finally {
+    setLocale(undefined)
+  }
 })

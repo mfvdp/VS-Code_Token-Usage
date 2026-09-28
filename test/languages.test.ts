@@ -14,10 +14,10 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { FLAG_SVG } from '../src/flags'
-import { setBundle } from '../src/i18n'
+import { locale, setBundle, setLocale } from '../src/i18n'
 import {
-  autoLanguage, isLanguageId, LANGUAGE_IDS, LANGUAGES, LanguageId, languageEntry, languageName, LanguageSetting,
-  resolveLanguage, ResolvedLanguage, vscodeLanguageTag,
+  autoLanguage, intlTag, isLanguageId, LANGUAGE_IDS, languageDir, LANGUAGES, LanguageId, languageEntry, languageName,
+  LanguageSetting, resolveLanguage, ResolvedLanguage, vscodeLanguageTag,
 } from '../src/languages'
 import { LANGUAGE_NAME_AS_ENGLISH, readJson } from './helpers/nls'
 
@@ -55,12 +55,28 @@ const TIER_2: Array<[string, string, string, string]> = [
   ['ro', 'ro', 'Română', 'ro'],
 ]
 
-/** The ids of 1.11's twelve: the languages that have no file until their package (group N) writes it whole. */
+/** The ids of 1.11's twelve — written whole by 1.11's group N; every one has its files since 1.11's join. */
 const NEW_IN_1_11: readonly string[] = TIER_2.map(([id]) => id)
 
-test('the registry: twenty-six languages — the lead\'s fourteen, then the twelve of tier 2 in the collect row\'s order —, ids unique and lower-case, canonical locales ICU knows, a native name and a drawn flag each, no direction (1.9 A1 rule 1; 1.11 A1 rule 1: the literal 14 → 26)', () => {
-  assert.equal(LANGUAGES.length, 26)
-  assert.deepEqual(LANGUAGES.map((e) => [e.id, e.locale, e.native, e.flag]), [...LEADS_LIST, ...TIER_2])
+/**
+ * 1.13 A1 rule 1 (§2.1): the three written right to left, after `ro` in collect row 9's order — Egypt's, Israel's and
+ * Iran's flags (§7a Q13), the native names by code point below.
+ */
+const RTL_1_13: Array<[string, string, string, string]> = [
+  ['ar', 'ar', 'العربية', 'eg'],
+  ['he', 'he', 'עברית', 'il'],
+  ['fa', 'fa', 'فارسی', 'ir'],
+]
+
+/** The ids of 1.13's three: the languages that have no file until their package (group N, N1–N3) writes it whole. */
+const NEW_IN_1_13: readonly string[] = RTL_1_13.map(([id]) => id)
+
+/** The fields 1.13 adds to exactly the three (§0b.3): the direction and the pinned digits and calendar. */
+const RTL_FIELDS = { dir: 'rtl', digits: 'latn', calendar: 'gregory' } as const
+
+test('the registry: twenty-nine languages — the lead\'s fourteen, the twelve of tier 2 in the collect row\'s order, then Arabic, Hebrew and Persian —, ids unique and lower-case, canonical locales ICU knows, a native name and a drawn flag each, a direction and pinned formats on exactly the three (1.9 A1 rule 1; 1.11 A1 rule 1: the literal 14 → 26; 1.13 A1 rule 1: 26 → 29)', () => {
+  assert.equal(LANGUAGES.length, 29)
+  assert.deepEqual(LANGUAGES.map((e) => [e.id, e.locale, e.native, e.flag]), [...LEADS_LIST, ...TIER_2, ...RTL_1_13])
   assert.equal(new Set(LANGUAGES.map((e) => e.id)).size, LANGUAGES.length, 'an id stands twice')
   assert.equal(new Set(LANGUAGES.map((e) => e.flag)).size, LANGUAGES.length, 'two languages share a flag')
   // Every native name is in NFC — the form every file of the repository is written in, and the frame compares in.
@@ -73,9 +89,23 @@ test('the registry: twenty-six languages — the lead\'s fourteen, then the twel
     assert.deepEqual(Intl.DateTimeFormat.supportedLocalesOf([e.locale]), [e.locale], `${e.locale} is unknown to this ICU`)
     assert.ok(e.native.trim().length > 0 && e.native === e.native.trim(), `${e.id} has no native name`)
     assert.ok(Object.prototype.hasOwnProperty.call(FLAG_SVG, e.flag), `${e.id}: no drawing for the flag ${e.flag}`)
-    // No direction field, nor any other: every language of 1.9 and 1.11 is written left to right (§0b.11; RTL is 1.13).
-    assert.deepEqual(Object.keys(e).sort(), ['flag', 'id', 'locale', 'native'], `${e.id} carries another field`)
+    // 1.13 A1 rule 1 (pinned and changed: no direction field, nor any other — every language of 1.9 and 1.11 was written
+    // left to right): the three of 1.13 carry exactly dir, digits and calendar beside the four, with the one value each
+    // may have; every other entry carries the four and nothing else.
+    const rtl = NEW_IN_1_13.includes(e.id)
+    assert.deepEqual(Object.keys(e).sort(), ['flag', 'id', 'locale', 'native', ...(rtl ? Object.keys(RTL_FIELDS) : [])].sort(), `${e.id} carries another field`)
+    if (rtl) for (const [k, v] of Object.entries(RTL_FIELDS)) assert.equal((e as unknown as Record<string, unknown>)[k], v, `${e.id}: ${k}`)
   }
+  // Exactly three are written right to left — languageDir says so for them and 'ltr' for the other twenty-six.
+  assert.deepEqual(LANGUAGE_IDS.filter((id) => languageDir(id) === 'rtl'), ['ar', 'he', 'fa'])
+  for (const id of LANGUAGE_IDS) assert.ok(['ltr', 'rtl'].includes(languageDir(id)), id)
+  // The native names by code point (§2.1): Persian's is written with FARSI YEH (U+06CC), not the Arabic yeh (U+064A).
+  const points = (x: string): string[] => [...x].map((c) => c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0'))
+  assert.deepEqual(NEW_IN_1_13.map((id) => points(languageEntry(id as LanguageId).native)), [
+    ['0627', '0644', '0639', '0631', '0628', '064A', '0629'],
+    ['05E2', '05D1', '05E8', '05D9', '05EA'],
+    ['0641', '0627', '0631', '0633', '06CC'],
+  ])
   // Frozen: no package can push a language into it at run time.
   assert.ok(Object.isFrozen(LANGUAGES) && LANGUAGES.every((e) => Object.isFrozen(e)))
   assert.deepEqual(LANGUAGE_IDS, LANGUAGES.map((e) => e.id))
@@ -99,7 +129,7 @@ test('isLanguageId: an exact registry id — never another case, a path, an empt
   }
 })
 
-test('languageName: each language\'s name in the reader\'s language, one t() literal per id — twenty-six distinct English words (1.11 A1)', () => {
+test('languageName: each language\'s name in the reader\'s language, one t() literal per id — twenty-nine distinct English words (1.11 A1; 1.13 A1 rule 2: Arabic, Hebrew, Persian)', () => {
   const english: Record<LanguageId, string> = {
     en: 'English', de: 'German', fr: 'French', es: 'Spanish', 'pt-br': 'Portuguese (Brazil)', it: 'Italian',
     ja: 'Japanese', ko: 'Korean', 'zh-cn': 'Chinese (Simplified)', 'zh-tw': 'Chinese (Traditional)', ru: 'Russian',
@@ -107,6 +137,8 @@ test('languageName: each language\'s name in the reader\'s language, one t() lit
     // 1.11 A1: the twelve of tier 2 (§2.1).
     nl: 'Dutch', uk: 'Ukrainian', sv: 'Swedish', nb: 'Norwegian', da: 'Danish', fi: 'Finnish', hi: 'Hindi',
     id: 'Indonesian', vi: 'Vietnamese', el: 'Greek', hu: 'Hungarian', ro: 'Romanian',
+    // 1.13 A1 rule 2 (§7a Q14): "Persian", Microsoft's and ICU's English name for `fa` — not "Farsi".
+    ar: 'Arabic', he: 'Hebrew', fa: 'Persian',
   }
   for (const id of LANGUAGE_IDS) assert.equal(languageName(id), english[id], id)
   assert.equal(new Set(LANGUAGE_IDS.map(languageName)).size, LANGUAGE_IDS.length, 'two languages share an English name')
@@ -123,6 +155,8 @@ test('languageName: each language\'s name in the reader\'s language, one t() lit
     // 1.11 §6: the twelve of tier 2 in German — Hindi is Hindi in German too (LANGUAGE_NAME_AS_ENGLISH).
     assert.deepEqual(NEW_IN_1_11.map((id) => languageName(id as LanguageId)), ['Niederländisch', 'Ukrainisch', 'Schwedisch',
       'Norwegisch', 'Dänisch', 'Finnisch', 'Hindi', 'Indonesisch', 'Vietnamesisch', 'Griechisch', 'Ungarisch', 'Rumänisch'])
+    // 1.13 §6: the three of 1.13 in German, as the Duden writes them (not „Farsi").
+    assert.deepEqual(NEW_IN_1_13.map((id) => languageName(id as LanguageId)), ['Arabisch', 'Hebräisch', 'Persisch'])
     // Every name has its German word — none is the English one but where LANGUAGE_NAME_AS_ENGLISH says German writes it
     // so (1.11 A3 rule 11 b, the frame's T10 list: Hindi).
     for (const id of LANGUAGE_IDS) {
@@ -186,40 +220,126 @@ test('resolveLanguage: every setting under VS Code en, de, de-ch and hu — the 
   // `auto`: the words follow autoLanguage, the formats keep VS Code's own tag (1.8's behaviour), the
   // page's lang is always the words' language — never `hu` for English words.
   const autoRows: Array<[string, readonly LanguageId[], ResolvedLanguage]> = [
-    ['en', EN_DE, { setting: 'auto', id: 'en', intl: 'en', htmlLang: 'en', auto: { vscode: 'en', shipped: true } }],
-    ['de', EN_DE, { setting: 'auto', id: 'de', intl: 'de', htmlLang: 'de', auto: { vscode: 'de', shipped: true } }],
-    ['de-ch', EN_DE, { setting: 'auto', id: 'de', intl: 'de-ch', htmlLang: 'de', auto: { vscode: 'de-ch', shipped: true } }],
-    ['hu', EN_DE, { setting: 'auto', id: 'en', intl: 'hu', htmlLang: 'en', auto: { vscode: 'hu', shipped: false } }],
-    ['en', ALL, { setting: 'auto', id: 'en', intl: 'en', htmlLang: 'en', auto: { vscode: 'en', shipped: true } }],
-    ['de', ALL, { setting: 'auto', id: 'de', intl: 'de', htmlLang: 'de', auto: { vscode: 'de', shipped: true } }],
-    ['de-ch', ALL, { setting: 'auto', id: 'de', intl: 'de-ch', htmlLang: 'de', auto: { vscode: 'de-ch', shipped: true } }],
+    ['en', EN_DE, { setting: 'auto', id: 'en', intl: 'en', htmlLang: 'en', dir: 'ltr', auto: { vscode: 'en', shipped: true } }],
+    ['de', EN_DE, { setting: 'auto', id: 'de', intl: 'de', htmlLang: 'de', dir: 'ltr', auto: { vscode: 'de', shipped: true } }],
+    ['de-ch', EN_DE, { setting: 'auto', id: 'de', intl: 'de-ch', htmlLang: 'de', dir: 'ltr', auto: { vscode: 'de-ch', shipped: true } }],
+    ['hu', EN_DE, { setting: 'auto', id: 'en', intl: 'hu', htmlLang: 'en', dir: 'ltr', auto: { vscode: 'hu', shipped: false } }],
+    ['en', ALL, { setting: 'auto', id: 'en', intl: 'en', htmlLang: 'en', dir: 'ltr', auto: { vscode: 'en', shipped: true } }],
+    ['de', ALL, { setting: 'auto', id: 'de', intl: 'de', htmlLang: 'de', dir: 'ltr', auto: { vscode: 'de', shipped: true } }],
+    ['de-ch', ALL, { setting: 'auto', id: 'de', intl: 'de-ch', htmlLang: 'de', dir: 'ltr', auto: { vscode: 'de-ch', shipped: true } }],
     // 1.11 (pinned and changed: English with every language of 1.9 available): with every language of the registry
     // available, Hungarian is one of them — its words, its formats, its page; with English and German only, English.
-    ['hu', ALL, { setting: 'auto', id: 'hu', intl: 'hu', htmlLang: 'hu', auto: { vscode: 'hu', shipped: true } }],
-    ['pt-pt', ALL, { setting: 'auto', id: 'en', intl: 'pt-pt', htmlLang: 'en', auto: { vscode: 'pt-pt', shipped: false } }],
+    ['hu', ALL, { setting: 'auto', id: 'hu', intl: 'hu', htmlLang: 'hu', dir: 'ltr', auto: { vscode: 'hu', shipped: true } }],
+    ['pt-pt', ALL, { setting: 'auto', id: 'en', intl: 'pt-pt', htmlLang: 'en', dir: 'ltr', auto: { vscode: 'pt-pt', shipped: false } }],
     // Beyond the four: a regional Chinese keeps its region in the page's lang, and in Intl.
-    ['zh-tw', ALL, { setting: 'auto', id: 'zh-tw', intl: 'zh-tw', htmlLang: 'zh-TW', auto: { vscode: 'zh-tw', shipped: true } }],
-    ['pt-br', EN_DE, { setting: 'auto', id: 'en', intl: 'pt-br', htmlLang: 'en', auto: { vscode: 'pt-br', shipped: false } }],
+    ['zh-tw', ALL, { setting: 'auto', id: 'zh-tw', intl: 'zh-tw', htmlLang: 'zh-TW', dir: 'ltr', auto: { vscode: 'zh-tw', shipped: true } }],
+    ['pt-br', EN_DE, { setting: 'auto', id: 'en', intl: 'pt-br', htmlLang: 'en', dir: 'ltr', auto: { vscode: 'pt-br', shipped: false } }],
+    // 1.13 A1 (§0a.1, §0a.2): the direction and the pin follow the words' language. VS Code's `ar` with an Arabic bundle:
+    // Arabic words, right to left, the digits 0–9 and the Gregorian calendar pinned; its `ar-eg` keeps Egypt's region
+    // with the pin (Intl's default there is Arabic-Indic digits); a Persian tag's own `nu` is replaced. The page's lang
+    // is the plain tag. Without the bundle, English words, left to right, and VS Code's own tag unpinned.
+    ['ar', ALL, { setting: 'auto', id: 'ar', intl: 'ar-u-ca-gregory-nu-latn', htmlLang: 'ar', dir: 'rtl', auto: { vscode: 'ar', shipped: true } }],
+    ['ar-eg', ALL, { setting: 'auto', id: 'ar', intl: 'ar-EG-u-ca-gregory-nu-latn', htmlLang: 'ar', dir: 'rtl', auto: { vscode: 'ar-eg', shipped: true } }],
+    ['fa-IR-u-nu-arabext', ALL, { setting: 'auto', id: 'fa', intl: 'fa-IR-u-ca-gregory-nu-latn', htmlLang: 'fa', dir: 'rtl', auto: { vscode: 'fa-ir-u-nu-arabext', shipped: true } }],
+    ['he', ALL, { setting: 'auto', id: 'he', intl: 'he-u-ca-gregory-nu-latn', htmlLang: 'he', dir: 'rtl', auto: { vscode: 'he', shipped: true } }],
+    ['ar', EN_DE, { setting: 'auto', id: 'en', intl: 'ar', htmlLang: 'en', dir: 'ltr', auto: { vscode: 'ar', shipped: false } }],
+    ['ar-eg', EN_DE, { setting: 'auto', id: 'en', intl: 'ar-eg', htmlLang: 'en', dir: 'ltr', auto: { vscode: 'ar-eg', shipped: false } }],
   ]
   for (const [tag, available, expected] of autoRows) {
     assert.deepEqual(resolveLanguage('auto', tag, available), expected, `auto under ${tag} with ${available.length} available`)
   }
   // An explicit id: its own locale for the words, the formats and the page — whatever VS Code says;
-  // one whose bundle the build does not have is English through and through.
+  // one whose bundle the build does not have is English through and through. 1.13 A1 (pinned and changed: intl was
+  // the entry's locale): the formats' tag is the locale through intlTag — the locale itself for every language but the
+  // three, which pin the digits and the calendar —, and the direction the language's.
   for (const available of [EN_DE, ALL]) {
     for (const setting of LANGUAGE_IDS as readonly LanguageSetting[]) {
-      for (const tag of ['en', 'de', 'de-ch', 'hu']) {
+      for (const tag of ['en', 'de', 'de-ch', 'hu', 'ar-eg']) {
         const id = setting as LanguageId
         const has = available.includes(id)
-        const locale = has ? languageEntry(id).locale : 'en'
+        const shown: LanguageId = has ? id : 'en'
+        const locale = languageEntry(shown).locale
+        const intl = NEW_IN_1_13.includes(shown) ? `${locale}-u-ca-gregory-nu-latn` : locale
         assert.deepEqual(resolveLanguage(setting, tag, available),
-          { setting, id: has ? id : 'en', intl: locale, htmlLang: locale, auto: null },
+          { setting, id: shown, intl, htmlLang: locale, dir: NEW_IN_1_13.includes(shown) ? 'rtl' : 'ltr', auto: null },
           `${setting} under ${tag} with ${available.length} available`)
       }
     }
   }
   // English is always there, whatever the list says.
   assert.equal(resolveLanguage('en', 'de', []).id, 'en')
+})
+
+// ---------------------------------------------------------------------------
+// 1.13 A1 rule 4 (§0a.2): the digits 0–9 and the Gregorian calendar, pinned for the three and for no other language
+// ---------------------------------------------------------------------------
+
+test('intlTag: the words\' entry\'s calendar and digits as a -u-ca-gregory-nu-latn extension on the base, the base\'s own ca and nu replaced and its other keywords kept, canonicalised; the base as it stands for a language that pins nothing, and for a tag ICU cannot read — never a throw (1.13 A1 rule 4, §0a.2)', () => {
+  const cases: Array<[unknown, LanguageId, string]> = [
+    ['ar', 'ar', 'ar-u-ca-gregory-nu-latn'],
+    ['ar-EG', 'ar', 'ar-EG-u-ca-gregory-nu-latn'],
+    // VS Code's tag under auto is lower case: ICU's spelling comes back.
+    ['ar-eg', 'ar', 'ar-EG-u-ca-gregory-nu-latn'],
+    ['fa-IR-u-nu-arabext', 'fa', 'fa-IR-u-ca-gregory-nu-latn'],
+    ['ar-u-nu-arab-ca-islamic', 'ar', 'ar-u-ca-gregory-nu-latn'],
+    // Another keyword of the base stays: an hour cycle VS Code reported is VS Code's.
+    ['ar-EG-u-hc-h12', 'ar', 'ar-EG-u-ca-gregory-hc-h12-nu-latn'],
+    ['he', 'he', 'he-u-ca-gregory-nu-latn'],
+    ['fa', 'fa', 'fa-u-ca-gregory-nu-latn'],
+    // A language that pins nothing: the base as it stands, even one ICU would spell otherwise or not read at all.
+    ['de-CH', 'de', 'de-CH'],
+    ['de-ch', 'de', 'de-ch'],
+    ['pt-BR', 'pt-br', 'pt-BR'],
+    ['x@y', 'de', 'x@y'],
+    ['', 'en', ''],
+    // A base ICU cannot read comes back as it was — setLocale decides (en-US).
+    ['x@y', 'ar', 'x@y'],
+    ['', 'fa', ''],
+    ['not a tag', 'he', 'not a tag'],
+  ]
+  for (const [base, id, want] of cases) assert.equal(intlTag(base as string, id), want, `${JSON.stringify(base)} under ${id}`)
+  // Not a string at all (a guard the types do not need, the code has anyway): no throw either.
+  assert.equal(intlTag(42 as unknown as string, 'ar'), 42 as unknown as string)
+  // Every other language of the registry: its locale unchanged — the pin is on the three alone.
+  for (const e of LANGUAGES) {
+    if (NEW_IN_1_13.includes(e.id)) continue
+    assert.equal(intlTag(e.locale, e.id), e.locale, e.id)
+  }
+  // setLocale takes the pinned tag as it stands (i18n.ts usableLocale: canonical, known to ICU), and the formatters read it.
+  try {
+    for (const id of NEW_IN_1_13 as LanguageId[]) {
+      const tag = intlTag(languageEntry(id).locale, id)
+      setLocale(tag)
+      assert.equal(locale(), tag, id)
+      const n = new Intl.NumberFormat(locale()).resolvedOptions()
+      const d = new Intl.DateTimeFormat(locale()).resolvedOptions()
+      assert.deepEqual([n.numberingSystem, d.calendar], ['latn', 'gregory'], id)
+    }
+    setLocale(intlTag('ar-eg', 'ar'))
+    assert.equal(locale(), 'ar-EG-u-ca-gregory-nu-latn')
+  } finally {
+    setLocale(undefined)
+  }
+})
+
+test('every other locale of the registry writes the digits 0–9 and counts in the Gregorian calendar by ICU\'s own default — so the pin is written for the three alone, and it is needed there: Persian\'s default is Persian digits and the Solar Hijri calendar, Egypt\'s and Saudi Arabia\'s Arabic-Indic digits (1.13 A1 rule 4, §0a.2)', () => {
+  const defaults = (tag: string): [string, string] => [
+    new Intl.NumberFormat(tag).resolvedOptions().numberingSystem,
+    new Intl.DateTimeFormat(tag).resolvedOptions().calendar,
+  ]
+  for (const e of LANGUAGES) {
+    if (NEW_IN_1_13.includes(e.id)) continue
+    assert.deepEqual(defaults(e.locale), ['latn', 'gregory'], `${e.locale}: a pin would be needed here too`)
+  }
+  // The three's bases: fa's default is not 0–9 and not Gregorian — the day 26 September 2026 is 4 Mehr there —, and VS
+  // Code's regional Arabic under auto gives Arabic-Indic digits. ar and he happen to be latn and gregory on this ICU; the
+  // pin is written for them too, so the three behave alike under any ICU (A1 rule 4).
+  assert.notDeepEqual(defaults('fa'), ['latn', 'gregory'])
+  assert.notEqual(defaults('ar-EG')[0], 'latn')
+  assert.notEqual(defaults('ar-SA')[0], 'latn')
+  for (const id of NEW_IN_1_13 as LanguageId[]) {
+    assert.deepEqual(defaults(intlTag(languageEntry(id).locale, id)), ['latn', 'gregory'], id)
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -231,8 +351,11 @@ test('resolveLanguage: every setting under VS Code en, de, de-ch and hu — the 
  * the registry before a single file of theirs exists — group N writes each whole, from the frozen tip, and the join (P8,
  * PENDING_ALLOWED false) has them all. Until then a language of the registry has all of its files or none, and one with
  * none is one of the twelve.
+ * 1.13 P2 (pinned and changed: one of 1.11's twelve): the twelve have their files since 1.11's join; Arabic, Hebrew and
+ * Persian are in the registry before a single file of theirs exists (N1–N3 write each whole, P7 joins), so a language
+ * with none is one of 1.13's three — P1's spec error 4.
  */
-test('the join: every language of the registry but English has its four parts, its bundle, its manifest and its freshness record — on the build branch, one of 1.11\'s twelve has none of them yet (1.9 B5, P19; 1.11 P2)', () => {
+test('the join: every language of the registry but English has its four parts, its bundle, its manifest and its freshness record — on the build branch, one of 1.13\'s three has none of them yet (1.9 B5, P19; 1.11 P2; 1.13 P2)', () => {
   const { existsSync, readFileSync } = require('node:fs') as typeof import('node:fs')
   const { join } = require('node:path') as typeof import('node:path')
   const { pendingNlsKeys, ROOT } = require('./helpers/nls') as typeof import('./helpers/nls')
@@ -268,12 +391,12 @@ test('the join: every language of the registry but English has its four parts, i
     }
   }
   assert.deepEqual(missing, [], `missing: ${missing.join(', ')}`)
-  // Only a language of 1.11's twelve may be unwritten, and only before the join.
-  assert.deepEqual(notYet.filter((id) => !NEW_IN_1_11.includes(id)), [], 'a language of 1.9 has no files')
+  // Only a language of 1.13's three may be unwritten, and only before the join.
+  assert.deepEqual(notYet.filter((id) => !NEW_IN_1_13.includes(id)), [], 'a language of 1.12 has no files')
   if (!pendingAllowed()) assert.deepEqual(notYet, [], `at the join every language is written: ${notYet.join(', ')} is not`)
 })
 
-test('the join: availableLanguages over the repository\'s l10n/ finds every language written, and the picker offers Automatic and each of them in the registry\'s order — all twenty-six and twenty-seven options at the join, the fourteen of 1.10 and fifteen before it (1.9 B5, P19; 1.11 A8, P2)', () => {
+test('the join: availableLanguages over the repository\'s l10n/ finds every language written, and the picker offers Automatic and each of them in the registry\'s order — all twenty-nine and thirty options at the join, the twenty-six of 1.12 and twenty-seven before it (1.9 B5, P19; 1.11 A8, P2; 1.13 P2)', () => {
   const { existsSync } = require('node:fs') as typeof import('node:fs')
   const { join } = require('node:path') as typeof import('node:path')
   const { ROOT } = require('./helpers/nls') as typeof import('./helpers/nls')
@@ -284,13 +407,14 @@ test('the join: availableLanguages over the repository\'s l10n/ finds every lang
   const written = LANGUAGE_IDS.filter((id) => id === 'en' || existsSync(join(ROOT, 'l10n', `bundle.l10n.${id}.json`)))
   assert.deepEqual(available, written)
   if (pendingAllowed()) {
-    // The build branch: the fourteen of 1.10 at least, and no language beyond them but one of the twelve of 1.11.
-    assert.deepEqual(available.slice(0, 14), LEADS_LIST.map(([id]) => id))
-    assert.deepEqual(available.slice(14).filter((id) => !NEW_IN_1_11.includes(id)), [])
+    // 1.13 P2 (pinned and changed: the fourteen of 1.10 at least, and beyond them only one of 1.11's twelve): the build
+    // branch — the twenty-six of 1.12 at least, and no language beyond them but one of 1.13's three.
+    assert.deepEqual(available.slice(0, 26), [...LEADS_LIST, ...TIER_2].map(([id]) => id))
+    assert.deepEqual(available.slice(26).filter((id) => !NEW_IN_1_13.includes(id)), [])
   } else {
-    // 1.11 P8 (A8): the join — English, German and the twenty-four, each found by its bundle.
+    // 1.13 P2 (pinned and changed: 1.11 P8's twenty-six): 1.13's join (P7) — English, German, the twenty-four and the three.
     assert.deepEqual(available, [...LANGUAGE_IDS])
-    assert.equal(available.length, 26)
+    assert.equal(available.length, 29)
   }
   // What the extension hands the view model at activation, under auto in an English window.
   const picker = (setting: LanguageSetting) => buildViewModel({
@@ -298,8 +422,8 @@ test('the join: availableLanguages over the repository\'s l10n/ finds every lang
   }).language
   const auto = picker('auto')
   assert.equal(auto.options.length, available.length + 1)
-  // 1.11 P8 (A1 rule 3, A8): Automatic and the twenty-six at the join.
-  if (!pendingAllowed()) assert.equal(auto.options.length, 27)
+  // 1.11 P8 (A1 rule 3, A8): Automatic and the twenty-six at the join; 1.13 (pinned and changed: 27): and the three.
+  if (!pendingAllowed()) assert.equal(auto.options.length, 30)
   assert.deepEqual(auto.options.map((o) => o.id), ['auto', ...available])
   assert.deepEqual(auto.options.filter((o) => o.checked).map((o) => o.id), ['auto'])
   // Each language by its own name, in its own lang, with its flag; its name in the reader's language beside it. A

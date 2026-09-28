@@ -2794,6 +2794,37 @@ const FLAG_COUNTRY: Record<string, string> = {
   // 1.11 P9 (Review 1 F1): the twelve of tier 2.
   nl: 'Netherlands', ua: 'Ukraine', se: 'Sweden', no: 'Norway', dk: 'Denmark', fi: 'Finland', in: 'India', id: 'Indonesia',
   vn: 'Vietnam', gr: 'Greece', hu: 'Hungary', ro: 'Romania',
+  // 1.13 P2 (§7a Q13): the three of 1.13 — the rows are P8's to write.
+  eg: 'Egypt', il: 'Israel', ir: 'Iran',
+}
+
+/**
+ * 1.13 P2: the registry as 1.12 shipped it — English, German and the twenty-four, up to Română. The pins of the 1.11 and
+ * 1.12 release notes and documentation packages read it; Arabic, Hebrew and Persian are in the registry before a file of
+ * theirs exists (group N writes each whole), and the pages name them once P8 writes their sentences.
+ */
+const LANGUAGES_1_12 = LANGUAGES.slice(0, 26)
+
+/**
+ * 1.13 P2: whether a language ships in this build — English always, every other one by its bundle (languageLoad.ts
+ * `availableLanguages`, the picker's rule): a page names only a language the picker offers.
+ */
+function ships(id: string): boolean {
+  return id === 'en' || existsSync(join(ROOT, 'l10n', `bundle.l10n.${id}.json`))
+}
+
+/**
+ * 1.13 P2: how many languages of the registry, from its start, a page's list names — the largest count, at least the
+ * twenty-six of 1.12, whose rendering `render` finds in the text; each of them one the build ships. A page lists the
+ * registry from its start (P8 adds the three of 1.13 once they ship); a language package cannot touch the pages.
+ */
+function listedFromStart(text: string, render: (ids: readonly string[]) => string): number {
+  let n = 0
+  for (let k = LANGUAGES_1_12.length; k <= LANGUAGES.length; k++) if (text.includes(render(LANGUAGE_IDS.slice(0, k)))) n = k
+  assert.ok(n >= LANGUAGES_1_12.length, `the list does not name the twenty-six of 1.12 from the registry's start: ${render(LANGUAGE_IDS.slice(0, LANGUAGES_1_12.length))}`)
+  const unshipped = LANGUAGE_IDS.slice(0, n).filter((id) => !ships(id))
+  assert.deepEqual(unshipped, [], `the list names a language the picker does not offer: ${unshipped.join(', ')}`)
+  return n
 }
 
 /** The seam is module state: a test that installs a locale or a bundle puts it back. */
@@ -2814,13 +2845,14 @@ test('docs/languages.md: one row per registry entry — its id, its native name,
   // the whole registry, one row per entry, strictly, and a fifth column says since when — English from the first release,
   // German since 1.3.0 (every text; the settings since 1.2.0), the twelve of 1.9 and, marked as new, the twelve of 1.11
   // (§3 A6). Every language listed ships its bundle: the picker offers no other.
-  const { availableLanguages } = require('../src/languageLoad') as typeof import('../src/languageLoad')
-  const shipped = availableLanguages(join(ROOT, 'l10n'))
-  const since = (i: number): string => (i === 0 ? '1.0.0' : i === 1 ? '1.3.0' : i < 14 ? '1.9.0' : '**new in 1.11.0**')
+  // 1.13 P2 (pinned and changed: the whole registry): the registry from its start — the twenty-six of 1.12 at least, one
+  // row per entry, strictly, and only languages that ship; the three of 1.13 are in the registry before their files, and
+  // their rows (marked as new in 1.13.0) are P8's.
+  const since = (i: number): string => (i === 0 ? '1.0.0' : i === 1 ? '1.3.0' : i < 14 ? '1.9.0' : i < 26 ? '**new in 1.11.0**' : '**new in 1.13.0**')
   const want = underLocale(undefined, () => LANGUAGES.map((e, i) => `| \`${e.id}\` | ${e.native} | ${languageName(e.id)} | ${FLAG_COUNTRY[e.flag]} (\`${e.flag}\`) | ${since(i)} |`))
-  assert.equal(rows.length, LANGUAGES.length, `${rows.length} rows for ${LANGUAGES.length} languages`)
-  assert.deepEqual(rows, want)
-  assert.deepEqual(LANGUAGES.filter((e) => !shipped.includes(e.id)).map((e) => e.id), [], 'the table names a language the picker does not offer')
+  assert.ok(rows.length >= LANGUAGES_1_12.length && rows.length <= LANGUAGES.length, `${rows.length} rows for ${LANGUAGES.length} languages`)
+  assert.deepEqual(rows, want.slice(0, rows.length))
+  assert.deepEqual(LANGUAGES.slice(0, rows.length).filter((e) => !ships(e.id)).map((e) => e.id), [], 'the table names a language the picker does not offer')
   assert.equal(rows.filter((r) => r.endsWith('| **new in 1.11.0** |')).length, 12)
   assert.ok(doc.languages.includes('| Id | Language | In English | Flag | Since |'))
   // The flags the page explains are the registry's.
@@ -3241,7 +3273,9 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
     `the warning *${warning}* says so and nothing changes`, 'Application scope: always your user settings, never a workspace\'s']) {
     assert.ok(row.includes(claim), `docs/settings.md's language row does not say: ${claim}`)
   }
-  assert.ok(row.includes(LANGUAGE_IDS.map((id) => `\`${id}\``).join(', ')), 'docs/settings.md\'s language row does not list the registry\'s ids in its order')
+  // 1.13 P2 (pinned and changed: every id of the registry): the registry's ids from its start, the twenty-six of 1.12 at
+  // least, each one the build ships (listedFromStart) — P8 names the three of 1.13.
+  listedFromStart(row, (ids) => ids.map((id) => `\`${id}\``).join(', '))
   assert.equal(properties['tokenPace.language'].enum?.length, LANGUAGES.length + 1)
   assert.deepEqual(properties['tokenPace.language'].enumDescriptions?.slice(1), LANGUAGES.map((e) => e.native))
   const ext = readDoc('src/extension.ts')
@@ -3871,8 +3905,9 @@ test('the 1.11.0 release notes: the newest entry, its date set at publish, every
   assert.ok(order.every((i) => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'the 1.11.0 entry\'s sections are missing or out of order')
   const section = (h: string): string => { const at = heads.indexOf(h); return flat.slice(order[at], at + 1 < heads.length ? order[at + 1] : undefined) }
   // The twelve languages of 1.11, named in their own names in the registry's order — in the summary and in Added.
-  assert.equal(LANGUAGES.length, 26)
-  const twelve = LANGUAGES.slice(14).map((e) => e.native)
+  // 1.13 P2 (pinned and changed: the live registry's 26): the registry of 1.11 and 1.12, a figure of an earlier release note.
+  assert.equal(LANGUAGES_1_12.length, 26)
+  const twelve = LANGUAGES_1_12.slice(14).map((e) => e.native)
   assert.equal(twelve.length, 12)
   const named = `${twelve.slice(0, -1).join(', ')} and ${twelve[twelve.length - 1]}`
   assert.equal(flat.split(named).length - 1, 2, `the 1.11.0 entry does not name the twelve languages twice as the registry has them: ${named}`)
@@ -3910,7 +3945,8 @@ test('the 1.11.0 release notes: the newest entry, its date set at publish, every
   assert.ok(readDoc('src/alerts.ts').includes('c.window.resetsAt <= now'), 'the reset-due guard is gone from alerts.ts')
   // Privacy: the file count from the registry, the session name, the export's fields.
   const privacy = section('### Privacy')
-  assert.equal(LANGUAGES.length - 1, 25)
+  // 1.13 P2 (pinned and changed: the live registry): 1.11's twenty-five translation files, a figure of its release note.
+  assert.equal(LANGUAGES_1_12.length - 1, 25)
   assert.ok(privacy.includes('twenty-five translation files in all'))
   assert.ok(privacy.includes('a weekday, a time and the first eight characters of the session id; never a project or a path'))
   assert.ok(privacy.includes('never a path, a URL with a path, or a session or project name the export did not already carry'))
@@ -3985,7 +4021,8 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
   ]) assert.ok(languages.includes(claim), `docs/languages.md does not say: ${claim}`)
   assert.ok(doc.languages.includes('\n## The twenty-six languages\n'))
   // The facts behind them: the registry, the page's type-ahead rule, the locales, the bundles' words.
-  assert.deepEqual(LANGUAGES.slice(14).map((e) => e.id), ['nl', 'uk', 'sv', 'nb', 'da', 'fi', 'hi', 'id', 'vi', 'el', 'hu', 'ro'])
+  // 1.13 P2 (pinned and changed: every entry after the fourteen): the twelve of 1.11, the three of 1.13 after them.
+  assert.deepEqual(LANGUAGES_1_12.slice(14).map((e) => e.id), ['nl', 'uk', 'sv', 'nb', 'da', 'fi', 'hi', 'id', 'vi', 'el', 'hu', 'ro'])
   assert.deepEqual(['hi', 'el', 'uk', 'nb'].map((id) => LANGUAGES.find((e) => e.id === id)?.flag), ['in', 'gr', 'ua', 'no'])
   assert.deepEqual([autoLanguage('no', LANGUAGE_IDS), autoLanguage('nn', LANGUAGE_IDS), autoLanguage('nb-no', LANGUAGE_IDS)], ['en', 'en', 'nb'])
   const main = readDoc('src/webview/main.ts')
@@ -3995,7 +4032,7 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
   assert.deepEqual(['da', 'fi', 'id'].map((tag) => clock(tag, 'h23')), ['06.00', '06.00', '06.00'])
   assert.equal(clock('hu', 'h12'), 'de. 06:00')
   assert.equal(underLocale('hi', () => full(1_234_567)), '12,34,567')
-  for (const id of LANGUAGES.slice(14).map((e) => e.id)) {
+  for (const id of LANGUAGES_1_12.slice(14).map((e) => e.id)) {
     const b = bundle(id)
     assert.deepEqual(Object.keys(b).filter((k) => /\{\d\} %/.test(k) && /%\s?\{\d\}/.test(b[k])), [], `${id} writes the percent first`)
   }
@@ -4006,7 +4043,8 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
   assert.equal(bundle('ja')['{0}:'], '{0}:')
   // privacy.md: §0a.1 (the file count from the registry), §0a.2 (Review 2's sentence), §0a.5 (the export's fields).
   const privacy = flatText(doc.privacy)
-  assert.equal(LANGUAGES.length - 1, 25)
+  // 1.13 P2 (pinned and changed: the live registry): the twenty-five files of 1.11's and 1.12's pages; P8 counts 1.13's.
+  assert.equal(LANGUAGES_1_12.length - 1, 25)
   for (const claim of ['one of the twenty-five translation files it ships, with the translations of its own texts and nothing of yours',
     'the Records\' longest and largest sessions are named by a weekday, a time and the first eight characters of the session id — never a project or a path; a test puts a project name into the index\'s key and an agent\'s file and finds it in no record, no Quick Pick item, no markdown document and no export',
     '**What an export adds in 1.11.** Per bucket the list amount, the day of the price rule it was priced by and whether no rule covered its day (`listCostUsd`, `priceFrom`, `priceApproximate`), the list total, and in the JSON the price rows checked after the table\'s day and the pages the table was read from (`pricing.checked_later`, `pricing.sources`)',
@@ -4040,8 +4078,10 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
   assert.ok(readDoc('test/prices.test.ts').includes('const CLOSED_ON_PURPOSE'))
   // The README: the bullet with every native name in the registry's order, the Records bullet, the index rows, the picture's alt text.
   const readme = flatText(README)
-  const natives = LANGUAGES.map((e) => e.native)
-  assert.ok(readme.includes(`— to ${natives.slice(0, -1).join(', ')} or ${natives[natives.length - 1]}, or to VS Code's display language`), 'the README bullet does not name the twenty-six as the registry has them')
+  // 1.13 P2 (pinned and changed: every native name of the registry): the registry's from its start, the twenty-six of
+  // 1.12 at least, each a language the build ships (listedFromStart) — P8 names the three of 1.13.
+  const nativeOf = (id: string): string => LANGUAGES.find((e) => e.id === id)?.native ?? id
+  listedFromStart(readme, (ids) => `— to ${ids.slice(0, -1).map(nativeOf).join(', ')} or ${nativeOf(ids[ids.length - 1])}, or to VS Code's display language`)
   for (const claim of ['* **Twenty-six languages.**', 'The twenty-four beyond English and German were translated by AI agents and checked by tests, not by native speakers',
     'the fixed-period token totals and, off by default, the Records — since 1.11 the most expensive days, the longest and largest Claude Code sessions and the hours with the most cache written. → [Dashboard](docs/dashboard.md)',
     'the twenty-six languages and their flags, the notation that stays the same, and how the translations were made |',
@@ -4058,7 +4098,9 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
   assert.ok(doc.troubleshooting.includes('[the table](languages.md#the-twenty-six-languages)'))
   assert.ok(flatText(readDoc('media/walkthrough/dashboard.md')).includes('twenty-six of them, or *Automatic*'))
   assert.ok(flatText(doc.prompts).includes('and likewise in each of the other twenty-four languages; the German status prompt keeps the author\'s own wording, the twenty-four translate the English'))
-  for (const id of LANGUAGES.slice(1).map((e) => e.id)) assert.equal(typeof bundle(id)['Status table'], 'string', `${id} does not translate the shipped prompt's title`)
+  // 1.13 P2 (pinned and changed: every language of the registry): every language the build ships — the three of 1.13
+  // have no bundle until group N writes each whole.
+  for (const id of LANGUAGES.slice(1).map((e) => e.id).filter(ships)) assert.equal(typeof bundle(id)['Status table'], 'string', `${id} does not translate the shipped prompt's title`)
   // The brief's pattern-key note says what the Japanese files do (L6: ja keeps the ASCII colon).
   const brief = flatText(readDoc('l10n/TRANSLATING.md'))
   assert.ok(brief.includes('`{0}：` in Chinese (Japanese writes the ASCII colon `{0}:`, as its sentences do), `（）` around a figure in Chinese and Japanese'))
@@ -4066,7 +4108,11 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
   // dashboard.md and settings.md: the count words and the type-ahead.
   assert.ok(flatText(doc.dashboard).includes('then the twenty-six languages, each with its flag') && flatText(doc.dashboard).includes('A letter moves the focus to the next language whose own name or name in your language begins with it, round the list, and chooses nothing'))
   assert.ok(doc.settings.includes('The settings UI offers the twenty-seven values as a list') && doc.settings.includes('The twenty-four languages beyond English and German were translated by AI agents'))
-  assert.equal(properties['tokenPace.language'].enum?.length, 27)
+  // 1.13 P2 (pinned and changed: the literal 27): the enum is auto and the registry's ids — thirty since 1.13 P2, which
+  // added Arabic, Hebrew and Persian; settings.md's "twenty-seven values" above is 1.12's count until P8 rewrites it
+  // (named in P2's report — the settings UI lists every value of the enum, whether its bundle ships or not).
+  assert.equal(properties['tokenPace.language'].enum?.length, LANGUAGES.length + 1)
+  assert.equal(LANGUAGES.length + 1, 30)
 })
 
 test('the Codex app-server section says what the standing connection does — the default, the lease, the three methods, the reads, the pushes, the restarts and their hour, the ends, the diagnostics line — and the other pages point at it (1.12 A7)', () => {
@@ -4476,8 +4522,10 @@ test('the pages carry the sentences of the 1.12 documentation package, held to t
   ]) assert.ok(privacy.includes(claim), `docs/privacy.md does not say: ${claim}`)
   assert.equal(READ_CONTRACT.find((r) => r.file === 'src/notify.ts')?.fields.length, 12)
 
-  // settings.md and languages.md: the ten renamed Alerts categories, against the manifests and 1.11's titles.
-  for (const l of LANGUAGES.filter((e) => e.id !== 'en')) {
+  // settings.md and languages.md: the ten renamed Alerts categories, against the manifests and 1.11's titles. 1.13 P2
+  // (pinned and changed: every language of the registry): the languages of 1.12 — the three of 1.13 name their categories
+  // once they are written, and 1.12's sentence is about the twenty-four.
+  for (const l of LANGUAGES_1_12.filter((e) => e.id !== 'en')) {
     const nls = JSON.parse(readDoc(`package.nls.${l.id}.json`)) as Record<string, string>
     const [alerts, notifications] = [nls['configuration.alerts.title'], nls['configuration.notifications.title']]
     assert.notEqual(alerts, notifications, `${l.id}: one name for the alerts and the notifications`)
@@ -4518,7 +4566,8 @@ test('the pages carry the sentences of the 1.12 documentation package, held to t
   const graphemes = (s: string): number => [...new Intl.Segmenter().segment(s)].length
   const norm = (s: string): string => s.toLowerCase().replace(/\.$/, '')
   const differ: string[] = []
-  for (const l of LANGUAGES.filter((e) => e.id !== 'en' && e.id !== 'de')) {
+  // 1.13 P2 (pinned and changed: every language of the registry): the twenty-four of 1.12, whose sentence this is.
+  for (const l of LANGUAGES_1_12.filter((e) => e.id !== 'en' && e.id !== 'de')) {
     const b = JSON.parse(readDoc(`l10n/bundle.l10n.${l.id}.json`)) as Record<string, string>
     const f = new Intl.DateTimeFormat(l.locale, { timeZone: 'UTC', weekday: 'short' })
     const intl = days.map((_, d) => f.format(Date.UTC(2026, 8, 6 + d, 12)))

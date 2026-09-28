@@ -4,7 +4,7 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { setLocale } from '../src/i18n'
-import { LANGUAGES } from '../src/languages'
+import { intlTag, LANGUAGES } from '../src/languages'
 import {
   ageMinutes, BarOptions, compact, decimalText, DEFAULT_BAR, deltaBadge, estimate, extraUsageText, full,
   lastDays, money, percentOf, percentText, provenanceBadge, ratioText, renderBar, severity, usd,
@@ -196,7 +196,10 @@ function inLocale<T>(locale: string | undefined, fn: () => T): T {
 
 test('decimalText: the language\'s decimal mark in every registry locale, never grouped, a dash for what is no number (1.10 B4)', () => {
   const marks = new Set<string>()
-  for (const { id, locale } of LANGUAGES) {
+  // 1.13 P2 (pinned and changed: the plain locale): each language under the tag the host sets for it — its locale through
+  // intlTag, which pins Arabic's, Hebrew's and Persian's digits to 0–9 (§0a.2); Persian's own default writes ۲٫۵.
+  for (const { id, locale: base } of LANGUAGES) {
+    const locale = intlTag(base, id)
     const m = markOf(locale)
     marks.add(m)
     inLocale(locale, () => {

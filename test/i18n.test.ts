@@ -22,7 +22,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { DEFAULT_LANG, DEFAULT_LOCALE, lang, locale, setBundle, setLang, setLocale, t } from '../src/i18n'
+import { DEFAULT_DIR, DEFAULT_LANG, DEFAULT_LOCALE, dir, lang, locale, setBundle, setDir, setLang, setLocale, t } from '../src/i18n'
 import { dayOf, formatDay, formatTime, rangeFor, TimeConfig } from '../src/time'
 import { readJson, ROOT } from './helpers/nls'
 
@@ -44,6 +44,7 @@ function pristine(): void {
   setBundle(undefined)
   setLocale(undefined)
   setLang(undefined)
+  setDir(undefined)
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +130,41 @@ test('setLang keeps the tag of the words\' language, region and case as given, a
       setLang('de')
       setLang(bad)
       assert.equal(lang(), 'en', `setLang(${JSON.stringify(bad)}) did not fall back`)
+    }
+  } finally {
+    pristine()
+  }
+})
+
+test('setDir keeps exactly \'rtl\' and turns anything else into \'ltr\' — the direction every language had before 1.13; the four setters are independent (1.13 A1, §2.1)', () => {
+  try {
+    pristine()
+    assert.equal(DEFAULT_DIR, 'ltr')
+    assert.equal(dir(), 'ltr')
+    setDir('rtl')
+    assert.equal(dir(), 'rtl')
+    setDir('ltr')
+    assert.equal(dir(), 'ltr')
+    for (const bad of ['RTL', ' rtl', 'rtl ', 'auto', 'up', 'rtl"><img', '', 1, true, null, undefined, {}, ['rtl']]) {
+      setDir('rtl')
+      setDir(bad)
+      assert.equal(dir(), 'ltr', `setDir(${JSON.stringify(bad)}) did not fall back`)
+    }
+    // The direction is the words' own: the other three setters leave it, and it leaves them.
+    setDir('rtl')
+    setLang('ar')
+    setLocale('ar-u-ca-gregory-nu-latn')
+    setBundle({ Refresh: 'تحديث' })
+    assert.deepEqual([dir(), lang(), locale(), t('Refresh')], ['rtl', 'ar', 'ar-u-ca-gregory-nu-latn', 'تحديث'])
+    setDir('ltr')
+    assert.deepEqual([dir(), lang(), locale(), t('Refresh')], ['ltr', 'ar', 'ar-u-ca-gregory-nu-latn', 'تحديث'])
+    // The pinned tags of 1.13 as they stand (canonical, known to ICU) — and the page's lang takes only the plain tag: a
+    // one-letter singleton is no shape setLang allows, which is why resolveLanguage keeps htmlLang plain (A1 rule 5).
+    for (const tag of ['ar-u-ca-gregory-nu-latn', 'ar-EG-u-ca-gregory-nu-latn', 'he-u-ca-gregory-nu-latn', 'fa-u-ca-gregory-nu-latn', 'fa-IR-u-ca-gregory-nu-latn']) {
+      setLocale(tag)
+      assert.equal(locale(), tag)
+      setLang(tag)
+      assert.equal(lang(), 'en', `setLang took ${tag}`)
     }
   } finally {
     pristine()

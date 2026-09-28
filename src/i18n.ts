@@ -16,11 +16,12 @@
  *    (languageLoad.ts) for the language `tokenPace.language` names — `auto` is VS Code's display
  *    language, looked up as VS Code looks up the manifest's strings (languages.ts
  *    `resolveLanguage`). extension.ts `applyLanguage` hands it over with `setBundle`, the `Intl`
- *    tag with `setLocale` and the tag of the words' language with `setLang` — at activation,
- *    before anything can show a string, and again when the setting changes: a switch at run time
- *    calls the three setters once more, and every text built after it is in the new language.
- *    Nothing else calls them. (`package.json` still declares `"l10n": "./l10n"`, so VS Code loads
- *    a bundle for its own language too; Token Pace no longer reads `vscode.l10n.bundle`.)
+ *    tag with `setLocale`, the tag of the words' language with `setLang` and its direction with
+ *    `setDir` (1.13) — at activation, before anything can show a string, and again when the
+ *    setting changes: a switch at run time calls the four setters once more, and every text built
+ *    after it is in the new language. Nothing else calls them. (`package.json` still declares
+ *    `"l10n": "./l10n"`, so VS Code loads a bundle for its own language too; Token Pace no longer
+ *    reads `vscode.l10n.bundle`.)
  *  • `locale()` is what the `Intl` formatters in time.ts use: 'en-US' until the host says
  *    otherwise, so a date reads the same on every machine in the English build and follows
  *    the chosen language once that is known — under `auto`, VS Code's own tag, so a `de-ch`
@@ -29,6 +30,9 @@
  *  • `lang()` is the language the words are in — the page's `<html lang>`: 'en' until the host
  *    says otherwise, and never VS Code's tag when the words are English. It keeps the region
  *    ('pt-BR', 'zh-TW'): a browser picks Han glyph forms and fonts by it.
+ *  • `dir()` is the direction the words are written in (1.13 A1): 'ltr' until the host says
+ *    otherwise, 'rtl' for Arabic, Hebrew and Persian — the registry's, never VS Code's (languages.ts
+ *    `languageDir`). The host's surfaces read it to mark a right-to-left text (1.13 A3).
  *
  * How to add a string
  *
@@ -51,14 +55,19 @@
  * headers. They are pasted into issues, and a maintainer has to be able to read them.
  */
 
+import type { TextDirection } from './languages'
+
 /** The locale every formatter uses until the host names another one. */
 export const DEFAULT_LOCALE = 'en-US'
 /** The page's language until the host names another. */
 export const DEFAULT_LANG = 'en'
+/** 1.13 A1: the words' direction until the host names another. */
+export const DEFAULT_DIR: TextDirection = 'ltr'
 
 let bundle = new Map<string, string>()
 let tag = DEFAULT_LOCALE
 let wordsTag = DEFAULT_LANG
+let wordsDir: TextDirection = DEFAULT_DIR
 
 /**
  * Installs the translation table. Anything that is not a non-empty string is dropped: the
@@ -99,6 +108,19 @@ export function setLang(next: string | undefined | null): void {
 /** The language the words are in — see `setLang`. */
 export function lang(): string {
   return wordsTag
+}
+
+/**
+ * 1.13 A1: the direction of the words' language — exactly 'rtl' is right to left; anything else (undefined, another
+ * string, another case, a number) is 'ltr', the direction of every language before 1.13.
+ */
+export function setDir(next: unknown): void {
+  wordsDir = next === 'rtl' ? 'rtl' : DEFAULT_DIR
+}
+
+/** The direction the words are written in — see `setDir`. */
+export function dir(): TextDirection {
+  return wordsDir
 }
 
 /**

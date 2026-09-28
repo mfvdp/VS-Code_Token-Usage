@@ -969,6 +969,35 @@ test('a language switch applies at once: the setting\'s bundle at activation, th
   }
 })
 
+test('1.13 A1: applyLanguage hands the words\' direction to the seam with the other three — Arabic right to left with the digits and the calendar pinned in Intl and the plain tag for the page, a switch to German left to right, and an Arabic setting without its file English and left to right (§2.1, §0a.2)', async () => {
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  try {
+    const ext = languageFolder({ ar: JSON.stringify({ Refresh: 'تحديث' }), de: JSON.stringify({ Refresh: 'Aktualisieren' }) })
+    await activateHost(makeEmptyFixture(), ext, { settings: { 'tokenPace.language': 'ar', 'tokenPace.statusBar.show': ['tokens'] } })
+    assert.deepEqual([i18n.t('Refresh'), i18n.dir(), i18n.lang(), i18n.locale()], ['تحديث', 'rtl', 'ar', 'ar-u-ca-gregory-nu-latn'])
+    assert.match(state.logText(), /Language: ar → ar \(1 strings, Intl ar-u-ca-gregory-nu-latn\)/)
+    state.set('tokenPace.language', 'de')
+    state.fireConfigChange(['tokenPace.language'])
+    assert.deepEqual([i18n.t('Refresh'), i18n.dir(), i18n.lang(), i18n.locale()], ['Aktualisieren', 'ltr', 'de', 'de'])
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    // VS Code's Egyptian Arabic under auto: Egypt's region in Intl with the pin, the plain registry tag for the page.
+    await activateHost(makeEmptyFixture(), ext, { language: { tag: 'ar-eg' } })
+    assert.deepEqual([i18n.dir(), i18n.lang(), i18n.locale()], ['rtl', 'ar', 'ar-EG-u-ca-gregory-nu-latn'])
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    // No Arabic file in this build: English words, left to right, English formats.
+    await activateHost(makeEmptyFixture(), languageFolder({}), { settings: { 'tokenPace.language': 'ar' } })
+    assert.match(state.logText(), /Language: ar has no translation file in this build; English is shown\./)
+    assert.deepEqual([i18n.dir(), i18n.lang(), i18n.locale()], ['ltr', 'en', 'en'])
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    const { setBundle, setDir, setLang, setLocale } = i18n
+    setBundle(undefined)
+    setLocale(undefined)
+    setLang(undefined)
+    setDir(undefined)
+  }
+})
+
 test('a language the build has no file for, a file that does not parse and a setting that is no language are English, and the log says why in English — never the setting\'s text (1.9 A1 rule 3, A2 rules 2–3)', async () => {
   const i18n = require('../src/i18n') as typeof import('../src/i18n')
   try {

@@ -272,7 +272,7 @@ test('the keep-warm setting: a boolean, off by default, of application scope, in
   assert.equal(germanNls['command.cancelKeepWarm.title'], 'Warmhalte-Zeile abbrechen')
 })
 
-test('the language setting\'s words: what switches, what follows VS Code, what stays English, who translated — twenty-four languages since 1.11 — in both languages; its values are the native names in every file, the twelve of 1.11 after cs (1.9 A1 rule 4; 1.11 A2)', () => {
+test('the language setting\'s words: what switches, what follows VS Code, what stays English, who translated — twenty-seven languages since 1.13 — in both languages; its values are the native names in every file, the twelve of 1.11 after cs, the three of 1.13 after ro (1.9 A1 rule 4; 1.11 A2; 1.13 A1 rule 2)', () => {
   const en = englishNls['config.language.description']
   const de = germanNls['config.language.description']
   for (const claim of [
@@ -283,8 +283,9 @@ test('the language setting\'s words: what switches, what follows VS Code, what s
     'The settings, the command titles and the walkthrough always follow VS Code\'s display language (*Configure Display Language*)',
     'VS Code reads them when it starts, so they cannot switch while it runs',
     'The debug log, the diagnostics report and the CSV and JSON exports stay English',
-    // 1.11 A2 rule 3 (pinned and changed: twelve): the languages beyond English and German are twenty-four.
-    'The twenty-four languages beyond English and German were translated by AI agents from the English text, with the German as a second reference',
+    // 1.11 A2 rule 3 (pinned and changed: twelve): the languages beyond English and German are twenty-four; 1.13 A1 rule 2
+    // (pinned and changed: twenty-four): twenty-seven — the rest of the paragraph word for word.
+    'The twenty-seven languages beyond English and German were translated by AI agents from the English text, with the German as a second reference',
     'checked by tests for completeness, placeholders and the marks ~, ⚠ and –',
     'not by native speakers',
   ]) {
@@ -298,14 +299,15 @@ test('the language setting\'s words: what switches, what follows VS Code, what s
     'Die Einstellungen, die Befehlstitel und die Einführung folgen immer der Anzeigesprache von VS Code (*Anzeigesprache konfigurieren*)',
     'VS Code liest sie beim Start, deshalb können sie nicht umschalten, solange es läuft',
     'Das Debug-Protokoll, der Diagnosebericht und die CSV- und JSON-Exporte bleiben Englisch',
-    'Die vierundzwanzig Sprachen über Englisch und Deutsch hinaus haben KI-Agenten aus dem englischen Text übersetzt, mit dem Deutschen als zweiter Vorlage',
+    'Die siebenundzwanzig Sprachen über Englisch und Deutsch hinaus haben KI-Agenten aus dem englischen Text übersetzt, mit dem Deutschen als zweiter Vorlage',
     'Tests prüfen sie auf Vollständigkeit, Platzhalter und die Zeichen ~, ⚠ und –',
     'Muttersprachler haben sie nicht geprüft',
   ]) {
     assert.ok(de.includes(claim), `the German description does not say: ${claim}`)
   }
   // No claim beyond the tests: not professional, not reviewed, not native (§3 B4).
-  for (const stale of ['professional', 'reviewed by', 'native-quality', 'professionell', 'lektoriert', 'The twelve languages', 'Die zwölf Sprachen']) {
+  for (const stale of ['professional', 'reviewed by', 'native-quality', 'professionell', 'lektoriert', 'The twelve languages', 'Die zwölf Sprachen',
+    'The twenty-four languages', 'Die vierundzwanzig Sprachen']) {
     assert.equal(en.includes(stale) || de.includes(stale), false, stale)
   }
   assert.equal(englishNls['config.language.enum.auto'], 'Follow VS Code\'s display language (English where Token Pace has no translation for it)')
@@ -317,9 +319,12 @@ test('the language setting\'s words: what switches, what follows VS Code, what s
     // 1.11 §2.1: the twelve of tier 2 — Norwegian is "Norsk" (§7a Q12).
     nl: 'Nederlands', uk: 'Українська', sv: 'Svenska', nb: 'Norsk', da: 'Dansk', fi: 'Suomi', hi: 'हिन्दी', id: 'Bahasa Indonesia',
     vi: 'Tiếng Việt', el: 'Ελληνικά', hu: 'Magyar', ro: 'Română',
+    // 1.13 §2.1: the three of 1.13 — Persian's with FARSI YEH (U+06CC), the registry's test pins the code points.
+    ar: 'العربية', he: 'עברית', fa: 'فارسی',
   }
   assert.deepEqual(Object.fromEntries(LANGUAGES.map((e) => [e.id, e.native])), natives)
-  // In the English file's order: auto, then the registry's — the twelve of 1.11 right after cs, as package.json lists them.
+  // In the English file's order: auto, then the registry's — the twelve of 1.11 right after cs, the three of 1.13 right
+  // after ro, as package.json lists them.
   const order = Object.keys(englishNls).filter((k) => k.startsWith('config.language.enum.'))
   assert.deepEqual(order, ['auto', ...LANGUAGES.map((e) => e.id)].map((id) => `config.language.enum.${id}`))
   for (const [name, bundle] of BUNDLES) {

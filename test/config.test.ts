@@ -494,7 +494,7 @@ test('tokenPace.language: auto or an exact registry id — another case, a path,
   }
 })
 
-test('the language setting: a string enum of auto and the twenty-six ids, auto by default, of application scope, first in General with order 0 (1.9 A1 rule 2; 1.11 A2: the twelve of tier 2 after cs)', () => {
+test('the language setting: a string enum of auto and the twenty-nine ids, auto by default, of application scope, first in General with order 0 (1.9 A1 rule 2; 1.11 A2: the twelve of tier 2 after cs; 1.13 A1: the three of 1.13 after ro)', () => {
   const raw = readJson('package.json') as {
     contributes: { configuration: Array<{ id: string; properties: Record<string, Record<string, unknown>> }> }
   }
@@ -503,7 +503,9 @@ test('the language setting: a string enum of auto and the twenty-six ids, auto b
   const keys = Object.keys(general.properties)
   assert.equal(keys[0], 'tokenPace.language', 'the language is not the first setting of General')
   const ids = ['en', 'de', 'fr', 'es', 'pt-br', 'it', 'ja', 'ko', 'zh-cn', 'zh-tw', 'ru', 'tr', 'pl', 'cs',
-    'nl', 'uk', 'sv', 'nb', 'da', 'fi', 'hi', 'id', 'vi', 'el', 'hu', 'ro']
+    'nl', 'uk', 'sv', 'nb', 'da', 'fi', 'hi', 'id', 'vi', 'el', 'hu', 'ro',
+    // 1.13 P2 (pinned and changed: the twenty-six): Arabic, Hebrew and Persian after ro.
+    'ar', 'he', 'fa']
   assert.deepEqual(general.properties['tokenPace.language'], {
     type: 'string',
     order: 0,

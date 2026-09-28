@@ -62,7 +62,7 @@ import {
 } from './diagnostics'
 import { CLAUDE_ROOTS, CODEX_ROOTS, configureRoots } from './discover'
 import { DEFAULT_FORECAST_CONFIG, ForecastConfig } from './forecast'
-import { locale, setBundle, setLang, setLocale, t } from './i18n'
+import { locale, setBundle, setDir, setLang, setLocale, t } from './i18n'
 import { hookPermissionOpen, KEEP_WARM_LINE } from './keepWarm'
 import { folderSessions, KEEPWARM_CANCEL_COMMAND, KEEPWARM_FILE_NAME, KeepWarmHost } from './keepWarmHost'
 import { availableLanguages, bundleFileName, readBundle } from './languageLoad'
@@ -224,8 +224,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   /**
    * 1.9 A2 rule 3: installs the language the setting names — its bundle (English reads none), its
-   * `Intl` tag and the tag its words are in — and says so in one English log line. An explicit
-   * language without a file, or a file that cannot be read, is English, and the log says why.
+   * `Intl` tag, the tag its words are in and (1.13 A1) their direction — and says so in one English
+   * log line. An explicit language without a file, or a file that cannot be read, is English, and the
+   * log says why.
    * Nothing else is read: no transcript, no file of Claude Code or Codex, nothing over the network.
    */
   function applyLanguage(setting: LanguageSetting): ResolvedLanguage {
@@ -248,6 +249,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     setBundle(bundle)
     setLocale(resolved.intl)
     setLang(resolved.htmlLang)
+    setDir(resolved.dir)
     const strings = Object.values(bundle).filter((v) => typeof v === 'string' && v.length > 0).length
     log.info(`Language: ${setting} → ${resolved.id} (${strings} strings, Intl ${locale()})`)
     return resolved

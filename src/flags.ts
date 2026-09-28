@@ -33,6 +33,17 @@
  *    with its blue cross 2 inside the white, Denmark 12:4 and 12:4:12, Finland 5:3 and 4:3:4), the
  *    unit set by the height, so the vertical bar stands off-centre toward the hoist and only the
  *    fly is shorter or longer than the flag's own (a 3:2 box for flags of 16:10, 22:16, 37:28, 18:11);
+ *  • 1.13 A1 rule 3 (§7a Q13), the three of 1.13 under the same rules, the unit set by the height as for the Nordic
+ *    crosses. Israel from its flag law (220 × 160): the two blue stripes 25 high at 15 from the edges, the Star of David
+ *    of two equilateral triangles with bases parallel to the stripes, their lines 5.5 wide — drawn as two filled triangle
+ *    rings (an outer triangle and an inner one wound the other way), because a country flag has no `fill="none"`; the
+ *    triangles' size, which the law leaves open, is the one of the common drawing (the lines' middle on a circle of
+ *    29.141 around the centre). Egypt's three equal bands with the eagle of Saladin as one golden silhouette in the
+ *    white band — without it the flag is Yemen's, so the "no coat of arms" rule meets its limit here: head, wings,
+ *    shield, tail and the base's plaque as five plain shapes, no inscription. Iran's three equal bands with the emblem as
+ *    one red silhouette a quarter of the height high (four crescents, the sword and the shadda on top) and the takbir
+ *    as two rows of eleven short white strokes along the white band's edges — the script itself does not fit a
+ *    kilobyte, and a scribble of it would not be the takbir;
  *  • `auto` is a globe drawn in `currentColor`, so forced colours repaint it; every country flag
  *    keeps its own colours (the page gives it `forced-color-adjust: none` and an outline, P2).
  *
@@ -94,5 +105,8 @@ export const FLAG_SVG: Readonly<Record<FlagId | 'auto', string>> = Object.freeze
   gr: svg('<rect width="30" height="20" fill="#0D5EAF"/><path d="M0 3.33h30M0 7.78h30M0 12.22h30M0 16.67h30" stroke="#FFFFFF" stroke-width="2.22"/><rect width="11.11" height="11.11" fill="#0D5EAF"/><path d="M5.56 0v11.11M0 5.56h11.11" stroke="#FFFFFF" stroke-width="2.22"/>'),
   hu: svg('<rect width="30" height="20" fill="#477050"/><rect width="30" height="13.33" fill="#FFFFFF"/><rect width="30" height="6.67" fill="#CE2939"/>'),
   ro: svg('<rect width="30" height="20" fill="#CE1126"/><rect width="20" height="20" fill="#FCD116"/><rect width="10" height="20" fill="#002B7F"/>'),
+  eg: svg('<rect width="30" height="20" fill="#000000"/><rect width="30" height="13.33" fill="#FFFFFF"/><rect width="30" height="6.67" fill="#CE1126"/><g fill="#C09300"><path d="M14.35 7.12Q14.6 6.8 15.05 6.8Q15.4 6.85 15.45 7.2L15.5 8.25H14.62L14.78 7.36L14.5 7.28z"/><path d="M14.55 8.32Q13.6 7.55 12.8 8.35V11.3L13.95 11.95V8.9zM15.45 8.32Q16.4 7.55 17.2 8.35V11.3L16.05 11.95V8.9z"/><path d="M14.2 8.6H15.8V10.1Q15.8 10.7 15 11.1Q14.2 10.7 14.2 10.1z"/><path d="M14.6 11.25H15.4L15.85 12.05H14.15z"/><path d="M13 12.2Q15 12.6 17 12.2L17.1 13.05Q15 13.4 12.9 13.05z"/></g>'),
+  il: svg('<rect width="30" height="20" fill="#FFFFFF"/><rect y="1.875" width="30" height="3.125" fill="#0038B8"/><rect y="15" width="30" height="3.125" fill="#0038B8"/><path d="M15 5.67L18.75 12.17H11.25zM15 7.04L12.44 11.48H17.56zM15 14.33L11.25 7.83H18.75zM15 12.96L17.56 8.52H12.44z" fill="#0038B8"/>'),
+  ir: svg('<rect width="30" height="20" fill="#DA0000"/><rect width="30" height="13.33" fill="#FFFFFF"/><rect width="30" height="6.67" fill="#239F40"/><path d="M.36 5.95h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2M.36 14.03h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2m.73 0h2" stroke="#FFFFFF" stroke-width=".6"/><g fill="#DA0000"><path d="M17.54 9.96A1.94 1.94 0 0 1 16.51 11.68A2.51 2.51 0 0 0 16.11 8.15A1.94 1.94 0 0 1 17.54 9.96zM16.64 9.88A2.32 2.32 0 0 1 13.61 12.09A2.54 2.54 0 0 0 15.84 8.13A2.31 2.31 0 0 1 16.64 9.88z"/><path d="M12.46 9.96A1.94 1.94 0 0 0 13.49 11.68A2.51 2.51 0 0 1 13.89 8.15A1.94 1.94 0 0 0 12.46 9.96zM13.36 9.88A2.32 2.32 0 0 0 16.39 12.09A2.54 2.54 0 0 1 14.16 8.13A2.31 2.31 0 0 0 13.36 9.88z"/><polygon points="15,7.98 15.3,8.21 15.2,12.23 15,12.5 14.8,12.23 14.7,8.21"/><polygon points="14.35,7.5 15,7.86 15.65,7.5 15,7.7"/></g>'),
   auto: svg('<g fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="15" cy="10" r="8.4"/><path d="M6.6 10h16.8M7.9 5.5h14.2M7.9 14.5h14.2M15 1.6v16.8a4.2 8.4 0 0 1 0-16.8a4.2 8.4 0 0 1 0 16.8"/></g>'),
 })

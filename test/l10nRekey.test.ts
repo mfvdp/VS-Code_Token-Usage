@@ -376,23 +376,27 @@ test('the tests\' helper reads a language\'s pending manifest keys, and none whe
   assert.deepEqual([...pendingNlsKeys('ja', dir)], [])
 })
 
-test('the repository\'s ledger: 1.10\'s started at e72057a (1123 t() keys, 295 manifest keys), 1.11\'s at b89ff43 (1197, 297), 1.12\'s at d39c2df (1240, 309), one line each —, a list exists only for a language of the registry beyond English and German, each at the ledger\'s end, and none of these files ships (1.10 P1; 1.11 P1; 1.12 P1)', () => {
+test('the repository\'s ledger: 1.10\'s started at e72057a (1123 t() keys, 295 manifest keys), 1.11\'s at b89ff43 (1197, 297), 1.12\'s at d39c2df (1240, 309), 1.13\'s at a09a405 (1303, 331), one line each —, a list exists only for a language of the registry beyond English and German, each at the ledger\'s end, and none of these files ships (1.10 P1; 1.11 P1; 1.12 P1; 1.13 P1)', () => {
   const base = read<{ v: number; base: string; keys: Record<string, string[]>; nls: Table }>(ROOT, 'l10n/rekey-base.json')
   const ledger = read<{ v: number; base: string; entries: Entry[] }>(ROOT, 'l10n/rekey.json')
   assert.deepEqual([base.v, base.base], [1, ledger.base])
   // 1.10 P1 wrote the base from the 1.9.0 release commit, 1.11 P1 from the 1.10.0 one (--start b89ff43, which emptied the
   // ledger: 1.10's 115 entries are in the history at b89ff43), 1.12 P1 from the 1.11.0 one (--start d39c2df: 1.11's 67
-  // entries are in the history at d39c2df). A later version's --start writes its own, and its pin here.
-  const counts: Record<string, [number, number]> = { e72057a: [1123, 295], b89ff43: [1197, 297], d39c2df: [1240, 309] }
+  // entries are in the history at d39c2df), 1.13 P1 from the 1.12.0 one (--start a09a405: 1.12's 121 entries are in the
+  // history at a09a405). A later version's --start writes its own, and its pin here.
+  const counts: Record<string, [number, number]> = { e72057a: [1123, 295], b89ff43: [1197, 297], d39c2df: [1240, 309], a09a405: [1303, 331] }
   assert.ok(Object.prototype.hasOwnProperty.call(counts, base.base), `the base ${base.base} has no pin here — add its counts`)
   assert.deepEqual([Object.keys(base.keys).length, Object.keys(base.nls).length], counts[base.base])
   // The base file is what --start writes: one line per key and per manifest key.
   assert.equal(text(ROOT, 'l10n/rekey-base.json').split('\n').length, Object.keys(base.keys).length + Object.keys(base.nls).length + 9)
   // A list for each language that has not finished its work (a language's package deletes its own). 1.12 P1 (pinned and
   // changed: the twelve 1.10 languages of 1.11's lists): --start d39c2df wrote one at cursor 0 for each of the twenty-four
-  // languages of the registry beyond English and German.
+  // languages of the registry beyond English and German. 1.13 P1 (pinned and changed: the registry's twenty-four exactly):
+  // --start a09a405 wrote one for each of the same twenty-four; the registry gains ar, he and fa with 1.13's P2, whose
+  // files their own packages write whole — never a list, --start passes over a language without files —, so the
+  // registry beyond English and German holds the twenty-four and more from then on.
   const languages: readonly string[] = LANGUAGE_IDS.filter((id) => id !== 'en' && id !== 'de')
-  assert.equal(languages.length, 24)
+  assert.ok(languages.length >= 24, `only ${languages.length} languages beyond English and German`)
   const dir = join(ROOT, 'l10n', 'pending')
   const ids = existsSync(dir) ? readdirSync(dir).map((f) => f.replace(/\.json$/, '')).sort() : []
   assert.deepEqual(ids.filter((id) => !languages.includes(id)), [], 'a pending list for English, German or no language')
@@ -402,7 +406,7 @@ test('the repository\'s ledger: 1.10\'s started at e72057a (1123 t() keys, 295 m
   assert.deepEqual(negations, ['!l10n/bundle.l10n.*.json'])
 })
 
-test('docs/development.md says how an English change reaches the languages: the ledger and its base, the eight kinds, the script and its options, the pending lists, the frame while they exist, the freeze and the join (1.10 P1)', () => {
+test('docs/development.md says how an English change reaches the languages: the ledger and its base, the eight kinds, the script and its options, the pending lists, the frame while they exist, the freeze and the join (1.10 P1; 1.13 P1: the 1.13 ledger)', () => {
   const flat = (s: string): string => s.replace(/\s+/g, ' ')
   const dev = flat(text(ROOT, 'docs/development.md'))
   for (const claim of [
@@ -416,6 +420,10 @@ test('docs/development.md says how an English change reaches the languages: the 
     'A language without a pending list has done everything the ledger asks',
     '`t()` falls back to the English',
     'l10n/rekey.json`, `l10n/rekey-base.json` and `l10n/pending/`',
+    // 1.13 P1 (E1 rule 5): the 1.13 ledger, 1.12's entries in the history, the literals of history, T16 and the arrow rule.
+    '1.12\'s 121 at `a09a405`', '(`node scripts/l10n-rekey.mjs --start a09a405`: 1303 `t()` keys, 331 manifest keys)',
+    'Arabic, Hebrew and Persian — are never on it', '`NOTIFY_TEXT_KEYS_1_12`, 121 entries on base `d39c2df`',
+    '**T16** holds the direction', '**The arrow rule**', '`RTL_LANGUAGES`', '`languageDir`', '`pseudoRtlBundle()`', '`RESET_CLOCK_KEYS`',
   ]) assert.ok(dev.includes(claim), `docs/development.md does not say: ${claim}`)
   // The eight kinds, each with its fields, as the script's ENTRY_FIELDS has them.
   const script = text(ROOT, 'scripts/l10n-rekey.mjs')

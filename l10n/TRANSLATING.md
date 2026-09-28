@@ -31,6 +31,8 @@ how the translations were made is in [Languages](../docs/languages.md).
   the status bar's "exhausted" glyph, quoted as “!” — keep it.)
 * The twelve languages of 1.11 each have their line in [1.11: a new language, whole](#111-a-new-language-whole)
   — Dutch and the three Nordic languages among them, whose neutral register is *je*/*du*.
+* The three languages of 1.13 — Arabic, Hebrew and Persian, written right to left — have theirs in
+  [1.13: a new language, whole](#113-a-new-language-whole).
 
 ## Never translated
 
@@ -57,8 +59,9 @@ how the translations were made is in [Languages](../docs/languages.md).
 * **The native names** of `config.language.enum.<id>` (English, Deutsch, Français, Español,
   Português (Brasil), Italiano, 日本語, 한국어, 简体中文, 繁體中文, Русский, Türkçe, Polski, Čeština — and
   from 1.11 on Nederlands, Українська, Svenska, Norsk, Dansk, Suomi, हिन्दी, Bahasa Indonesia,
-  Tiếng Việt, Ελληνικά, Magyar, Română) — the same in every file. The names *in the reader's language*
-  (the keys `English`, `German`, … `Czech`, and from 1.11 on `Dutch` … `Romanian`) are translated. Where
+  Tiếng Việt, Ελληνικά, Magyar, Română, and from 1.13 on العربية, עברית, فارسی) — the same in every file. The
+  names *in the reader's language* (the keys `English`, `German`, … `Czech`, from 1.11 on `Dutch` … `Romanian`, and
+  from 1.13 on `Arabic`, `Hebrew`, `Persian`) are translated. Where
   your language writes one of them as the English does (the German *Hindi*), say so in your report
   with the key: the lead adds it to `LANGUAGE_NAME_AS_ENGLISH` in the test, with its reason.
 
@@ -66,7 +69,8 @@ how the translations were made is in [Languages](../docs/languages.md).
 
 * Every `{n}` placeholder, as often as the key has it. A translation may reorder them.
 * The marks, each as often as in the English: `~` (an estimate — ASCII, never `～`), `⚠` (a lower
-  bound), `≈`, `–` (absence), `%`, `×`, `→` and the separator `·` (never `・`).
+  bound), `≈`, `–` (absence), `%`, `×`, `→` and the separator `·` (never `・`). In a language written right
+  to left `→` and `←` are one mark ([1.13: right to left](#113-right-to-left)).
 * A dash between two parts of a sentence is the em dash `—`, as in the English (or a comma, a colon,
   brackets) — also where your language's typography sets an en dash there (French, Polish, Czech):
   the en dash `–` is the absence mark, T4 counts it, and a value holds exactly as many as its key. A
@@ -116,7 +120,7 @@ in their translations. Use the language's own quotation marks — « », „ ", 
 
 For the language `<id>` (the registry's id in `src/languages.ts` — twenty-four beyond English and
 German: `fr`, `es`, `pt-br`, `it`, `ja`, `ko`, `zh-cn`, `zh-tw`, `ru`, `tr`, `pl`, `cs`, and from 1.11 on
-`nl`, `uk`, `sv`, `nb`, `da`, `fi`, `hi`, `id`, `vi`, `el`, `hu`, `ro`):
+`nl`, `uk`, `sv`, `nb`, `da`, `fi`, `hi`, `id`, `vi`, `el`, `hu`, `ro`; from 1.13 on also `ar`, `he`, `fa`):
 
 | File | Made how |
 |---|---|
@@ -124,7 +128,7 @@ German: `fr`, `es`, `pt-br`, `it`, `ja`, `ko`, `zh-cn`, `zh-tw`, `ru`, `tr`, `pl
 | `l10n/bundle.l10n.<id>.json` | generated: `node scripts/merge-l10n.mjs` |
 | `package.nls.<id>.json` | written by you: every key of `package.nls.json`, in its order |
 | `l10n/nls-sources/<id>.json` | generated: `node scripts/nls-sources.mjs <id>` — only once the manifest is translated: the record says your text translates today's English |
-| `l10n/pending/<id>.json` | 1.10: written by `scripts/l10n-rekey.mjs` whenever the English changed — your work list; you empty it and delete it (the next section). A language new in 1.11 had none in 1.11; from 1.12 on every language beyond English and German has one while the English changes |
+| `l10n/pending/<id>.json` | 1.10: written by `scripts/l10n-rekey.mjs` whenever the English changed — your work list; you empty it and delete it (the next section). A language new in 1.11 had none in 1.11; from 1.12 on every language beyond English and German has one while the English changes — but a language new in 1.13 (`ar`, `he`, `fa`), which is written whole |
 
 Nothing else: not `src/`, `test/`, `scripts/`, `docs/`, `media/`, `README.md`, `CHANGELOG.md`,
 `package.json`, `package.nls.json`, the German files, this brief, another language's files or the
@@ -365,6 +369,132 @@ Each receives the name in its `{0}` — the keep-warm tooltip alone in its `{1}`
    translated, never inflected; rule 3's constructions where your grammar wants a case.
 5. Your list's `why` for such a key says which form its placeholder carries.
 
+## 1.13: right to left
+
+For every language, and for Arabic, Hebrew and Persian above all. A right-to-left text is stored in **logical order** —
+the order in which it is read and typed —, and the layout is the display's: the dashboard mirrors itself for these
+languages, and on VS Code's own surfaces (the status bar, tooltips, Quick Picks, messages, dialogs), which VS Code lays
+out left to right in every language, Token Pace wraps each text in invisible isolates of its own.
+
+* **The isolates are the code's, never the translation's.** Never write a direction mark or an isolate — LRM U+200E,
+  RLM U+200F, ALM U+061C, LRE … RLO U+202A–U+202E, LRI … PDI U+2066–U+2069 (T16) — not even to "fix" how a line looks in
+  your editor: a mark in a value lands in the bar, in a screen reader's words and in every copy of the text.
+* **Write in logical order, never in visual order**, and never reverse a Latin word or a number to make a line look
+  right: the bidi algorithm lays it out. A placeholder is `{0}` as the key writes it — never `}0{` (a placeholder typed
+  in visual order) and never `{٠}` (T16).
+* **The arrows** (T4): in a language written right to left `→` and `←` count as one mark — as many arrows as the key
+  has. Turn an arrow that shows the reading direction: a range, as in `Longest streak {0} days · {1} → {2}`, reads from
+  the right, and the arrow that points on is `←` (`{1} ← {2}`); "scroll sideways for the remaining columns →" points to
+  where the columns are in your layout. Keep `→` where it names something that stays left to right on the screen — a
+  chart's axis, the time line of a chart. Every arrow you turned is named in your report, key by key.
+* **Numbers**: the digits `0–9` only — never the Arabic-Indic `٠–٩` or the Persian `۰–۹` (T16): Token Pace formats every
+  figure itself, with the digits 0–9 and the Gregorian calendar in all three languages, so a figure reads the same in the
+  bar, on the page and in an export. A digit in your value is one the key has. The percent sign is `%`, never `٪` (T4
+  counts `٪` as a `%` missing).
+* **Names and code stay Latin inside the sentence**: Token Pace, Claude Code, Codex, the names of 1.12, `security`, every
+  backtick span, setting id, path and command — written where your sentence needs them, in logical order.
+* **Quotation marks**: `«…»` in Arabic and Persian (the logical `«` opens; the glyphs turn by themselves in a
+  right-to-left line), `"…"` or `„…”` in Hebrew — one form throughout, named in your report.
+* **Persian ZWNJ** (U+200C, the zero-width non-joiner inside a word, as in `سه‌شنبه`) and ZWJ (U+200D) are letters' business,
+  not direction marks: T16 lets them stand.
+* **No Arabic presentation form** (U+FB50–U+FDFF, U+FE70–U+FEFF — shaped letters, as a PDF's copy gives them): write the
+  plain letters; a presentation form breaks search, copy and the font's own shaping (T16).
+* **The native names**, by code point, in every file: `العربية` (U+0627 U+0644 U+0639 U+0631 U+0628 U+064A U+0629),
+  `עברית` (U+05E2 U+05D1 U+05E8 U+05D9 U+05EA), `فارسی` (U+0641 U+0627 U+0631 U+0633 U+06CC — FARSI YEH, not the Arabic
+  yeh U+064A).
+
+## 1.13: a new language, whole
+
+In 1.13 three languages join, each written right to left: `ar` العربية (Arabic), `he` עברית (Hebrew), `fa` فارسی
+(Persian) — one package each, one at a time. Each is a whole translation, made once from the English at the frozen tip
+(the commit the lead names), with the German as a second reference and the call site where both leave a doubt.
+Another language's translation is not a source — not even Persian for Arabic script questions, or Arabic for Persian
+terms. A new language is never a pending list.
+
+Every item of [1.11: a new language, whole](#111-a-new-language-whole) holds for you — items 1 and 3–12 as they stand,
+its register (item 2) replaced by the one below —, with [1.13: right to left](#113-right-to-left) and these notes:
+
+1. **Register** — a reading of common UI practice, not verified against a style guide and not a native speaker's:
+   decide for your language and give the reason in your report.
+   * **Arabic**: Modern Standard Arabic; commands and buttons as verbal nouns (حفظ، إلغاء، فتح اللوحة); running sentences
+     without a gendered second person where a construction can do without — the passive, the verbal noun, an
+     impersonal يمكن —, else the masculine singular Arabic software uses.
+   * **Hebrew**: commands in the infinitive or as nouns (לשמור / שמירה), instructions impersonal (יש ל…), no gendered
+     imperative where the sentence can do without.
+   * **Persian**: شما with plural verbs; commands as verbal nouns or infinitives (ذخیره، لغو).
+2. **Plurals**: no plural rules in 1.13 either. Arabic's six categories (zero/one/two/few/many/other) and Hebrew's dual
+   take the label form — "الجلسات: {0}", "סשנים: {0}" —, the same construction in every string of the kind, named in
+   your report; Persian writes the singular noun after a numeral, so "{0} جلسه" is right as it stands.
+3. **Weekday words** (T13): four characters or fewer, counted as grapheme clusters. Intl's short forms are longer (five
+   to eight): Hebrew writes the short forms `א׳` … `ש׳`, Persian its one-letter forms `ی د س چ پ ج ش`, Arabic three
+   letters or Intl's narrow forms `ح ن ث ر خ ج س` — your choice, named in your report.
+4. **Marks**: the Arabic comma `،`, semicolon `؛` and question mark `؟` in Arabic and Persian sentences; `%`, `·`, `–` as
+   the absence mark, `—` between clauses, `…`, and `~ ⚠ ≈` as the key has them (T4).
+5. **Hard wraps**: a consent paragraph keeps the English's line count, each line ≤ 100 characters.
+6. **The bar's examples** (T15) as your locale prints them with the digits 0–9 — forms such as `06:00 ص` in Arabic's
+   12-hour clock, a weekday before the clock beyond a day: do not work them out; copy what T15 prints.
+7. **The reset-clock slots**, the two words (an alert is the popup inside VS Code, a notification a message sent outside
+   it — never one word for both), and "Always Allow" (macOS's own label in your language if you know it, else the English
+   between your quotation marks): as [1.12: your pending list](#112-your-pending-list) and
+   [1.13: your pending list](#113-your-pending-list) say.
+8. **Terms**: your 30 hardest terms, and the word you chose for prompt, record (a personal best), entry (an agent's
+   data), keep-warm, cold start, session, window, reset, quota, notification, alert, channel, Keychain, secret storage,
+   cooldown and test message.
+9. **Gates** — item 11 of the 1.11 section, with `out-test/bidi.test.js` in the test run from 1.13 on:
+
+   ```
+   node build.mjs --tests && systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 env CI=true TZ=UTC \
+     LANG=en_US.UTF-8 HOME=$(mktemp -d) NODE_OPTIONS=--max-old-space-size=6144 node --test \
+     out-test/l10n.languages.test.js out-test/nls.test.js out-test/languages.test.js out-test/i18n.test.js \
+     out-test/i18n.model.test.js out-test/i18n.text.test.js out-test/dashboard.test.js out-test/prompts.test.js \
+     out-test/bidi.test.js
+   node scripts/nls-sources.mjs --check --strict <id>
+   test ! -e l10n/pending/<id>.json
+   ```
+
+10. **Your report** opens with the line "Not a native speaker: the translations are an AI agent's." — then the branch and
+    its commit, the gates with their exit codes, the counts (runtime keys, part entries, manifest keys), the register,
+    the plural construction, the terms of item 8, the weekday words, the arrows turned (key by key), the quotation marks,
+    any false positive of the frame named with its key (not worked around), anything in the English that looked wrong
+    (reported, not changed), and the minutes it took.
+
+## 1.13: your pending list
+
+For the twenty-four languages beyond English and German. 1.13's ledger started at the 1.12.0 release
+(`node scripts/l10n-rekey.mjs --start a09a405`) with an empty list for each of you; the code packages' English changes
+fill it, and you work through it as [the 1.10 section](#working-through-your-pending-list-110) says —
+`node scripts/l10n-rekey.mjs --print <id>`, every `translate` key into the parts it names, every `review` key read against
+the new English, every manifest key on the list, then `node scripts/merge-l10n.mjs`, `node scripts/nls-sources.mjs <id>`
+and the file deleted (the gates of [1.11: a new language, whole](#111-a-new-language-whole), item 11, ending in
+`test ! -e l10n/pending/<id>.json`).
+
+1. **What to expect**, about eleven keys a language: the three language names `Arabic`, `Hebrew`, `Persian`
+   (`translate`, as your dictionary writes them — where it writes one as the English does, say so with the key); the
+   three native names, `nls-add` entries that already hold the right value, which you confirm; `config.language.description`
+   (`review`: the count of translated languages, now twenty-seven); and four leftovers of 1.12 —
+   `config.credentials.keychain.description` ("a VS Code window", `review`), `config.notifications.telegram.description`
+   (the `@name` of a public Telegram channel, in your language's 1.12 word for a Telegram channel), the e-mail channel's
+   setup hint (its field ids `host`, `user`, `from` and `to` in backticks now — keep each as it is) and
+   `config.codexAppServer.mode.description` (the app-server ends, not the mode — a subject your grammar may need to say).
+2. **The reset-clock slots** (`RESET_CLOCK_KEYS` in `test/l10n.languages.test.ts`). A reset clock is `14:20` today and
+   `Thu 14:20` a day or more away — one slot, and the code decides which it holds. Write a form that reads with both: a
+   label (`Reset: {0}`), a colon or brackets; never a preposition that takes a clock hour only (German *um*, Danish *kl.*,
+   Ukrainian *о*, Greek *στις*). The slots:
+   * `resets at {0}` ({0}), `resets at {0} (in {1})` ({0}) — the status bar's reset part;
+   * `{0} (in {1})` ({0}), `{0} (reset due)` ({0}) — the reset with its countdown, and past its time;
+   * `reset at {0}` ({0}) — the usage Quick Pick's line;
+   * `{0}, {1} window: {2} used — resets at {3}.` ({3}), `{0}, {1} window: exhausted — resets at {2}.` ({2}) and
+     `{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.` ({3} and {4}) — the notifications.
+
+   Your 1.11 and 1.12 forms before these slots were read by 1.12's Review L and kept with their reasons: keep them
+   unless your list names the key. The paragraph is for the three new languages and any later change; 1.13 turns the
+   German to the label form („Reset: {0}").
+3. The questions 1.10's, 1.11's and 1.12's readers left for native speakers stay open: where a key of your list is one of
+   them, keep the value you have and say so.
+4. Your report opens with the line "Not a native speaker: the translations are an AI agent's." — then the branch and its
+   commit, the gates with their exit codes, per language the counts and the three language names, the subject you gave
+   the app-server sentence, and anything that looked wrong (reported, not changed).
+
 ## The gates
 
 ```
@@ -397,7 +527,8 @@ each failure names the language, the file and the key:
 * **T3 · Placeholders** — every value keeps the `{n}` of its key, each as often.
 * **T4 · Marks** — `~ ⚠ ≈ – % × → ·` as often as the key (the manifest: `~ ⚠ ≈ –`), counted in the
   text as NFC normalises it (1.11) — so the Greek ano teleia (U+0387), which NFC makes the separator
-  `·`, is named wherever it stands.
+  `·`, is named wherever it stands; in a language written right to left (Arabic, Hebrew, Persian) `→` and `←` count as
+  one mark (1.13).
 * **T5 · Code** — backtick spans, `tokenPace.…` ids, `$(…)` codicons, `command:` targets and
   paragraphs as the key has them; in the manifest also the setting links, command links, fences and
   JSON examples.
@@ -411,15 +542,16 @@ each failure names the language, the file and the key:
   [1.12: your pending list](#112-your-pending-list)) are taken out — a name of several words also where a line break
   splits it (1.12):
   in a Latin-script language a key of three words or more is never its own translation and no four
-  words of the key stand in a row in the value; in Japanese, Korean, Chinese, Russian — and from 1.11
-  on Ukrainian, Greek and Hindi — no value keeps three Latin words in a row — a `×` or `÷` between two
+  words of the key stand in a row in the value; in Japanese, Korean, Chinese, Russian — from 1.11
+  on Ukrainian, Greek and Hindi, and from 1.13 on Arabic, Hebrew and Persian — no value keeps three Latin words in a row — a `×` or `÷` between two
   of them ends the run. Vietnamese is written in Latin letters and held by the first rule. No manifest entry
   of 40 characters or more is the English. A manifest key on your pending list is left out of T3, T4,
   T5, T7 and T9 until it is done: its value is the English, or your translation of the English before
   the change. A key that names a setting's fields by their ids — 1.12: "Set host, user, from and to in tokenPace.notifications.email first." —
   keeps `host`, `user`, `from`, `to` in English between your own separators: T9 takes those four out of that key and
   its value alone (`FIELD_IDS_OF_A_KEY`, the key with its ids and the reason); everywhere else they are English words
-  it catches.
+  it catches. (1.13: P6 empties this list with L3 — the key's ids in backticks, which T9 takes out as code — and owns
+  this sentence then.)
 * **T10 · Registry** — every file names a registry id; the registry's language names are translated
   (1.11: a name your list names `translate` may be missing until you translate it, and a name may be
   the English only where `LANGUAGE_NAME_AS_ENGLISH` says your language writes it so);
@@ -450,6 +582,10 @@ each failure names the language, the file and the key:
   (`▲`). So the English “CC 5h 25% · resets 2h14m” is “CC 5h 25% · Reset in 2h14m” in German, and
   “Σ 3.1M · today” is “Σ 3,1M · heute”. A value quotes as many examples as the English. A key on
   your pending list is left out until it is done.
+* **T16 · Direction** (1.13) — no value writes a bidi control (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069)
+  the key lacks — the isolates are the code's —, a digit of another script (any decimal digit but `0–9`), an Arabic
+  presentation form (U+FB50–U+FDFF, U+FE70–U+FEFF), or a placeholder turned or in other digits (`}0{`, `{٠}`); ZWNJ and
+  ZWJ may stand. In every language, not only the three written right to left ([1.13: right to left](#113-right-to-left)).
 
 A rule that is wrong about a string — English that is right to keep, say — is **reported with its
 key**, not worked around and not edited: the lead extends `SAME_IN_EVERY_LANGUAGE` when the languages

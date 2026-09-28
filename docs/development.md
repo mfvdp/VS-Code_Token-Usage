@@ -123,7 +123,7 @@ node scripts/nls-sources.mjs --check   # every manifest translation matches toda
 node scripts/l10n-rekey.mjs --check    # every entry of the re-key ledger applied to every language (1.10)
 ```
 
-`test/l10n.languages.test.ts` holds every language on disk to the same fifteen rules, T1–T15: the
+`test/l10n.languages.test.ts` holds every language on disk to the same sixteen rules, T1–T16: the
 keys, the parts, the placeholders, the marks (`~`, `⚠`, `≈`, `–`, `%`, `×`, `→`, `·`), the code
 (backtick spans, setting ids, codicons, command targets, links, fences, JSON examples), the page's words
 (no markup character), the tone (no exclamation mark), the tables, no English left (proper names and
@@ -133,9 +133,12 @@ and the heat map's weekday words — the thirteen of 1.9 — and, since 1.10, T1
 ([below](#changing-the-english-the-re-key-ledger-110)) and T15 for the bar's own examples:
 every example a setting of the status bar quotes (`CC 5h 25% · resets 2h14m`, `Σ 3.1M · today`) is what
 that language's bar prints for the fixture the test and the brief document — its words, its decimals, its
-weekday and its 12-hour clock —, the English's included. Every rule also runs once against a synthetic
+weekday and its 12-hour clock —, the English's included — and, since 1.13, T16 for the direction: no bidi control
+in a value, no digit of another script, no Arabic presentation form, a placeholder only as `{n}` with ASCII digits.
+Every rule also runs once against a synthetic
 language in a temporary directory — the German under another id, and the English with every word turned
-into 語 (since 1.11 also into शुक्र, under `hi`) — broken in the one way the rule exists to catch (T15,
+into 語 (since 1.11 also into शुक्र, under `hi`, and since 1.13 into كلمة with every `→` turned `←`, under `ar`) —
+broken in the one way the rule exists to catch (T15,
 which reads the bar under the id's own locale, against the English and a copy of the Czech files instead). `test/nls.test.ts` holds every manifest translation to the
 manifest's structure. The brief a translation works from is `l10n/TRANSLATING.md`. Nothing of this
 ships but the bundles and the `package.nls*.json` files: `.vscodeignore` keeps `l10n/parts/`,
@@ -202,12 +205,18 @@ value: nothing is invented. A language without a pending list has done everythin
 records its manifest and deletes the list. The next version's first change of the English starts a new
 ledger. `--start` writes the new base and an empty ledger: the entries of the version before are not
 carried over — each is applied, no list of theirs is left, and they stay in the history (1.10's 115 at
-`b89ff43`, 1.11's 67 at `d39c2df`). 1.11's ledger started at `b89ff43`, before its first English change; 1.12's
+`b89ff43`, 1.11's 67 at `d39c2df`, 1.12's 121 at `a09a405`). 1.11's ledger started at `b89ff43`, before its first English change; 1.12's
 at `d39c2df` (`node scripts/l10n-rekey.mjs --start d39c2df`), with a list at cursor 0 for each of the twenty-four
 languages beyond English and German — every one has its files since 1.11. It holds 121 entries: the code packages'
 English changes, each with its German, until the English was frozen; the twenty-four languages then worked through
 their lists in four packages of six, and at the join `PENDING_ALLOWED` went back to false and
-`node scripts/nls-sources.mjs --check --strict` became the gate again.
+`node scripts/nls-sources.mjs --check --strict` became the gate again. 1.13's ledger started at the 1.12.0 release
+(`node scripts/l10n-rekey.mjs --start a09a405`: 1303 `t()` keys, 331 manifest keys) with a list at cursor 0 for each of
+the twenty-four, and `PENDING_ALLOWED` is true again until 1.13's join. The three languages 1.13 adds — Arabic, Hebrew and
+Persian — are never on it: they have no file before their packages write them whole from the frozen English, and
+`--start` passes over a language without files. Three tests read the live ledger's figures until then — the kept-names
+guard's seventeen notification texts, the 1.12.0 notes' base and count, the languages page's count — and hold literals
+of history since (`NOTIFY_TEXT_KEYS_1_12`, 121 entries on base `d39c2df`).
 
 While lists exist (`PENDING_ALLOWED` in `test/l10n.languages.test.ts` is true), the frame reads them: T1
 and T2 let a key listed `translate` be absent, a manifest key on a list stays out of the rules that
@@ -265,6 +274,24 @@ repeated perhaps, never translated or dropped, and the seventeen notification te
 backtick their English lacks, since they go to chat services as they are; and the session-name scan over the page's
 own `tr()` calls too (`src/webview/main.ts` has its own `tr`), with `SESSION_NAME_PAGE_FIELDS`, the fields a session's
 name travels in on the page.
+
+In 1.13 the frame learned right to left before a single Arabic, Hebrew or Persian value was written, each rule once, for
+every language. **T16** holds the direction: no bidi control (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) in a
+value — the isolates are the code's, never a translation's —, no decimal digit but `0–9`, no Arabic presentation form,
+and a placeholder only as `{n}` with ASCII digits (never `}0{` typed in visual order, never `{٠}`); ZWNJ and ZWJ, which
+Persian writes inside words, may stand. `NON_LATIN` gains `ar`, `he` and `fa` (`NEW_IN_1_13` beside the registry until
+it has them). **The arrow rule**: T4 counts `→` and `←` as one mark in a language `RTL_LANGUAGES` names — read from the
+registry's `languageDir`, never a list of the frame's own —, since a right-to-left reader reads a range from the right
+and the arrow that points on there is `←`. A fourth synthetic language, the English with every word turned into كلمة and
+every `→` into `←` under `ar`, runs every rule; its texts are `pseudoRtlBundle()` of `test/helpers/nls.ts`, which the
+isolate test and the harness install where no right-to-left translation exists yet, made with the frame's own pattern
+(`protectedPattern`, from the names the helper reads out of the frame's source — a test holds the two equal).
+`RESET_CLOCK_KEYS` lists the `t()` keys whose placeholder receives a reset clock that may carry a weekday (`14:20`
+today, `Thu 14:20` beyond) — where a translation needs a form that reads with both, a label rather than a clock-only
+preposition such as German *um*: a scan of every `t()` and `tr()` call follows `resetClock` and `formatReset`'s absolute
+and `both` forms through variables, local functions, fields and wrapper calls into the arguments, asks for exactly the
+listed keys (the one excepted key with its reason, `RESET_CLOCK_EXCEPTED`) and pins the two functions' calls
+(`RESET_CLOCK_SOURCES`); the brief names every key.
 
 ## The price table
 

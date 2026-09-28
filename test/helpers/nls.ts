@@ -84,6 +84,151 @@ export const LANGUAGE_NAME_AS_ENGLISH: ReadonlyArray<readonly [string, string, s
   ['it', 'Hindi', 'the Italian name of the language is hindi (Treccani), capitalised as a list item'],
 ]
 
+// ---------------------------------------------------------------------------
+// 1.13 A4 rule 6: the pseudo-translation — and the pseudo-RTL bundle the frame, the isolate test and the harness share
+// ---------------------------------------------------------------------------
+
+/** A literal as a pattern. */
+export const reEsc = (x: string): string => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * 1.12 D4 (L1-O2): a name of SAME_IN_EVERY_LANGUAGE as a pattern that takes any run of whitespace for each of its spaces —
+ * a hard-wrapped text ("…as Claude\nCode's status line", the status-line consent's English) breaks a name where the
+ * line ends, and "Claude\nCode" is the name "Claude Code" still, never the name Claude and the English word Code.
+ */
+export const namePattern = (name: string): string => reEsc(name).replace(/ /g, '\\s+')
+
+/** Latin letters, the accented ones among them — not × (U+00D7) or ÷ (U+00F7), which stand in that block. */
+export const LATIN_LETTERS = 'A-Za-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u024F\\u1E00-\\u1EFF'
+
+/**
+ * What stands in a text as code or as a name, never as a word of its language — the frame's PROTECTED
+ * (test/l10n.languages.test.ts), made from its names (SAME_IN_EVERY_LANGUAGE): fences, backtick spans, placeholders,
+ * addresses, command targets, setting ids and links, codicons, paths, file names, model ids, the fixed forms that start
+ * with a digit (`2h14m`, `12.5K`, a hash) and the names — a name of several words also across a line break (1.12 D4).
+ * 1.13 P1: here, not in the frame, so that the pseudo-RTL bundle below is made by the very pattern the frame's
+ * fixtures are (a test file imported by another would run its tests twice).
+ */
+export function protectedPattern(names: readonly string[]): RegExp {
+  return new RegExp([
+    '```[\\s\\S]*?```',
+    '`[^`\\n]*`',
+    '\\{\\d+\\}',
+    'https?://[^\\s)]+',
+    '\\(command:[^)\\s]*\\)',
+    'command:[\\w.]+',
+    '#?tokenPace\\.[\\w.]+#?',
+    '\\$\\([\\w~-]+\\)',
+    '(?:~|%[A-Za-z]+%|[A-Za-z]:)?(?:[\\\\/][\\w.<>*~-]+)+[\\\\/]?',
+    '[\\w.<>-]*\\.(?:jsonl?|md|m?js|ts|lock|key|csv|toml|txt|log|vsix|sh|ps1|exe)\\b[\\w.<>-]*',
+    '\\b(?:claude|gpt|codex|o\\d)-[\\w.-]+',
+    '\\d[\\w.,:]*',
+    `(?<![\\p{L}\\p{N}])(?:${[...names].sort((a, b) => b.length - a.length).map(namePattern).join('|')})(?![\\p{L}\\p{N}])`,
+  ].join('|'), 'gu')
+}
+
+const PSEUDO_WORD = new RegExp(`[${LATIN_LETTERS}]+(?:['’][${LATIN_LETTERS}]+)*`, 'gu')
+
+/**
+ * The English turned into a language of another script: every word `word`, everything `protect` matches kept — the
+ * code, the names, the placeholders —, and the marks, the quotation marks and the paragraphs as they are. `turnArrows`
+ * (1.13 A4 rule 3): every `→` outside the kept spans written `←`, as a right-to-left translation turns an arrow that
+ * shows the reading direction.
+ */
+export function pseudoText(english: string, word: string, protect: RegExp, turnArrows = false): string {
+  const turn = (x: string): string => {
+    const words = x.replace(PSEUDO_WORD, word)
+    return turnArrows ? words.replace(/→/g, '←') : words
+  }
+  let out = ''
+  let at = 0
+  for (const m of english.matchAll(protect)) {
+    out += turn(english.slice(at, m.index))
+    out += m[0]
+    at = (m.index ?? 0) + m[0].length
+  }
+  return out + turn(english.slice(at))
+}
+
+/** The file whose lists name what a pseudo-translation keeps. */
+const FRAME_FILE = join('test', 'l10n.languages.test.ts')
+
+/**
+ * 1.13 P1: the names the frame keeps in every language — SAME_IN_EVERY_LANGUAGE with the lists it spreads
+ * (ADDED_AT_THE_JOIN, NAMES_OF_1_12), in its order —, read from the frame's source: the frame is a test file, and a
+ * test file imported by another would run its tests twice (test/languages.test.ts reads PENDING_ALLOWED from that file's
+ * line for the same reason). The frame's test holds this reading equal to the list itself, so an entry the lead adds
+ * at a join is here at once.
+ */
+export function frameKeptNames(root: string = ROOT): string[] {
+  const text = readFileSync(join(root, FRAME_FILE), 'utf8')
+  const lists = new Map<string, string[]>()
+  for (const m of text.matchAll(/^export const (\w+): ReadonlyArray<readonly \[string, string\]> = \[\n([\s\S]*?)^\]$/gm)) {
+    const items: string[] = []
+    for (const line of m[2].split('\n')) {
+      const spread = /^\s*\.\.\.(\w+),?\s*$/.exec(line)
+      const entry = /^\s*\['((?:[^'\\]|\\.)*)',/.exec(line)
+      if (spread) items.push(`...${spread[1]}`)
+      else if (entry) items.push(entry[1].replace(/\\(.)/g, '$1'))
+    }
+    lists.set(m[1], items)
+  }
+  const expand = (name: string, seen: readonly string[]): string[] => {
+    const items = lists.get(name)
+    if (!items || seen.includes(name)) throw new Error(`${FRAME_FILE}: no list ${name} to read the kept names from`)
+    return items.flatMap((x) => (x.startsWith('...') ? expand(x.slice(3), [...seen, name]) : [x]))
+  }
+  return expand('SAME_IN_EVERY_LANGUAGE', [])
+}
+
+/**
+ * 1.13 A4 rule 6: the word of the `arab` fixture and of the pseudo-RTL bundle — "word" in Arabic, كلمة (U+0643 U+0644
+ * U+0645 U+0629): four letters of a script written right to left, four grapheme clusters, so every weekday word of the
+ * fixture fits T13's column.
+ */
+export const ARAB_WORD = 'كلمة'
+
+/**
+ * Review L 1.12, finding 1: the word the frame's kept-names guard holds beside NAMES_OF_1_12 — `security`, macOS's tool
+ * (the darwin paragraphs), which a translation keeps and T9 does not take out of a text (it is an English word
+ * everywhere else). The frame's KEPT_NAMES takes it from here, and the pseudo-RTL text keeps it, as a translation does.
+ */
+export const KEPT_WORDS: readonly string[] = ['security']
+
+const RTL_PROTECT = new Map<string, RegExp>()
+/** The pattern the pseudo-RTL text keeps — the frame's names in `root` and KEPT_WORDS —, made once per root. */
+function rtlProtect(root: string): RegExp {
+  let re = RTL_PROTECT.get(root)
+  if (!re) {
+    re = protectedPattern([...frameKeptNames(root), ...KEPT_WORDS])
+    RTL_PROTECT.set(root, re)
+  }
+  return re
+}
+
+/**
+ * 1.13 A4 rule 6: one English text as the pseudo-RTL language writes it — every word ARAB_WORD, every `→` a `←`, the
+ * code, the names (and KEPT_WORDS), the placeholders, the other marks and the quotation marks as they are, in logical
+ * order. No bidi control (T16): the isolates are the code's, never a translation's.
+ */
+export function pseudoRtl(english: string, root: string = ROOT): string {
+  return pseudoText(english, ARAB_WORD, rtlProtect(root), true)
+}
+
+/**
+ * 1.13 A4 rule 6, A3 rule 9, A5 rule 1: the pseudo-RTL bundle — every t() key (the German bundle's keys, which the frame's
+ * T1 holds to the extracted keys) with its pseudoRtl text, keys sorted as merge-l10n.mjs writes a bundle. The frame's
+ * `arab` fixture is made of the same texts (a test holds the two equal), under the id `ar`; the isolate test and the
+ * harness install it where no Arabic, Hebrew or Persian translation exists yet. Nothing is written: a test that needs
+ * files writes them into a temporary directory of its own, never into `l10n/`.
+ */
+export function pseudoRtlBundle(root: string = ROOT): Record<string, string> {
+  const german = JSON.parse(readFileSync(join(root, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const out: Record<string, string> = {}
+  for (const key of Object.keys(german).sort()) out[key] = pseudoRtl(key, root)
+  return out
+}
+
 /** The raw manifest, placeholders and all — for the tests that check the placeholders. */
 export const rawManifest = readJson('package.json') as Record<string, unknown>
 

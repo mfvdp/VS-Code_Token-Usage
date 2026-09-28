@@ -2947,7 +2947,7 @@ test('docs/languages.md: the translation statement says who translated, from wha
   assert.ok(nlsDe['config.language.description'].includes('Muttersprachler haben sie nicht geprüft'))
 })
 
-test('docs/development.md says how a language is made and checked: the registry, the parts, the two scripts, the record, the fifteen rules, the freeze (1.9 P3; 1.10 P21: fifteen)', () => {
+test('docs/development.md says how a language is made and checked: the registry, the parts, the two scripts, the record, the sixteen rules, the freeze (1.9 P3; 1.10 P21: fifteen; 1.13 P1: sixteen)', () => {
   const dev = flatText(doc.development)
   for (const claim of [
     '## Translating', '`src/languages.ts` (`LANGUAGES`: the id, the `Intl` locale, the native name and the flag, in the picker\'s order)',
@@ -2957,7 +2957,8 @@ test('docs/development.md says how a language is made and checked: the registry,
     '`l10n/nls-sources/<id>.json` — the freshness record: for every manifest key, the first 16 hex digits of the SHA-256 of the English it was translated from, written by `node scripts/nls-sources.mjs <id>`',
     '`node scripts/nls-sources.mjs --check` names every language and key whose English changed since',
     // 1.10 P21 (pinned and changed: "thirteen rules, T1–T13"): T14 (the pending lists) and T15 (the bar's examples) joined in 1.10.
-    '`test/l10n.languages.test.ts` holds every language on disk to the same fifteen rules, T1–T15',
+    // 1.13 P1 (pinned and changed: "fifteen rules, T1–T15"): T16 (the direction) joined in 1.13.
+    '`test/l10n.languages.test.ts` holds every language on disk to the same sixteen rules, T1–T16',
     'the list `SAME_IN_EVERY_LANGUAGE` in the test, each word with its reason',
     'the German under another id, and the English with every word turned into 語',
     'The brief a translation works from is `l10n/TRANSLATING.md`',
@@ -3723,11 +3724,12 @@ test('the pages carry the sentences of the documentation package, held to the co
   for (const id of ['fr', 'es', 'pt-br', 'it', 'pl', 'cs']) assert.match(bundle(id).Prompts, /^Prompt/, `${id} does not keep the loanword`)
   assert.deepEqual([bundle('ja').Prompts, bundle('ko').Prompts, bundle('ru').Prompts], ['プロンプト', '프롬프트', 'Промпты'])
   // No list of an earlier version's ledger is left (1.11 P1, pinned and changed: no list at all; 1.12 P1, pinned and
-  // changed: 1.10's base e72057a alone) — from `--start b89ff43` on the lists on disk were 1.11's, which its join emptied,
-  // and from `--start d39c2df` on they are 1.12's, which its join empties (test/l10n.languages.test.ts T14 with
+  // changed: 1.10's base e72057a alone; 1.13 P1, pinned and changed: 1.10's and 1.11's bases) — from `--start b89ff43` on
+  // the lists on disk were 1.11's, which its join emptied, from `--start d39c2df` on 1.12's, which its join emptied, and
+  // from `--start a09a405` on they are 1.13's, which its join empties (test/l10n.languages.test.ts T14 with
   // PENDING_ALLOWED false).
   const ledgerBase = (JSON.parse(readDoc('l10n/rekey.json')) as { base: string }).base
-  assert.equal(['e72057a', 'b89ff43'].includes(ledgerBase) && existsSync(join(ROOT, 'l10n/pending')) && readdirSync(join(ROOT, 'l10n/pending')).length > 0, false, 'a pending list of 1.10 or 1.11 is left')
+  assert.equal(['e72057a', 'b89ff43', 'd39c2df'].includes(ledgerBase) && existsSync(join(ROOT, 'l10n/pending')) && readdirSync(join(ROOT, 'l10n/pending')).length > 0, false, 'a pending list of 1.10, 1.11 or 1.12 is left')
   // development.md: the ledger's `; ` rule as the script has it, the test seam as the code gates it.
   const dev = flatText(doc.development)
   assert.ok(dev.includes('A `why` never holds `; ` — the script joins the reasons of one key with it and splits on it again —, and `--check` refuses one.'))
@@ -4352,7 +4354,7 @@ test('the 1.12.0 release notes: the newest entry, its date set at publish, every
     assert.ok(privacy.includes(claim), `the 1.12.0 entry does not say: ${claim}`)
   }
 
-  // Internal: the versions unchanged, the ledger's count read from the file.
+  // Internal: the versions unchanged, the ledger's count (a literal of history since 1.13 P1, below).
   const internal = section('### Internal')
   assert.deepEqual([STATE_VERSION, AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION], [8, 10, 4])
   assert.ok(internal.includes(`\`STATE_VERSION\` ${STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and \`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION} are unchanged`))
@@ -4360,10 +4362,13 @@ test('the 1.12.0 release notes: the newest entry, its date set at publish, every
     const want = m[1] === 'STATE_VERSION' ? STATE_VERSION : m[1] === 'AGENT_TABLES_REVISION' ? AGENT_TABLES_REVISION : EXPORT_SCHEMA_VERSION
     assert.equal(Number(m[2]), want, `the 1.12.0 entry says ${m[1]} ${m[2]}`)
   }
-  const ledger = JSON.parse(readDoc('l10n/rekey.json')) as { base: string; entries: unknown[] }
-  assert.equal(ledger.base, 'd39c2df')
-  assert.ok(internal.includes(`1.12's holds ${ledger.entries.length} entries since the 1.11.0 release`), `the 1.12.0 entry does not give the ledger's ${ledger.entries.length} entries`)
-  assert.equal(existsSync(join(ROOT, 'l10n/pending')), false, 'a pending list is on disk: the join is not done')
+  // 1.13 P1 (pinned and changed: the base read from l10n/rekey.json as d39c2df, the count from its entries, and no pending
+  // list on disk): `l10n-rekey.mjs --start a09a405` began 1.13's ledger, emptied the entries and wrote a list at cursor 0
+  // for each of the twenty-four, so 1.12's figures are history — the 121 entries of l10n/rekey.json at a09a405 (base
+  // d39c2df), a literal from here on, as the 1.12.0 notes shipped it; and no list on disk is one of 1.12's ledger.
+  assert.ok(internal.includes('1.12\'s holds 121 entries since the 1.11.0 release'), '1.12\'s ledger held 121 entries')
+  const ledgerBase = (JSON.parse(readDoc('l10n/rekey.json')) as { base: string }).base
+  assert.equal(ledgerBase === 'd39c2df' && existsSync(join(ROOT, 'l10n/pending')) && readdirSync(join(ROOT, 'l10n/pending')).length > 0, false, 'a pending list of 1.12 is on disk: the join is not done')
 
   // Claims the notes must not make: nothing beyond an AI agent's reading, no live test of a channel or of Codex, no
   // path, file, secret, review or date of the build.
@@ -4484,9 +4489,12 @@ test('the pages carry the sentences of the 1.12 documentation package, held to t
   assert.ok(flatText(doc.settings).includes('The rows\' titles, such as *Notifications: Channels*, are made by VS Code from the keys and stay English in every language.'))
   const tenNames = RENAMED_ALERTS_1_12.map((id) => LANGUAGES.find((e) => e.id === id)?.native)
   const languages = flatText(doc.languages)
-  const ledger = JSON.parse(readDoc('l10n/rekey.json')) as { entries: unknown[] }
+  // 1.13 P1 (pinned and changed: the count read from l10n/rekey.json's entries — here, in development.md's "It holds …
+  // entries" below and in the count's own check): `--start a09a405` emptied the ledger, so 1.12's count is history — the
+  // 121 entries of l10n/rekey.json at a09a405 (base d39c2df), a literal from here on.
+  const LEDGER_1_12 = 121
   for (const claim of [
-    `**In 1.12** the twenty-four languages beyond English and German worked through 1.12's ledger of English changes (${ledger.entries.length} entries) in four packages of six, each by an AI agent (Claude Opus 5.5); a reading pass by further AI agents followed, one per package, none of them a native speaker`,
+    `**In 1.12** the twenty-four languages beyond English and German worked through 1.12's ledger of English changes (${LEDGER_1_12} entries) in four packages of six, each by an AI agent (Claude Opus 5.5); a reading pass by further AI agents followed, one per package, none of them a native speaker`,
     `and ten of them (${tenNames.join(', ')}) renamed their Alerts category for it, because its old name is now the notifications' word: a reader who knew the old name finds the new one in the settings UI's list of categories`,
     'The macOS Keychain\'s name and its buttons ("Always Allow", "Allow") are written as each agent believed macOS shows them in the language, not checked on a Mac; Magyar keeps the English labels in quotation marks.',
     // D14: the open questions — 1.10's and 1.11's named, the one closed, 1.12's per family, none decided.
@@ -4502,7 +4510,6 @@ test('the pages carry the sentences of the 1.12 documentation package, held to t
     // What switches at once: the popups are alerts and messages, the notifications follow the language too.
     'and from then on every Quick Pick, alert, message, dialog and consent text, and every notification Token Pace sends to a channel (1.12)',
   ]) assert.ok(languages.includes(claim), `docs/languages.md does not say: ${claim}`)
-  assert.equal(ledger.entries.length, 121)
   // The facts under D2, D8 and D9: the glue rule and the countdown's `m`, the weekday forms per language, the terms.
   const main = readDoc('src/webview/main.ts')
   assert.ok(/const DURATION_GLUE_RE = \/\(\\d\\u00a0\(\?:d\|h\|min\)\)/.test(main), 'DURATION_GLUE_RE no longer glues d, h and min to a following part: say so in the docs')
@@ -4571,12 +4578,15 @@ test('the pages carry the sentences of the 1.12 documentation package, held to t
     '`FIELD_IDS_OF_A_KEY` — a key that names a setting\'s fields by their ids keeps them in English', 'beside `SAME_IN_EVERY_LANGUAGE` and `ADDED_AT_THE_JOIN`',
     'the kept-names guard — every name of `NAMES_OF_1_12` and the word `security` (macOS\'s tool) stand in a value at least as often as in its key',
     'the seventeen notification texts carry no `*`, `_`, `~` or backtick their English lacks',
-    `It holds ${ledger.entries.length} entries`, 'at the join `PENDING_ALLOWED` went back to false and `node scripts/nls-sources.mjs --check --strict` became the gate again',
+    `It holds ${LEDGER_1_12} entries`, 'at the join `PENDING_ALLOWED` went back to false and `node scripts/nls-sources.mjs --check --strict` became the gate again',
     'src/\'s network call sites against NETWORK_SITES', 'asks `notifyCheck()` — `noChannel` with no channel set up, no request made —',
     'No test reaches the network: the fetch and the sockets are injected, and a static test holds `test/` free of a real service\'s host.']) {
     assert.ok(dev.includes(claim), `docs/development.md does not say: ${claim}`)
   }
-  assert.ok(/export const PENDING_ALLOWED: boolean = false/.test(frame), 'the join flag is not false')
+  // 1.13 P1 (pinned and changed: the join flag false): 1.12's join set it false, and `--start a09a405` turned it true again
+  // for 1.13's lists until 1.13's join (P7) — history in development.md; test/languages.test.ts's join test holds the
+  // flag to the lists on disk.
+  assert.ok(/^export const PENDING_ALLOWED: boolean = (true|false)$/m.test(frame), 'the frame no longer declares the join flag on one line')
   assert.ok(readDoc('test-e2e/suite/index.ts').includes("assert.equal(await extensionApi().notifyCheck(), 'noChannel')"))
 
   // The README: the bullet, the privacy line of §0a.9, the credentials' places (Review 3 D1), the index rows.

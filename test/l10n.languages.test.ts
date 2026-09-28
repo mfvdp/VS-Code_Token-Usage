@@ -13,7 +13,8 @@
  *   T1  the keys: the bundle's are the extracted t() keys, the manifest's are package.nls.json's in its order
  *   T2  the parts: the four part files, each with exactly the German part's keys
  *   T3  the placeholders: every {n} of the key, as often
- *   T4  the marks: ~ ⚠ ≈ – % × → · as often as the key (the manifest: ~ ⚠ ≈ –)
+ *   T4  the marks: ~ ⚠ ≈ – % × → · as often as the key (the manifest: ~ ⚠ ≈ –); in a language written right to
+ *       left → and ← count as one mark (1.13)
  *   T5  the code: backtick spans, tokenPace ids, codicons, command targets; in the manifest also the
  *       setting links, command links, fences, paragraphs and JSON examples
  *   T6  the page's words carry no markup character
@@ -31,6 +32,8 @@
  *       sees them, in grapheme clusters (1.11 A3)
  *   T14 the pending list (1.10 B1): its keys in today's English, the ledger applied to its end, none
  *       for German, none at all once PENDING_ALLOWED is false
+ *   T15 the bar's examples (1.10 B3): every example a setting quotes is what the status bar prints for the fixture
+ *   T16 the direction (1.13 A4): no bidi control, no digit of another script, no presentation form, placeholders as {n}
  *
  * 1.10 B1: the English changes while 1.10's code is written, and each change is an entry of the
  * re-key ledger (l10n/rekey.json), which scripts/l10n-rekey.mjs applies to every language's files.
@@ -60,13 +63,24 @@
  * SESSION_NAME_KEYS lists the keys whose placeholder receives a session's name — held to the code by a scan of every t()
  * call and named in the brief (D10).
  *
+ * 1.13 E1, A4 (P1): Arabic, Hebrew and Persian are written right to left, and the frame learned them before a single
+ * value was written, each rule once, for every language: T16 holds the direction — no bidi control in a value (the
+ * isolates are the code's, never the translation's), no digit of another script, no Arabic presentation form, a
+ * placeholder only as {n} with ASCII digits; NON_LATIN gains ar, he and fa; T4 counts → and ← as one mark in a language
+ * RTL_LANGUAGES names (read from the registry's languageDir); RESET_CLOCK_KEYS lists the keys whose placeholder receives
+ * a reset clock that may carry a weekday, held to the code by a scan; the kept-names guard reads its seventeen
+ * notification texts from a literal of history (NOTIFY_TEXT_KEYS_1_12). The ledger started at 1.12.0's release commit
+ * (l10n-rekey.mjs --start a09a405) with a list at cursor 0 for each of the twenty-four, and PENDING_ALLOWED is true
+ * until 1.13's join (P7).
+ *
  * Every rule is a function over the files of one language, so it runs over the repository's files
  * and — each once with the mutation it exists to catch — over a synthetic language written into a
  * temporary directory: a copy of the German under another id (a Latin-script language), a
  * pseudo-translation of the English that turns every word into 語 and keeps everything the rules
  * hold (a language of another script), and — since 1.11 — the same pseudo-translation with every
- * word शुक्र under `hi` (a script whose weekday words are longer in code points than on the screen).
- * Each passes every rule before it is broken. No file outside
+ * word शुक्र under `hi` (a script whose weekday words are longer in code points than on the screen), and — since
+ * 1.13 — the same with every word كلمة and every → turned ← under `ar` (a script written right to left; the pseudo-RTL
+ * bundle of test/helpers/nls.ts). Each passes every rule before it is broken. No file outside
  * the repository and the test's own temporary directories is touched; nothing is sent anywhere.
  */
 
@@ -83,12 +97,16 @@ import { KEEP_WARM_TERMS_PASSAGE, KeepWarmConsent } from '../src/consent'
 import { setBundle, setLang, setLocale } from '../src/i18n'
 import { KEEP_WARM_LINE } from '../src/keepWarm'
 import { isLanguageId, LANGUAGE_IDS, languageEntry, languageName, LANGUAGES } from '../src/languages'
+import * as registry from '../src/languages'
 import type { StatsCtx } from '../src/stats'
 import { buildItems, makeContext, UsageSource } from '../src/statusText'
 import type { MementoLike } from '../src/storage'
 import { formatReset, weekdayWords } from '../src/time'
 import { emptyBucket, QuotaState, QuotaWindow } from '../src/types'
-import { LANGUAGE_NAME_AS_ENGLISH, ROOT } from './helpers/nls'
+import {
+  ARAB_WORD, frameKeptNames, KEPT_WORDS, LANGUAGE_NAME_AS_ENGLISH, LATIN_LETTERS, namePattern, protectedPattern, pseudoRtl, pseudoRtlBundle,
+  pseudoText, reEsc, ROOT,
+} from './helpers/nls'
 
 // ---------------------------------------------------------------------------
 // The words that stay the same in every language (T9)
@@ -215,8 +233,31 @@ export const SAME_IN_EVERY_LANGUAGE: ReadonlyArray<readonly [string, string]> = 
  * 1.11 A3 rule 1: Ukrainian (Cyrillic), Greek and Hindi (Devanagari) joined before they were written;
  * Vietnamese is written in Latin letters (LATIN_LETTERS spans its U+1E00–U+1EFF), so T9's Latin rule
  * holds it. A test holds this set to the scripts of the registry's native names.
+ * 1.13 A4 rule 2 (P1): Arabic, Hebrew and Persian join before they are written (NEW_IN_1_13) — the Arabic script
+ * and the Hebrew one, written right to left.
  */
-export const NON_LATIN: ReadonlySet<string> = new Set(['ja', 'ko', 'zh-cn', 'zh-tw', 'ru', 'uk', 'el', 'hi'])
+export const NON_LATIN: ReadonlySet<string> = new Set(['ja', 'ko', 'zh-cn', 'zh-tw', 'ru', 'uk', 'el', 'hi', 'ar', 'he', 'fa'])
+
+/**
+ * 1.13 §2.1: the three new languages' native names, in the collect row's order (after `ro`) — by code point, NFC: ar
+ * U+0627 0644 0639 0631 0628 064A 0629, he U+05E2 05D1 05E8 05D9 05EA, fa U+0641 0627 0631 0633 06CC (FARSI YEH, not
+ * the Arabic U+064A); a test pins them. Beside the registry until P2 adds the entries (as 1.11 P1's NEW_IN_1_11): the
+ * NON_LATIN test reads the scripts from them, and RTL_LANGUAGES falls back to their ids while src/languages.ts has no
+ * languageDir.
+ */
+export const NEW_IN_1_13: ReadonlyArray<readonly [string, string]> = [['ar', 'العربية'], ['he', 'עברית'], ['fa', 'فارسی']]
+
+/**
+ * 1.13 A4 rules 2–3: the languages written right to left — read from the registry (src/languages.ts `languageDir`, P2),
+ * never a literal of the frame's own. Until P2 exports languageDir the module has none, and the frame reads the ids of
+ * NEW_IN_1_13 instead; P2 retires the fallback. T4 counts → and ← as one mark in these languages.
+ */
+const languageDirOf = (registry as unknown as { languageDir?: (id: string) => string }).languageDir
+export const RTL_LANGUAGES: ReadonlySet<string> = new Set(typeof languageDirOf === 'function'
+  ? LANGUAGE_IDS.filter((id) => languageDirOf(id) === 'rtl')
+  : NEW_IN_1_13.map(([id]) => id))
+/** Where RTL_LANGUAGES came from: the registry's languageDir, or the fallback until P2. */
+export const RTL_FROM_REGISTRY: boolean = typeof languageDirOf === 'function'
 
 /**
  * T5: a backtick span of the manifest that is words, not code — a formula spelled in words or a
@@ -249,8 +290,12 @@ export const NLS_SPANS_READ_AS_WORDS: ReadonlyArray<readonly [string, string]> =
  * join (P10) sets it false. test/languages.test.ts's join test reads this line.
  * 1.12 P10: false — group O (O1–O4, six languages each) worked the twenty-four lists to the ledger's end (121 entries) and
  * deleted them; no list is left, and every rule holds every key of all twenty-four languages and German again.
+ * 1.13 P1: true again — `l10n-rekey.mjs --start a09a405` (the 1.12.0 release) started 1.13's ledger with a list at cursor
+ * 0 for each of the twenty-four languages beyond English and German (Arabic, Hebrew and Persian have no files and are
+ * never on the ledger: their packages write them whole); 1.13's join (P7) sets it false. test/languages.test.ts's join
+ * test reads this line.
  */
-export const PENDING_ALLOWED: boolean = false
+export const PENDING_ALLOWED: boolean = true
 
 /**
  * 1.11 A3 rule 11 (b): a language name a language writes as the English does — `[id, English name, reason]`. T10
@@ -343,6 +388,61 @@ export const SESSION_NAME_PAGE_FIELDS: ReadonlyArray<readonly [string, string]> 
   ['idName', 'a tree row\'s id name (agentTreeBuild.ts `idName`)'],
   ['it.label', 'a tree item\'s label — `it` in the page\'s tree renderers (agentLabel({ label: it.label, fullLabel: it.fullLabel, … }))'],
   ['n.label', 'an agent payload\'s label — `n` in agentLabel(n, kind) and agentSpoken(n, …)'],
+]
+
+/**
+ * 1.13 B5 rule 1 (P1): the t() keys with a placeholder that receives a reset clock — `[key, placeholder]`: a value of
+ * `resetClock(…)` (src/time.ts) or of `formatReset(…)`'s `absolute` and `both` forms, which write the weekday in front of
+ * the clock once the reset is a day or more away — "14:20" today, "Thu 14:20" beyond. The slot holds either, so a
+ * translation writes a form that reads with both: a label ("Reset: {0}"), a colon or brackets, never a preposition that
+ * takes a clock hour only (German *um*, Danish *kl.*, Ukrainian *о*, Greek *στις* — 1.12's Review L). No pattern judges a
+ * preposition (§7a Q27: a list, no rule): the brief names every key ("1.13: your pending list"), and a test finds them by
+ * a scan of every t() call of src/ and every tr() call of the page, which follows the two functions' values through
+ * variables, local functions, object fields, conditionals and wrapper calls into the arguments. A key that takes
+ * `formatTime` without a weekday — a clock of today — is not one ("{0} finished a turn at {1}").
+ */
+export const RESET_CLOCK_KEYS: ReadonlyArray<readonly [string, string]> = [
+  // statusText.ts resetSuffix — the bar's reset part: `absolute` (formatReset's text) and `both` (resetClock).
+  ['resets at {0}', '{0}'],
+  ['resets at {0} (in {1})', '{0}'],
+  // time.ts formatReset — the `both` form's two whole messages around resetClock's clock (1.11 D12).
+  ['{0} (in {1})', '{0}'],
+  ['{0} (reset due)', '{0}'],
+  // textViews.ts, the usage Quick Pick's detail — the view model's `resetAbsolute` (formatReset, absolute).
+  ['reset at {0}', '{0}'],
+  // notify.ts sentenceOf — the notifications' reset words (1.12 host n=68, n=70, n=73): `reset(…)` is resetClock, the ETA
+  // `estimate(reset(…))` is one too, with its ~.
+  ['{0}, {1} window: {2} used — resets at {3}.', '{3}'],
+  ['{0}, {1} window: exhausted — resets at {2}.', '{2}'],
+  ['{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.', '{3}'],
+  ['{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.', '{4}'],
+]
+
+/**
+ * 1.13 B5 rule 1: what the scan finds that is no reset clock — `[key, placeholder, reason]`, each read at its call site
+ * (§0b.14: an exception is per key and with its reason). The scan follows values, not the branch that picks a message.
+ */
+export const RESET_CLOCK_EXCEPTED: ReadonlyArray<readonly [string, string, string]> = [
+  ['resets {0}', '{0}', 'statusText.ts resetSuffix passes formatReset\'s text to it only for tokenPace.resetFormat `relative` — the countdown `2h14m` (relativeShort); `absolute` takes "resets at {0}", `both` returns before, `none` writes nothing'],
+]
+
+/**
+ * 1.13 B5 rule 1: the calls of the two functions in src/ — `[file, callee, count]`, the definitions not counted. Each
+ * call's value goes where the scan follows it; a new call is a clock to trace (as SESSION_NAME_SOURCES pins the name
+ * functions' calls). formatReset's `relative` form (viewModel.ts's card and Quick Pick countdown) is counted and makes no
+ * clock.
+ */
+export const RESET_CLOCK_SOURCES: ReadonlyArray<readonly [string, string, number]> = [
+  // sentenceOf's `reset` — the notifications' clocks.
+  ['src/notify.ts', 'resetClock', 1],
+  // resetSuffix (the bar's reset part), tooltipReset (the tooltip's table cell), the compact item's body.
+  ['src/statusText.ts', 'formatReset', 3],
+  // resetSuffix's `both` message.
+  ['src/statusText.ts', 'resetClock', 1],
+  // formatReset's own clock.
+  ['src/time.ts', 'resetClock', 1],
+  // The window's `reset` (relative — a countdown) and `resetAbsolute` (absolute — the Quick Pick's "reset at {0}").
+  ['src/viewModel.ts', 'formatReset', 2],
 ]
 
 // ---------------------------------------------------------------------------
@@ -557,43 +657,25 @@ const commandLinks = (s: string): string[] => sorted([...s.matchAll(/\(command:(
 const jsonBlocks = (s: string): string[] => [...s.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1])
 const paragraphs = (s: string): number => s.split('\n\n').length
 
-const reEsc = (x: string): string => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-/**
- * 1.12 D4 (L1-O2): a name of SAME_IN_EVERY_LANGUAGE as a pattern that takes any run of whitespace for each of its spaces —
- * a hard-wrapped text ("…as Claude\nCode's status line", the status-line consent's English) breaks a name where the
- * line ends, and "Claude\nCode" is the name "Claude Code" still, never the name Claude and the English word Code.
- */
-const namePattern = (name: string): string => reEsc(name).replace(/ /g, '\\s+')
+// 1.12 D4's namePattern (a name's spaces as any run of whitespace), reEsc and LATIN_LETTERS are test/helpers/nls.ts's since
+// 1.13 P1, beside the pattern below — the pseudo-RTL bundle is made with them.
 
 /**
  * What stands in a text as code or as a name, never as a word of its language: fences, backtick
  * spans, placeholders, addresses, command targets, setting ids and links, codicons, paths, file
  * names, model ids, the fixed forms that start with a digit (`2h14m`, `12.5K`, a hash) and the words
  * of SAME_IN_EVERY_LANGUAGE — a name of several words also across a line break (1.12 D4). T9 takes these out before it
- * compares; the pseudo-translation keeps them as they are.
+ * compares; the pseudo-translation keeps them as they are. 1.13 P1: the pattern is protectedPattern (test/helpers/nls.ts),
+ * made from this list — the pseudo-RTL bundle is made with the same one (a test holds the names that helper reads from
+ * this file equal to SAME_IN_EVERY_LANGUAGE).
  */
-const PROTECTED = new RegExp([
-  '```[\\s\\S]*?```',
-  '`[^`\\n]*`',
-  '\\{\\d+\\}',
-  'https?://[^\\s)]+',
-  '\\(command:[^)\\s]*\\)',
-  'command:[\\w.]+',
-  '#?tokenPace\\.[\\w.]+#?',
-  '\\$\\([\\w~-]+\\)',
-  '(?:~|%[A-Za-z]+%|[A-Za-z]:)?(?:[\\\\/][\\w.<>*~-]+)+[\\\\/]?',
-  '[\\w.<>-]*\\.(?:jsonl?|md|m?js|ts|lock|key|csv|toml|txt|log|vsix|sh|ps1|exe)\\b[\\w.<>-]*',
-  '\\b(?:claude|gpt|codex|o\\d)-[\\w.-]+',
-  '\\d[\\w.,:]*',
-  `(?<![\\p{L}\\p{N}])(?:${[...SAME_IN_EVERY_LANGUAGE.map(([w]) => w)].sort((a, b) => b.length - a.length).map(namePattern).join('|')})(?![\\p{L}\\p{N}])`,
-].join('|'), 'gu')
+const PROTECTED = protectedPattern(SAME_IN_EVERY_LANGUAGE.map(([w]) => w))
 
 /** The words of a text once its code and names are out: runs of letters, two or more. */
 function wordsOf(s: string): string[] {
   return (s.replace(PROTECTED, ' ').match(/[\p{L}\p{M}]+/gu) ?? []).filter((w) => [...w].length >= 2)
 }
-/** Latin letters, the accented ones among them — not × (U+00D7) or ÷ (U+00F7), which stand in that block. */
-const LATIN_LETTERS = 'A-Za-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u024F\\u1E00-\\u1EFF'
+/** A Latin word: letters of LATIN_LETTERS (test/helpers/nls.ts) only. */
 const LATIN_WORD = new RegExp(`^[${LATIN_LETTERS}]+$`, 'u')
 
 /** T9, Latin script: the key never its own translation (three words or more), and no four words of it in a row. */
@@ -845,6 +927,36 @@ export function barExampleProblems(id: string, file: string, nls: Record<string,
 // ---------------------------------------------------------------------------
 
 type Rule = (s: Source, l: LangFiles) => string[]
+
+/**
+ * 1.13 A4 rule 1 (T16): the bidi format characters a translation never writes — ALM U+061C, LRM U+200E, RLM U+200F,
+ * LRE … RLO U+202A–U+202E, LRI … PDI U+2066–U+2069 (src/bidi.ts's BIDI_CONTROLS from P5 on; written as escapes, the Trojan
+ * Source rule of VS Code 1.62). ZWNJ U+200C and ZWJ U+200D are not among them: Persian writes ZWNJ inside words (سه‌شنبه).
+ */
+const BIDI_CONTROL_CHARS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu
+/** T16 (b): a decimal digit of another script — any \p{Nd} but 0–9 (Arabic-Indic, Extended Arabic-Indic, Devanagari, fullwidth …). */
+const FOREIGN_DIGITS = /(?![0-9])\p{Nd}/gu
+/** T16 (c): an Arabic presentation form — the shaped letters of U+FB50–U+FDFF and U+FE70–U+FEFF. */
+const PRESENTATION_FORMS = /[\uFB50-\uFDFF\uFE70-\uFEFF]/gu
+/** T16 (d): a placeholder written otherwise than `{` ASCII digits `}` — typed in visual order (`}0{`), or in other digits (`{٠}`). */
+const PLACEHOLDER_LIKE = /\}\p{Nd}+\{|\{[\p{Nd}\s]*\p{Nd}[\p{Nd}\s]*\}/gu
+const turnedPlaceholders = (x: string): string[] => (x.match(PLACEHOLDER_LIKE) ?? []).filter((p) => !/^\{[0-9]+\}$/.test(p))
+const T16_CLAUSES: ReadonlyArray<readonly [string, (x: string) => string[]]> = [
+  ['a bidi control the key lacks (the isolates are the code\'s, never the translation\'s — write in logical order, no direction mark)', (x) => x.match(BIDI_CONTROL_CHARS) ?? []],
+  ['a digit of another script the key lacks (the digits 0–9 only: the formatter writes the figures)', (x) => x.match(FOREIGN_DIGITS) ?? []],
+  ['an Arabic presentation form (write the letters unshaped, in logical order — a shaped form breaks search, copy and the font\'s own shaping)', (x) => x.match(PRESENTATION_FORMS) ?? []],
+  ['a placeholder turned or in other digits (a placeholder is exactly { ASCII digits }, as {0} — never }0{ or {٠})', turnedPlaceholders],
+]
+/** What `have` holds beyond `want`, as a multiset. */
+function beyond(have: readonly string[], want: readonly string[]): string[] {
+  const left = [...want]
+  return have.filter((x) => { const i = left.indexOf(x); if (i < 0) return true; left.splice(i, 1); return false })
+}
+/** A character or a short run as its code points: `U+200F`, `}0{ (U+007D U+0030 U+007B)`. */
+const shown = (x: string): string => {
+  const points = [...x].map((c) => `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`).join(' ')
+  return [...x].length === 1 ? points : `${J(x)} (${points})`
+}
 const BUNDLE = (l: LangFiles): string => `l10n/bundle.l10n.${l.id}.json`
 const NLS = (l: LangFiles): string => `package.nls.${l.id}.json`
 
@@ -909,14 +1021,24 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
     ],
   },
   T4: {
-    title: 'the marks — ~ ⚠ ≈ – % × → · as often as the key (the manifest: ~ ⚠ ≈ –); ASCII ~, never ～; no Greek ano teleia, which NFC makes a ·',
+    title: 'the marks — ~ ⚠ ≈ – % × → · as often as the key (the manifest: ~ ⚠ ≈ –), → and ← as one mark in a language written right to left; ASCII ~, never ～; no Greek ano teleia, which NFC makes a ·',
     rule: (s, l) => {
       const out: string[] = []
       // 1.11 A3 rule 6: the marks of the NFC form — a Greek ano teleia (U+0387) is the separator · there, and counts so.
       const nfc = (x: string): string => x.normalize('NFC')
       const teleia = (file: string, key: string): string => `${l.id}: ${file}: ${key} writes the Greek ano teleia (U+0387), which NFC makes the separator · — write a comma or a full stop`
+      // 1.13 A4 rule 3 (§7a Q31): a right-to-left reader reads a range, a sequence or "scroll sideways →" from the right,
+      // and the arrow that points on in that reading is ← — in such a language → and ← are one mark, as many as the key's.
+      const rtl = RTL_LANGUAGES.has(l.id)
       for (const [k, v] of entries(l.bundle)) {
-        for (const m of MARKS) if (count(nfc(v), m) !== count(nfc(k), m)) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} has ${count(nfc(v), m)} × ${m}, its key ${count(nfc(k), m)}`)
+        for (const m of MARKS) {
+          if (m === '→' && rtl) {
+            const [have, want] = [nfc(v), nfc(k)].map((x) => count(x, '→') + count(x, '←'))
+            if (have !== want) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} has ${have} × → or ←, its key ${want} (written right to left: → and ← are one mark)`)
+            continue
+          }
+          if (count(nfc(v), m) !== count(nfc(k), m)) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} has ${count(nfc(v), m)} × ${m}, its key ${count(nfc(k), m)}`)
+        }
         if (v.includes('～') || v.includes('・')) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} writes ～ or ・ for ~ or ·`)
         if (v.includes(ANO_TELEIA)) out.push(teleia(BUNDLE(l), J(k)))
       }
@@ -1110,6 +1232,23 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
     // A pending manifest key is exempt: the ledger changed its English, and the language's package writes it again.
     rule: (_s, l) => (l.nls ? barExampleProblems(l.id, NLS(l), l.nls, l.bundle, (k) => nlsPending(l, k)) : []),
   },
+  T16: {
+    title: 'the direction — no bidi control, no digit of another script, no presentation form, placeholders as {n} (1.13 A4)',
+    // Every value, a pending manifest key's among them: the English carries none of the four, so neither may a value
+    // that is still the English or a translation of the English before its change.
+    rule: (s, l) => {
+      const out: string[] = []
+      const check = (file: string, key: string, en: string, v: string): void => {
+        for (const [what, find] of T16_CLAUSES) {
+          const extra = beyond(find(v), find(en))
+          if (extra.length > 0) out.push(`${l.id}: ${file}: ${key} writes ${what}: ${extra.map(shown).join(' ')}`)
+        }
+      }
+      for (const [k, v] of entries(l.bundle)) check(BUNDLE(l), J(k), k, v)
+      for (const [k, v] of Object.entries(l.nls ?? {})) if (typeof v === 'string') check(NLS(l), k, s.english[k] ?? '', v)
+      return out
+    },
+  },
 }
 
 /** T12 runs the script as the gate does, once per directory and mode: its problems, one per line, "<id>: <key> — …". */
@@ -1138,11 +1277,19 @@ test('the frame runs over the languages on disk — German among them — and En
   // 1.11 P8 (A8): at the join the frame measures every language of the registry but English — German and the twenty-four.
   // 1.12 P1 (pinned and changed: at the join only): every language has its files since 1.11's join, and 1.12's lists at
   // cursor 0 take none away — the frame measures the twenty-five on the build branch too.
-  assert.deepEqual(ON_DISK, LANGUAGE_IDS.filter((id) => id !== 'en'))
-  assert.equal(ON_DISK.length, 25)
+  // 1.13 P1 (pinned and changed: every language of the registry but English, twenty-five): the registry gains Arabic,
+  // Hebrew and Persian with P2, and their files one package at a time (N1–N3) — until the join a language of NEW_IN_1_13
+  // may have no file yet; every other language of the registry has its files, and at the join (P7) every one has.
+  const unwritten = LANGUAGE_IDS.filter((id) => id !== 'en' && !ON_DISK.includes(id))
+  assert.deepEqual(unwritten.filter((id) => !NEW_IN_1_13.some(([n]) => n === id)), [], 'a language of 1.12 has no files')
+  if (!PENDING_ALLOWED) assert.deepEqual(unwritten, [], `at the join every language is written: ${unwritten.join(', ')} is not`)
+  // In the registry's order, and no file named after a language the registry does not have.
+  assert.deepEqual(ON_DISK, LANGUAGE_IDS.filter((id) => id !== 'en' && ON_DISK.includes(id)))
+  assert.ok(ON_DISK.length >= 25, `only ${ON_DISK.length} languages on disk`)
   // 1.10 B1 (pinned and changed: thirteen rules): T14, the pending list, runs over every language too.
   // 1.10 B3 (pinned and changed: fourteen rules): T15, the bar's examples, too — and over the English (below).
-  assert.deepEqual(Object.keys(RULES), ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T14', 'T15'])
+  // 1.13 P1 (pinned and changed: fifteen rules): T16, the direction, too.
+  assert.deepEqual(Object.keys(RULES), ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T14', 'T15', 'T16'])
   // The references are what they claim to be.
   const s = src()
   assert.ok(s.keys.length >= 1000, `only ${s.keys.length} t() keys`)
@@ -1183,18 +1330,11 @@ function tempDir(): string {
 
 /**
  * The English turned into a language of another script: every word 語 (or `word`), everything the rules hold
- * kept — the code, the names, the placeholders, the marks, the quotation marks, the paragraphs.
+ * kept — the code, the names, the placeholders, the marks, the quotation marks, the paragraphs. 1.13 P1: pseudoText of
+ * test/helpers/nls.ts over PROTECTED, the function the pseudo-RTL bundle is made with.
  */
-const PSEUDO_WORD = new RegExp(`[${LATIN_LETTERS}]+(?:['’][${LATIN_LETTERS}]+)*`, 'gu')
 function pseudo(english: string, word: string = '語'): string {
-  let out = ''
-  let at = 0
-  for (const m of english.matchAll(PROTECTED)) {
-    out += english.slice(at, m.index).replace(PSEUDO_WORD, word)
-    out += m[0]
-    at = (m.index ?? 0) + m[0].length
-  }
-  return out + english.slice(at).replace(PSEUDO_WORD, word)
+  return pseudoText(english, word, PROTECTED)
 }
 /**
  * 1.11 A3 rule 10: the word of the `deva` fixture — Hindi's short Friday as ICU writes it, two grapheme clusters and five
@@ -1213,9 +1353,11 @@ function writeJson(file: string, table: Record<string, string>): void {
  * (made by the script, as a translation package makes it). `german`: the German's words under
  * another id — a Latin-script language that passes every rule; `pseudo`: the English as 語 — a
  * language of another script that passes every rule; `deva` (1.11 A3 rule 10): the English as शुक्र,
- * meant for the id `hi` — Devanagari, whose words are longer in code points than on the screen.
+ * meant for the id `hi` — Devanagari, whose words are longer in code points than on the screen; `arab` (1.13 A4 rule 6):
+ * the English as كلمة with every → turned ←, meant for the id `ar` — a script written right to left, the texts of
+ * pseudoRtlBundle() (test/helpers/nls.ts), which the isolate test and the harness install too.
  */
-type FixtureKind = 'german' | 'pseudo' | 'deva'
+type FixtureKind = 'german' | 'pseudo' | 'deva' | 'arab'
 const BASES = new Map<string, string>()
 function fixture(kind: FixtureKind, id: string): string {
   const cacheKey = `${kind}:${id}`
@@ -1230,9 +1372,11 @@ function fixture(kind: FixtureKind, id: string): string {
     // 1.11 P2: a language name German writes as the English (LANGUAGE_NAME_AS_ENGLISH — Hindi) is German's alone; under
     // another id the fixture writes it as a word of its own, as that language's translation would.
     const germanWord = (k: string): string => (id !== 'de' && germanBundle[k] === k && LANGUAGE_NAME_AS_ENGLISH.some(([lang, name]) => lang === 'de' && name === k) ? `${k}-Sprache` : germanBundle[k])
+    // 1.13 P1: the `arab` texts are pseudoRtl's, the very ones pseudoRtlBundle() hands the isolate test and the harness.
+    const other = (en: string): string => (kind === 'arab' ? pseudoRtl(en) : pseudo(en, kind === 'deva' ? DEVA_WORD : '語'))
     for (const part of PARTS) {
       const table: Record<string, string> = {}
-      for (const k of s.germanParts[part]) table[k] = kind === 'german' ? germanWord(k) : pseudo(k, kind === 'deva' ? DEVA_WORD : '語')
+      for (const k of s.germanParts[part]) table[k] = kind === 'german' ? germanWord(k) : other(k)
       writeJson(join(base, 'l10n', 'parts', `${part}.${id}.json`), table)
       Object.assign(merged, table)
     }
@@ -1241,7 +1385,7 @@ function fixture(kind: FixtureKind, id: string): string {
     writeJson(join(base, 'l10n', `bundle.l10n.${id}.json`), bundle)
     const nls: Record<string, string> = {}
     for (const [k, en] of Object.entries(s.english)) {
-      nls[k] = kind === 'german' ? germanNls[k] : k.startsWith('config.language.enum.') && k !== 'config.language.enum.auto' ? en : pseudo(en, kind === 'deva' ? DEVA_WORD : '語')
+      nls[k] = kind === 'german' ? germanNls[k] : k.startsWith('config.language.enum.') && k !== 'config.language.enum.auto' ? en : other(en)
     }
     writeJson(join(base, `package.nls.${id}.json`), nls)
     const r = spawnSync(process.execPath, [join(ROOT, 'scripts', 'nls-sources.mjs'), id], { cwd: base, encoding: 'utf8' })
@@ -1299,17 +1443,21 @@ function caughtAs(pendingAllowed: boolean, no: string, dir: string, id: string, 
   }
 }
 
-test('the three synthetic languages — the German under fr, the English as 語 under ja, the English as शुक्र under hi — pass every rule (1.11 A3 rule 10: the third)', () => {
-  for (const [kind, id] of [['german', 'fr'], ['pseudo', 'ja'], ['deva', 'hi']] as const) {
+test('the four synthetic languages — the German under fr, the English as 語 under ja, the English as शुक्र under hi, the English as كلمة under ar — pass every rule (1.11 A3 rule 10: the third; 1.13 A4 rule 6: the fourth)', () => {
+  // 1.13 P1 (pinned and changed: three synthetic languages): the `arab` fixture joins, written right to left.
+  for (const [kind, id] of [['german', 'fr'], ['pseudo', 'ja'], ['deva', 'hi'], ['arab', 'ar']] as const) {
     const dir = fixture(kind, id)
     // 1.10 B3: but T15, which reads the bar under the id's own locale — the German's “Mo 06:00” is not what a French bar
     // prints (“lun. 06:00”), nor 語 a Japanese weekday. T15 runs over the real files and its own fixtures (below).
     // 1.11 P1: and T10 for `hi` until the registry has it (1.11 P2) — T10 names a file after no registry id, by design.
+    // 1.13 P1: and for `ar` until the registry has it (1.13 P2), the same way.
     const rules = Object.keys(RULES).filter((x) => x !== 'T15' && (x !== 'T10' || isLanguageId(id)))
     for (const no of rules) assert.deepEqual(run(no, dir, id), [], `${no} fails the unbroken ${kind} fixture ${id}`)
   }
   assert.ok(isLanguageId('hi') || run('T10', fixture('deva', 'hi'), 'hi').every((p) => p.startsWith('hi: no language of the registry')),
     'T10 names something of the deva fixture beyond its unregistered id')
+  assert.ok(isLanguageId('ar') || run('T10', fixture('arab', 'ar'), 'ar').every((p) => p.startsWith('ar: no language of the registry')),
+    'T10 names something of the arab fixture beyond its unregistered id')
 })
 
 test('T1 catches a bundle key gone, a key src/ does not have, and a manifest out of order', () => {
@@ -1452,8 +1600,34 @@ test('T9 lets the field ids a key lists stand in a language of another script �
  * ledger's n=59–75: the six titles, the nine event sentences, the test message and its answer — P7-D3: they go to chat
  * services as they are) carry no `*`, `_`, `~` or backtick the key does not have. The brief's 1.12 section says so.
  */
-const KEPT_NAMES: ReadonlyArray<string> = [...NAMES_OF_1_12.map(([w]) => w), 'security']
-const NOTIFY_TEXT_RANGE: readonly [number, number] = [59, 75]
+// 1.13 P1: `security` is test/helpers/nls.ts's KEPT_WORDS, which the pseudo-RTL text keeps too.
+const KEPT_NAMES: ReadonlyArray<string> = [...NAMES_OF_1_12.map(([w]) => w), ...KEPT_WORDS]
+/**
+ * 1.13 E1 rule 3, A4 rule 8 (P1 — pinned and changed: the texts read from the live ledger, l10n/rekey.json's `add`
+ * entries of the host part with n 59–75): `l10n-rekey.mjs --start a09a405` empties the ledger, and a guard that read its
+ * texts from there would then check no text and pass. The seventeen keys are copied once from `git show
+ * a09a405:l10n/rekey.json` (1.12's ledger, base d39c2df: n=59–75, kind add, part host) — a literal of history from here
+ * on; a test holds that there are seventeen and that each is a key of the English bundle.
+ */
+export const NOTIFY_TEXT_KEYS_1_12: ReadonlyArray<string> = [
+  'Token Pace: {0} is waiting for you',
+  'Token Pace: a long turn finished',
+  'Token Pace: quota threshold reached',
+  'Token Pace: quota exhausted',
+  'Token Pace: quota window reset',
+  'Token Pace: quota runs out before its reset',
+  '{0} is waiting for your permission (since {1}).',
+  '{0} is waiting for your answer (since {1}).',
+  '{0} finished a turn at {1}, after at least {2}.',
+  '{0}, {1} window: {2} used — resets at {3}.',
+  '{0}, {1} window: {2} used.',
+  '{0}, {1} window: exhausted — resets at {2}.',
+  '{0}, {1} window: exhausted.',
+  '{0}, {1} window: reset at {2} — {3} used in the new window.',
+  '{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.',
+  'Token Pace: test message',
+  'This channel works: Token Pace can reach it. Sent at {0}.',
+]
 const MARKDOWN_MARKS: ReadonlyArray<string> = ['*', '_', '~', '`']
 /**
  * How often a name stands in a text, whole: no Latin letter or digit joined to it (that would be another word), while a
@@ -1463,10 +1637,9 @@ const MARKDOWN_MARKS: ReadonlyArray<string> = ['*', '_', '~', '`']
 function keptCount(text: string, name: string): number {
   return (text.match(new RegExp(`(?<![${LATIN_LETTERS}0-9])${namePattern(name)}(?![${LATIN_LETTERS}0-9])`, 'gu')) ?? []).length
 }
-/** The notification texts' keys: the ledger's host-part additions n=59–75. */
+/** The notification texts' keys: 1.12's ledger's host-part additions n=59–75, as a literal since 1.13 P1. */
 function notifyTextKeys(): string[] {
-  const ledger = JSON.parse(readFileSync(join(ROOT, 'l10n', 'rekey.json'), 'utf8')) as { entries: LedgerEntry[] }
-  return ledger.entries.filter((e) => e.kind === 'add' && e.part === 'host' && e.n >= NOTIFY_TEXT_RANGE[0] && e.n <= NOTIFY_TEXT_RANGE[1] && typeof e.key === 'string').map((e) => e.key as string)
+  return [...NOTIFY_TEXT_KEYS_1_12]
 }
 /** One language's problems: a name lost from a bundle or manifest value, a markdown mark added to a notification text. */
 function keptNamesLeft(s: Source, l: LangFiles, notifyKeys: readonly string[]): string[] {
@@ -1494,7 +1667,9 @@ function keptNamesLeft(s: Source, l: LangFiles, notifyKeys: readonly string[]): 
 test('the names of 1.12 and `security` are kept in every language on disk, and the notification texts carry no markdown mark the key lacks (Review L 1.12 finding 1)', () => {
   const s = src()
   const keys = notifyTextKeys()
-  assert.equal(keys.length, 17, 'the ledger\'s n=59–75 are the seventeen notification texts')
+  // 1.13 P1 (pinned and changed: the count of the live ledger's n=59–75): the literal of history, each a key of the bundle.
+  assert.equal(keys.length, 17, 'NOTIFY_TEXT_KEYS_1_12 is the seventeen notification texts of 1.12\'s ledger, n=59–75')
+  assert.equal(new Set(keys).size, 17, 'a notification text stands twice in NOTIFY_TEXT_KEYS_1_12')
   for (const k of keys) assert.ok(s.keys.includes(k), `${J(k)} is not a bundle key`)
   assert.equal(KEPT_NAMES.length, 14)
   // Most names stand in the English (STARTTLS was listed before a text used it — P1, E1 rule 2); the check holds the ones that do.
@@ -2116,16 +2291,20 @@ const NEW_IN_1_11: ReadonlyArray<readonly [string, string]> = [
 /** Whether a native name is written in Latin letters: every letter of it one LATIN_WORD matches. */
 const latinName = (native: string): boolean => (native.match(/[\p{L}\p{M}]+/gu) ?? []).every((w) => LATIN_WORD.test(w))
 
-test('T9: NON_LATIN is the languages whose native name is not in Latin letters — the registry\'s and the twelve of 1.11 (Ukrainian, Greek, Hindi join; Vietnamese stays Latin: LATIN_WORD takes both words of "Tiếng Việt") (1.11 A3 rule 1)', () => {
+test('T9: NON_LATIN is the languages whose native name is not in Latin letters — the registry\'s, the twelve of 1.11 (Ukrainian, Greek, Hindi join; Vietnamese stays Latin: LATIN_WORD takes both words of "Tiếng Việt") and the three of 1.13 (Arabic, Hebrew, Persian) (1.11 A3 rule 1; 1.13 A4 rule 2)', () => {
   assert.deepEqual(['Tiếng', 'Việt'].map((w) => LATIN_WORD.test(w)), [true, true])
-  const all = new Map<string, string>([...LANGUAGES.map((e): [string, string] => [e.id, e.native]), ...NEW_IN_1_11])
-  assert.equal(all.size, LANGUAGES.length + NEW_IN_1_11.filter(([id]) => !isLanguageId(id)).length, 'a new id collides with another')
+  // 1.13 P1 (pinned and changed: the registry and NEW_IN_1_11): NEW_IN_1_13 beside them until P2 adds the entries — where
+  // the registry has one of the three, its native name is NEW_IN_1_13's, code point for code point.
+  const planned = [...NEW_IN_1_11, ...NEW_IN_1_13]
+  for (const [id, native] of NEW_IN_1_13) if (isLanguageId(id)) assert.equal(languageEntry(id).native, native, `${id}: the registry's native name`)
+  const all = new Map<string, string>([...LANGUAGES.map((e): [string, string] => [e.id, e.native]), ...planned])
+  assert.equal(all.size, LANGUAGES.length + planned.filter(([id]) => !isLanguageId(id)).length, 'a new id collides with another')
   for (const [id, native] of all) {
     if (id === 'en') continue
     assert.equal(NON_LATIN.has(id), !latinName(native), `${id} (${native}): ${NON_LATIN.has(id) ? 'in' : 'not in'} NON_LATIN`)
   }
   assert.deepEqual([...NON_LATIN].filter((id) => !all.has(id)), [], 'NON_LATIN names a language nobody plans')
-  for (const id of ['uk', 'el', 'hi']) assert.ok(NON_LATIN.has(id), id)
+  for (const id of ['uk', 'el', 'hi', 'ar', 'he', 'fa']) assert.ok(NON_LATIN.has(id), id)
 })
 
 test('T9 catches three Latin words in a row in the Devanagari fixture under hi — and a Hindi value written in Devanagari passes (1.11 A3 rules 1, 10)', () => {
@@ -2523,4 +2702,421 @@ test('the brief\'s 1.12 sections: your pending list — the ledger\'s start, the
   // The T9 rule's paragraph points to the 1.12 names and says a name holds across a line break.
   assert.ok(flat.includes('from 1.12 on the names of [1.12: your pending list](#112-your-pending-list)'))
   assert.ok(flat.includes('a name of several words also where a line break splits it (1.12)'))
+})
+
+// ---------------------------------------------------------------------------
+// 1.13 P1: the frame for right to left — T16, the arrow, the `arab` fixture and the pseudo-RTL bundle, the names kept, the
+// reset-clock slots
+// ---------------------------------------------------------------------------
+
+const codePoints = (x: string): string[] => [...x].map((c) => c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0'))
+
+test('NEW_IN_1_13 names Arabic, Hebrew and Persian by code point, and RTL_LANGUAGES is the three — read from the registry\'s languageDir once P2 exports it, from NEW_IN_1_13 until then (1.13 §2.1, A4 rules 2–3)', () => {
+  assert.deepEqual(NEW_IN_1_13.map(([id]) => id), ['ar', 'he', 'fa'])
+  assert.deepEqual(NEW_IN_1_13.map(([, native]) => codePoints(native)), [
+    ['0627', '0644', '0639', '0631', '0628', '064A', '0629'],
+    ['05E2', '05D1', '05E8', '05D9', '05EA'],
+    // FARSI YEH (U+06CC), not the Arabic yeh (U+064A).
+    ['0641', '0627', '0631', '0633', '06CC'],
+  ])
+  for (const [, native] of NEW_IN_1_13) assert.equal(native.normalize('NFC'), native)
+  assert.deepEqual([...RTL_LANGUAGES].sort(), ['ar', 'fa', 'he'])
+  for (const id of RTL_LANGUAGES) assert.ok(NON_LATIN.has(id), `${id} is written right to left and not in NON_LATIN`)
+  // The source says which: the registry's function (P2 on — every other language of the registry left to right), or the
+  // fallback, which only stands while the registry has none of the three.
+  if (RTL_FROM_REGISTRY) {
+    const dirOf = (registry as unknown as { languageDir: (id: string) => string }).languageDir
+    for (const id of LANGUAGE_IDS) assert.equal(dirOf(id), RTL_LANGUAGES.has(id) ? 'rtl' : 'ltr', id)
+  } else {
+    assert.deepEqual(NEW_IN_1_13.filter(([id]) => isLanguageId(id)), [], 'the registry has a language of 1.13 and no languageDir')
+  }
+})
+
+test('T16 catches a bidi control, a digit of another script, an Arabic presentation form and a turned placeholder in the arab fixture under ar — each clause with its own message — and lets ZWNJ and ZWJ stand (1.13 A4 rule 1)', () => {
+  const clean = fixture('arab', 'ar')
+  assert.deepEqual(run('T16', clean, 'ar'), [])
+  const key = keyWhere((k) => k === 'Refresh')
+  // (a) An isolate typed into a value (RLI … PDI), and an RLM in a manifest value.
+  const a = fixture('arab', 'ar')
+  editKey(a, 'ar', key, (v) => `⁧${v}⁩`)
+  edit(a, 'package.nls.ar.json', (t) => { t.description = `‏${t.description}` })
+  caught('T16', a, 'ar', clean, `${J(key)} writes a bidi control the key lacks`, 'U+2067 U+2069', 'package.nls.ar.json: description writes a bidi control', 'U+200F')
+  // (b) Arabic-Indic digits: ٣٠ for the key's 30, ٢٥ for the manifest example's 25.
+  const b = fixture('arab', 'ar')
+  editKey(b, 'ar', '30 days', (v) => v.replace('30', '٣٠'))
+  edit(b, 'package.nls.ar.json', (t) => {
+    assert.ok(t['config.resetFormat.enum.relative'].includes('25%'), t['config.resetFormat.enum.relative'])
+    t['config.resetFormat.enum.relative'] = t['config.resetFormat.enum.relative'].replace('25%', '٢٥%')
+  })
+  caught('T16', b, 'ar', clean, '"30 days" writes a digit of another script', 'U+0663 U+0660', 'config.resetFormat.enum.relative writes a digit of another script', 'U+0662 U+0665')
+  // (c) A shaped letter pasted from a PDF: ﻛ (U+FEDB, KAF INITIAL FORM) for ك.
+  const c = fixture('arab', 'ar')
+  editKey(c, 'ar', key, (v) => v.replace('ك', 'ﻛ'))
+  caught('T16', c, 'ar', clean, `${J(key)} writes an Arabic presentation form`, 'U+FEDB')
+  // (d) A placeholder typed in visual order, and one in Arabic-Indic digits.
+  const withZero = keyWhere((k) => /^[^{}]*\{0\}[^{}]*$/.test(k) && !k.includes('`'))
+  const d = fixture('arab', 'ar')
+  editKey(d, 'ar', withZero, (v) => v.replace('{0}', '}0{'))
+  caught('T16', d, 'ar', clean, `${J(withZero)} writes a placeholder turned or in other digits`, '"}0{"')
+  const e = fixture('arab', 'ar')
+  editKey(e, 'ar', withZero, (v) => v.replace('{0}', '{٠}'))
+  caught('T16', e, 'ar', clean, `${J(withZero)} writes a placeholder turned or in other digits`, '"{٠}"', 'writes a digit of another script')
+  // Persian orthography: ZWNJ inside a word (سه‌شنبه), and ZWJ, are no bidi controls.
+  const zw = fixture('arab', 'ar')
+  editKey(zw, 'ar', key, (v) => `${v} سه‌شنبه ك‍`)
+  assert.deepEqual(run('T16', zw, 'ar'), [])
+  // In every language, not only the ones written right to left: a Devanagari digit in the deva fixture, an RLM in German.
+  const hi = fixture('deva', 'hi')
+  editKey(hi, 'hi', '30 days', (v) => v.replace('30', '३०'))
+  caught('T16', hi, 'hi', fixture('deva', 'hi'), '"30 days" writes a digit of another script', 'U+0969 U+0966')
+  const de = fixture('german', 'fr')
+  editKey(de, 'fr', key, (v) => `${v}‏`)
+  caught('T16', de, 'fr', fixture('german', 'fr'), `${J(key)} writes a bidi control`, 'U+200F')
+})
+
+test('T16 over the files on disk: none of the twenty-five carries a bidi control, a foreign digit, a presentation form or a turned placeholder — the scan counted, every bundle and manifest value (1.13 A4 rule 9)', () => {
+  let values = 0
+  const problems: string[] = []
+  for (const id of ON_DISK) {
+    const l = loadLang(ROOT, id)
+    values += entries(l.bundle).length + Object.keys(l.nls ?? {}).length
+    problems.push(...RULES.T16.rule(src(), l))
+  }
+  assert.deepEqual(problems, [])
+  assert.ok(ON_DISK.length >= 25 && values >= 25 * 1500, `only ${values} values read in ${ON_DISK.length} languages`)
+})
+
+test('T9 catches three Latin words in a row in the arab fixture under ar — ar is in NON_LATIN — and two Latin names and a code span pass (1.13 A4 rule 2)', () => {
+  const clean = fixture('arab', 'ar')
+  const key = keyWhere((k) => k === 'Not enough data for a summary yet.')
+  const dir = fixture('arab', 'ar')
+  editKey(dir, 'ar', key, () => `${ARAB_WORD}: not enough data yet`)
+  caught('T9', dir, 'ar', clean, J(key), 'three Latin words in a row: "not enough data"')
+  const two = fixture('arab', 'ar')
+  editKey(two, 'ar', key, () => `${ARAB_WORD} Claude Code ${ARAB_WORD} \`tokenPace.x\` data yet`)
+  assert.deepEqual(run('T9', two, 'ar'), [])
+})
+
+test('T4 counts → and ← as one mark in a language written right to left — the arab fixture\'s ← passes, an arrow dropped or doubled fails; in a left-to-right language ← is no →; no verdict of the twenty-five changes (1.13 A4 rule 3, §7a Q31)', () => {
+  const clean = fixture('arab', 'ar')
+  const key = keyWhere((k) => k === 'scroll sideways for the remaining columns →')
+  assert.equal(readTable(join(clean, 'l10n', 'bundle.l10n.ar.json'))[key], `${Array(6).fill(ARAB_WORD).join(' ')} ←`)
+  assert.deepEqual(run('T4', clean, 'ar'), [])
+  const dropped = fixture('arab', 'ar')
+  editKey(dropped, 'ar', key, (v) => v.replace(' ←', ''))
+  caught('T4', dropped, 'ar', clean, `${J(key)} has 0 × → or ←, its key 1`)
+  const doubled = fixture('arab', 'ar')
+  editKey(doubled, 'ar', key, (v) => `→ ${v}`)
+  caught('T4', doubled, 'ar', clean, `${J(key)} has 2 × → or ←, its key 1`)
+  // The English's → kept in a right-to-left value is fine too — a chart's axis stays left to right (A6 rule 5).
+  const kept = fixture('arab', 'ar')
+  editKey(kept, 'ar', key, (v) => v.replace('←', '→'))
+  assert.deepEqual(run('T4', kept, 'ar'), [])
+  // Left to right: the rule does not apply, and a ← for the key's → is a lost → there.
+  const cleanJa = fixture('pseudo', 'ja')
+  const ja = fixture('pseudo', 'ja')
+  editKey(ja, 'ja', key, (v) => v.replace('→', '←'))
+  caught('T4', ja, 'ja', cleanJa, `${J(key)} has 0 × →, its key 1`)
+  // Over the files on disk: no value of a language written left to right would be judged otherwise by the arrow rule — so
+  // it changes no verdict of the twenty-five (and applies to none of them).
+  const changed: string[] = []
+  for (const id of ON_DISK) {
+    if (RTL_LANGUAGES.has(id)) continue
+    for (const [k, v] of entries(loadLang(ROOT, id).bundle)) {
+      const [nk, nv] = [k.normalize('NFC'), v.normalize('NFC')]
+      const ltr = count(nv, '→') === count(nk, '→')
+      const rtl = count(nv, '→') + count(nv, '←') === count(nk, '→') + count(nk, '←')
+      if (ltr !== rtl) changed.push(`${id}: ${J(k)}`)
+    }
+  }
+  assert.deepEqual(changed, [])
+})
+
+test('the pseudo-RTL bundle (test/helpers/nls.ts) is the arab fixture: every t() key as كلمة with → turned ←, the names, code and placeholders kept, no bidi control — made by the frame\'s own pattern (1.13 A4 rule 6)', () => {
+  const s = src()
+  // The helper reads the frame's names from this file: the same list, in its order.
+  assert.deepEqual(frameKeptNames(), SAME_IN_EVERY_LANGUAGE.map(([w]) => w))
+  assert.equal(protectedPattern(frameKeptNames()).source, PROTECTED.source)
+  // And the guard's one word beside the names (`security`, macOS's tool): the pseudo-RTL text keeps what the guard holds.
+  assert.deepEqual(KEPT_NAMES.filter((w) => !NAMES_OF_1_12.some(([n]) => n === w)), [...KEPT_WORDS])
+  assert.equal(pseudoRtl('Token Pace reads it with macOS\'s security tool'), `Token Pace ${ARAB_WORD} ${ARAB_WORD} ${ARAB_WORD} macOS's security ${ARAB_WORD}`)
+  assert.deepEqual(codePoints(ARAB_WORD), ['0643', '0644', '0645', '0629'])
+  assert.equal(graphemes(ARAB_WORD), 4)
+  const bundle = pseudoRtlBundle()
+  assert.deepEqual(Object.keys(bundle), sorted(s.keys))
+  assert.deepEqual(bundle, readTable(join(fixture('arab', 'ar'), 'l10n', 'bundle.l10n.ar.json')))
+  for (const [k, v] of Object.entries(bundle)) {
+    assert.deepEqual(v.match(BIDI_CONTROL_CHARS), null, J(k))
+    assert.deepEqual(placeholders(v), placeholders(k), J(k))
+    assert.equal(count(v, '←'), count(k, '→'), J(k))
+    assert.equal(count(v, '→'), 0, J(k))
+    assert.equal(nonLatinLeft(v), null, J(k))
+  }
+  assert.equal(pseudoRtl('Refresh'), ARAB_WORD)
+  assert.equal(pseudoRtl('Token Pace reads `~/.claude` for Claude Code — {0} → {1}'), `Token Pace ${ARAB_WORD} \`~/.claude\` ${ARAB_WORD} Claude Code — {0} ← {1}`)
+  // Nothing of it is on disk: the files the frame needs are written into its own temporary directories.
+  assert.equal(existsSync(join(ROOT, 'l10n', 'bundle.l10n.ar.json')) && !isLanguageId('ar'), false)
+})
+
+test('the kept-names guard holds the arab fixture as it holds the twenty-four — every name kept, a Telegram in Arabic letters caught — and catches a name dropped from a copy of a real language (1.13 A4 rule 8, §5 Review 1)', () => {
+  const s = src()
+  const keys = notifyTextKeys()
+  assert.deepEqual(keptNamesLeft(s, loadLang(fixture('arab', 'ar'), 'ar'), keys), [])
+  const telegram = keyWhere((k) => keptCount(k, 'Telegram') > 0)
+  const dir = fixture('arab', 'ar')
+  editKey(dir, 'ar', telegram, (v) => v.replace(/Telegram/g, 'تيليجرام'))
+  assert.ok(keptNamesLeft(s, loadLang(dir, 'ar'), keys).some((p) => p.includes(J(telegram)) && p.includes('keeps Telegram 0×')))
+  // A copy of the Russian files with one name taken out of one value: the guard is not vacuous on real files.
+  const ru = realFiles('ru')
+  assert.deepEqual(keptNamesLeft(s, loadLang(ru, 'ru'), keys), [])
+  const value = readTable(join(ru, 'l10n', 'bundle.l10n.ru.json'))[telegram]
+  assert.ok(value.includes('Telegram'), value)
+  editKey(ru, 'ru', telegram, (v) => v.replace('Telegram', 'Телеграм'))
+  assert.ok(keptNamesLeft(s, loadLang(ru, 'ru'), keys).some((p) => p.startsWith('ru: ') && p.includes(J(telegram)) && p.includes('keeps Telegram')))
+})
+
+test('NOTIFY_TEXT_KEYS_1_12 is the seventeen notification texts of 1.12\'s ledger (n=59–75, add, host) — a literal of history, each a key of the bundle in the host part (1.13 E1 rule 3, A4 rule 8)', () => {
+  const s = src()
+  assert.equal(NOTIFY_TEXT_KEYS_1_12.length, 17)
+  assert.equal(new Set(NOTIFY_TEXT_KEYS_1_12).size, 17)
+  for (const k of NOTIFY_TEXT_KEYS_1_12) {
+    assert.ok(s.keys.includes(k), `${J(k)} is not a key of the bundle`)
+    assert.ok(s.germanParts.host.includes(k), `${J(k)} is not in the host part`)
+  }
+  // Six titles, nine event sentences, the test message and its answer.
+  assert.equal(NOTIFY_TEXT_KEYS_1_12.filter((k) => k.startsWith('Token Pace: ')).length, 7)
+  assert.deepEqual(notifyTextKeys(), [...NOTIFY_TEXT_KEYS_1_12])
+})
+
+/** 1.13 B5 rule 1: every t() and tr() call of the scanned files with the arguments a reset clock reaches — read by the TypeScript parser. */
+interface ResetClockScan {
+  found: Array<{ file: string; fn: 't' | 'tr'; key: string; ph: string; line: number }>
+  calls: { t: number; tr: number }
+  fields: string[]
+  sources: Array<{ file: string; callee: string; line: number }>
+}
+/**
+ * The scan: the directories named on its command line (src/ by default), every `.ts` file. A value is a reset clock when it
+ * is a call of `resetClock`, or of `formatReset` whose format is not the literal `relative` or `none`; a variable, a local
+ * function (its returned value) or an object field (`resetAbsolute:`) bound to one; a conditional, `??` or `||` with one
+ * in a branch; a wrapper call with one as an argument (`estimate(…)`, `esc(…)`) or a method of one. A t() or tr() call is
+ * a barrier — its result is a sentence, not a clock —, and a text that merely contains a clock (a template, a `+`) is
+ * followed into a t() argument only, never into a binding. Scopes are functions (a block's shadowing is ignored).
+ */
+const RESET_CLOCK_SCAN = `
+const ts = require('typescript')
+const fs = require('fs')
+const path = require('path')
+const root = process.cwd()
+const dirs = process.argv.length > 1 ? process.argv.slice(1) : [path.join(root, 'src')]
+const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name))
+  : e.name.endsWith('.ts') && !e.name.endsWith('.d.ts') ? [path.join(d, e.name)] : []).sort()
+const importsT = (sf) => sf.statements.some((s) => ts.isImportDeclaration(s) && ts.isStringLiteral(s.moduleSpecifier)
+  && /(^|\\/)i18n$/.test(s.moduleSpecifier.text) && s.importClause && s.importClause.namedBindings
+  && ts.isNamedImports(s.importClause.namedBindings)
+  && s.importClause.namedBindings.elements.some((el) => el.name.text === 't' && (!el.propertyName || el.propertyName.text === 't')))
+const files = dirs.flatMap(walk).map((file) => {
+  const sf = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  return { label: path.relative(root, file).split(path.sep).join('/'), sf, withT: importsT(sf),
+    withTr: sf.statements.some((s) => ts.isFunctionDeclaration(s) && s.name && s.name.text === 'tr') }
+})
+const isScope = (n) => ts.isSourceFile(n) || ts.isFunctionLike(n)
+const scopeOf = (n) => { let p = n.parent; while (p && !isScope(p)) p = p.parent; return p }
+const vars = new Map()
+const fns = new Map()
+const fields = new Set()
+const add = (m, scope, name) => { if (!m.has(scope)) m.set(scope, new Set()); if (m.get(scope).has(name)) return false; m.get(scope).add(name); return true }
+const bound = (m, node, name) => { for (let p = node.parent; p; p = p.parent) if (isScope(p) && m.has(p) && m.get(p).has(name)) return true; return false }
+const isTr = (c) => ts.isIdentifier(c.expression) && (c.expression.text === 't' || c.expression.text === 'tr')
+const relative = (c) => !!c.arguments[2] && ts.isStringLiteral(c.arguments[2]) && (c.arguments[2].text === 'relative' || c.arguments[2].text === 'none')
+function carries(e, texts) {
+  if (!e) return false
+  if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e)) return carries(e.expression, texts)
+  if (ts.isConditionalExpression(e)) return carries(e.whenTrue, texts) || carries(e.whenFalse, texts)
+  if (ts.isBinaryExpression(e) && (e.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken || e.operatorToken.kind === ts.SyntaxKind.BarBarToken)) return carries(e.left, texts) || carries(e.right, texts)
+  if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.PlusToken) return texts && (carries(e.left, texts) || carries(e.right, texts))
+  if (ts.isTemplateExpression(e)) return texts && e.templateSpans.some((s) => carries(s.expression, texts))
+  if (ts.isIdentifier(e)) return bound(vars, e, e.text)
+  if (ts.isPropertyAccessExpression(e)) return fields.has(e.name.text)
+  if (ts.isCallExpression(e)) {
+    if (isTr(e)) return false
+    const c = e.expression
+    if (ts.isIdentifier(c)) {
+      if (c.text === 'resetClock') return true
+      if (c.text === 'formatReset') return !relative(e)
+      if (bound(fns, e, c.text)) return true
+    }
+    if (ts.isPropertyAccessExpression(c) && carries(c.expression, false)) return true
+    return e.arguments.some((a) => carries(a, false))
+  }
+  return false
+}
+const returnsOf = (fn) => {
+  if (fn.body && !ts.isBlock(fn.body)) return [fn.body]
+  const out = []
+  const visit = (n) => { if (n !== fn && ts.isFunctionLike(n)) return; if (ts.isReturnStatement(n) && n.expression) out.push(n.expression); ts.forEachChild(n, visit) }
+  if (fn.body) visit(fn.body)
+  return out
+}
+for (let changed = true, round = 0; changed && round < 20; round++) {
+  changed = false
+  for (const { sf } of files) {
+    const visit = (n) => {
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+        const init = n.initializer
+        if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+          if (returnsOf(init).some((r) => carries(r, false))) changed = add(fns, scopeOf(n), n.name.text) || changed
+        } else if (carries(init, false)) changed = add(vars, scopeOf(n), n.name.text) || changed
+      }
+      if (ts.isFunctionDeclaration(n) && n.name && returnsOf(n).some((r) => carries(r, false))) changed = add(fns, scopeOf(n), n.name.text) || changed
+      if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(n.left) && carries(n.right, false)) changed = add(vars, scopeOf(n), n.left.text) || changed
+      if (ts.isPropertyAssignment(n) && (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name)) && carries(n.initializer, false) && !fields.has(n.name.text)) { fields.add(n.name.text); changed = true }
+      if (ts.isShorthandPropertyAssignment(n) && bound(vars, n, n.name.text) && !fields.has(n.name.text)) { fields.add(n.name.text); changed = true }
+      ts.forEachChild(n, visit)
+    }
+    visit(sf)
+  }
+}
+const out = { found: [], calls: { t: 0, tr: 0 }, fields: [...fields].sort(), sources: [] }
+for (const { label, sf, withT, withTr } of files) {
+  const visit = (n) => {
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
+      const c = n.expression.text
+      const first = n.arguments[0]
+      const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+      if (((withT && c === 't') || (withTr && c === 'tr')) && first && (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first))) {
+        out.calls[c]++
+        n.arguments.slice(1).forEach((a, i) => { if (carries(a, true)) out.found.push({ file: label, fn: c, key: first.text, ph: '{' + i + '}', line }) })
+      }
+      if (c === 'resetClock' || c === 'formatReset') out.sources.push({ file: label, callee: c, line })
+    }
+    ts.forEachChild(n, visit)
+  }
+  visit(sf)
+}
+process.stdout.write(JSON.stringify(out))
+`
+const RESET_SCANS = new Map<string, ResetClockScan>()
+/** Runs the scan over `dirs` (src/ when none), from the repository root — its TypeScript parser is the checkout's. */
+function resetClockScan(...dirs: string[]): ResetClockScan {
+  const cacheKey = dirs.join('\u0000')
+  const hit = RESET_SCANS.get(cacheKey)
+  if (hit) return hit
+  const r = spawnSync(process.execPath, ['-e', RESET_CLOCK_SCAN, ...dirs], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  assert.equal(r.status, 0, `the reset-clock scan failed:\n${r.stderr}`)
+  const scan = JSON.parse(r.stdout) as ResetClockScan
+  RESET_SCANS.set(cacheKey, scan)
+  return scan
+}
+/** The scan's slots, `key\u0000{n}`, sorted and each once. */
+const slotsOf = (scan: ResetClockScan): string[] => [...new Set(scan.found.map((f) => `${f.key}\u0000${f.ph}`))].sort()
+
+test('RESET_CLOCK_KEYS: every key a t() key that holds its placeholder, and exactly the slots a reset clock reaches — found by a scan of every t() call of src/ and tr() call of the page, the exceptions each with its reason, the two functions\' calls pinned (1.13 B5 rules 1, 3)', () => {
+  const s = src()
+  const listed = RESET_CLOCK_KEYS.map(([k, ph]) => `${k}\u0000${ph}`)
+  assert.equal(new Set(listed).size, listed.length, 'a slot stands twice in RESET_CLOCK_KEYS')
+  for (const [key, ph] of [...RESET_CLOCK_KEYS, ...RESET_CLOCK_EXCEPTED.map(([k, p]) => [k, p] as const)]) {
+    assert.ok(s.keys.includes(key), `${J(key)} is no t() key of src/ (any more)`)
+    assert.ok(/^\{\d\}$/.test(ph) && key.includes(ph), `${J(key)} does not hold ${ph}`)
+  }
+  assert.deepEqual([RESET_CLOCK_KEYS.length, new Set(RESET_CLOCK_KEYS.map(([k]) => k)).size, RESET_CLOCK_EXCEPTED.length], [9, 8, 1])
+  for (const [key, , why] of RESET_CLOCK_EXCEPTED) assert.ok(why.length > 20 && !listed.some((x) => x.startsWith(`${key}\u0000`)), `${J(key)}: no reason, or listed too`)
+  const scan = resetClockScan()
+  assert.ok(scan.calls.t >= 1000 && scan.calls.tr >= 300, `the scan read ${scan.calls.t} t() and ${scan.calls.tr} tr() calls`)
+  // The scan and the lists: the listed slots and the excepted ones, no more, no less.
+  assert.deepEqual(slotsOf(scan), [...listed, ...RESET_CLOCK_EXCEPTED.map(([k, ph]) => `${k}\u0000${ph}`)].sort())
+  // The one field the view model carries a clock in, and where the two functions are called.
+  assert.deepEqual(scan.fields, ['resetAbsolute'])
+  const counts = new Map<string, number>()
+  for (const x of scan.sources) counts.set(`${x.file} ${x.callee}`, (counts.get(`${x.file} ${x.callee}`) ?? 0) + 1)
+  assert.deepEqual([...counts.entries()].sort(), RESET_CLOCK_SOURCES.map(([f, c, n]): [string, number] => [`${f} ${c}`, n]).sort())
+  // The German writes „um" before these slots today (1.12; P6 turns it into the label form — B5 rule 2).
+  const german = readTable(join(ROOT, 'l10n', 'bundle.l10n.de.json'))
+  for (const [key] of RESET_CLOCK_KEYS) assert.equal(typeof german[key], 'string', `${J(key)}: no German`)
+})
+
+test('RESET_CLOCK_KEYS\' scan follows a clock through a variable, a local function, a field, a wrapper and a template, stops at a t() call and at formatReset\'s relative form — and a new t(…, resetClock(…)) call beside src/ is a slot the list lacks (1.13 B5 rule 3\'s mutation)', () => {
+  const dir = tempDir()
+  mkdirSync(join(dir, 'x'), { recursive: true })
+  writeFileSync(join(dir, 'x', 'host.ts'), [
+    "import { t } from './i18n'",
+    "import { formatReset, resetClock } from './time'",
+    'declare const cfg: never; declare const esc: (s: string) => string',
+    "export const direct = (): string => t('Direct {0}', resetClock(1, 2, cfg))",
+    "export function viaVar(): string { const c = resetClock(1, 2, cfg); return t('Var {0} and {1}', 5, c) }",
+    "export function viaFn(): string { const f = (x: number): string => formatReset(x, 1, 'both', cfg); return t('Fn {0}', f(1)) }",
+    "export const made = { at: formatReset(1, 2, 'absolute', cfg), rel: formatReset(1, 2, 'relative', cfg) }",
+    "export const viaField = (o: typeof made): string => t('Field {0} rel {1}', o.at, o.rel)",
+    "export const wrapped = (): string => t('Wrapped {0}', esc(resetClock(1, 2, cfg)))",
+    "export const template = (): string => t('Template {0}', `~${resetClock(1, 2, cfg)}`)",
+    "export const barrier = (): string => t('Outer {0}', t('Inner {0}', resetClock(1, 2, cfg)))",
+    "export const countdown = (): string => t('Countdown {0}', formatReset(1, 2, 'relative', cfg))",
+    "export const lineOf = (): string => { const line = `${resetClock(1, 2, cfg)} · x`; return t('Line {0}', line) }",
+  ].join('\n'))
+  writeFileSync(join(dir, 'x', 'page.ts'), [
+    'declare const resetClock: (a: number) => string',
+    'function tr(key: string, ...args: string[]): string { return key + args.join() }',
+    "export const onPage = (): string => tr('Page {0}', resetClock(1))",
+  ].join('\n'))
+  const scan = resetClockScan(join(dir, 'x'))
+  assert.deepEqual(slotsOf(scan), ['Direct {0}\u0000{0}', 'Field {0} rel {1}\u0000{0}', 'Fn {0}\u0000{0}', 'Inner {0}\u0000{0}', 'Page {0}\u0000{0}',
+    'Template {0}\u0000{0}', 'Var {0} and {1}\u0000{1}', 'Wrapped {0}\u0000{0}'])
+  assert.deepEqual(scan.fields, ['at'])
+  // The mutation: src/ as it is, and one more call beside it — the scan finds a slot RESET_CLOCK_KEYS does not list.
+  const listed = [...RESET_CLOCK_KEYS, ...RESET_CLOCK_EXCEPTED.map(([k, ph]) => [k, ph] as const)].map(([k, ph]) => `${k}\u0000${ph}`).sort()
+  const more = tempDir()
+  writeFileSync(join(more, 'mutation.ts'), "import { t } from './i18n'\nimport { resetClock } from './time'\ndeclare const cfg: never\nexport const m = (): string => t('Quota back at {0}', resetClock(1, 2, cfg))\n")
+  const mutated = resetClockScan(join(ROOT, 'src'), more)
+  assert.deepEqual(slotsOf(mutated).filter((x) => !listed.includes(x)), ['Quota back at {0}\u0000{0}'])
+  assert.deepEqual(slotsOf(resetClockScan(join(ROOT, 'src'))), listed)
+})
+
+test('the brief\'s 1.13 sections: right to left — the isolates the code\'s, logical order, the arrows, the digits and %, names and code Latin, the quotation marks, ZWNJ, the native names; a new language, whole — ar, he, fa with their register, plurals and weekday words; your pending list — the language names, the count, L1–L4, the reset-clock slots with every key of RESET_CLOCK_KEYS (1.13 E1 rule 4, B5 rule 1)', () => {
+  const brief = readFileSync(join(ROOT, 'l10n', 'TRANSLATING.md'), 'utf8')
+  const flat = brief.replace(/\s+/g, ' ')
+  const rtl = flat.indexOf('## 1.13: right to left')
+  const whole = flat.indexOf('## 1.13: a new language, whole')
+  const list = flat.indexOf('## 1.13: your pending list')
+  const gates = flat.indexOf('## The gates')
+  const names = flat.indexOf('## Session names and product names in placeholders (1.12)')
+  assert.ok(names < rtl && rtl < whole && whole < list && list < gates, 'the brief lacks its three 1.13 sections after 1.12\'s, before the gates')
+  const a = flat.slice(rtl, whole)
+  for (const needed of [
+    'The isolates are the code\'s, never the translation\'s.', 'Never write a direction mark', 'U+200E', 'U+200F', 'U+2066', 'U+2069', 'U+061C', '(T16)',
+    'logical order', 'never in visual order', 'never reverse a Latin word',
+    '`→` and `←` count as one mark', '(T4)', 'a range', '`Longest streak {0} days · {1} → {2}`', '`{1} ← {2}`', 'scroll sideways for the remaining columns →',
+    'a chart\'s axis', 'the digits `0–9` only', '`٠–٩`', '`۰–۹`', '`%`', '`٪`', 'Latin inside the sentence',
+    '`«…»`', '`"…"`', '`„…”`', 'ZWNJ', 'U+200C', '`\u0633\u0647\u200C\u0634\u0646\u0628\u0647`', 'presentation form', 'U+FB50', '`}0{`', '`{٠}`',
+    '`العربية`', '`עברית`', '`فارسی`', 'U+06CC', 'FARSI YEH',
+  ]) assert.ok(a.includes(needed), `the brief's "1.13: right to left" does not say: ${needed}`)
+  const b = flat.slice(whole, list)
+  for (const needed of [
+    '`ar` العربية', '`he` עברית', '`fa` فارسی', 'the English at the frozen tip', 'the German as a second reference',
+    'Another language\'s translation is not a source', 'not even Persian for Arabic',
+    '[1.11: a new language, whole](#111-a-new-language-whole)', 'items 1 and 3–12',
+    'Modern Standard Arabic', 'verbal nouns', 'حفظ', 'يمكن', 'masculine singular', 'the infinitive', 'לשמור', 'שמירה', 'יש ל', 'شما', 'ذخیره',
+    'not verified against a style guide', 'zero/one/two/few/many/other', 'dual', 'the label form', '"الجلسات: {0}"', '"סשנים: {0}"', '"{0} جلسه"',
+    'grapheme clusters', 'Intl\'s short forms', '`א׳`', '`ש׳`', '`ی د س چ پ ج ش`', '`ح ن ث ر خ ج س`',
+    '`،`', '`؛`', '`؟`', '≤ 100 characters', 'copy what T15 prints', '`06:00 ص`', 'alert', 'notification', '"Always Allow"',
+    'Not a native speaker: the translations are an AI agent\'s.', 'the arrows turned', 'out-test/bidi.test.js',
+    'node scripts/nls-sources.mjs --check --strict <id>', 'test ! -e l10n/pending/<id>.json',
+  ]) assert.ok(b.includes(needed), `the brief's "1.13: a new language, whole" does not say: ${needed}`)
+  const c = flat.slice(list, gates)
+  for (const needed of [
+    'node scripts/l10n-rekey.mjs --start a09a405', 'the twenty-four languages beyond English and German', 'node scripts/l10n-rekey.mjs --print <id>',
+    '`translate`', '`review`', '`Arabic`', '`Hebrew`', '`Persian`', 'nls-add', 'config.language.description', 'twenty-seven',
+    'config.credentials.keychain.description', 'a VS Code window', 'config.notifications.telegram.description', 'a public Telegram channel',
+    'the e-mail channel\'s setup hint', '`host`, `user`, `from` and `to` in backticks', 'config.codexAppServer.mode.description', 'the app-server ends',
+    '**The reset-clock slots**', '`14:20`', '`Thu 14:20`', 'a label (`Reset: {0}`)', 'German *um*', 'Danish *kl.*', 'Ukrainian *о*', 'Greek *στις*',
+    '`RESET_CLOCK_KEYS`', 'kept with their reasons', 'node scripts/nls-sources.mjs <id>', 'test ! -e l10n/pending/<id>.json',
+    'stay open', 'Not a native speaker: the translations are an AI agent\'s.',
+  ]) assert.ok(c.includes(needed), `the brief's "1.13: your pending list" does not say: ${needed}`)
+  // Every reset-clock slot, whole, in backticks, with its placeholder.
+  for (const [key, ph] of RESET_CLOCK_KEYS) assert.ok(c.includes(`\`${key}\` (${ph})`) || c.includes(`\`${key}\` (${ph} and`) || c.includes(`and ${ph})`) , `the brief does not name the slot ${ph} of ${J(key)}`)
+  for (const [key] of RESET_CLOCK_KEYS) assert.ok(c.includes(`\`${key}\``), `the brief does not name the reset-clock key ${J(key)}`)
+  // T16 in the rules' list, the arrow in T4's, NON_LATIN's three in T9's, and the T9 sentence on FIELD_IDS_OF_A_KEY marked for 1.13's P6.
+  assert.ok(flat.includes('**T16 · Direction** (1.13)'), 'the brief does not describe T16')
+  assert.ok(flat.includes('in a language written right to left (Arabic, Hebrew, Persian) `→` and `←` count as one mark (1.13)'))
+  assert.ok(flat.includes('and from 1.13 on Arabic, Hebrew and Persian'))
+  assert.ok(flat.includes('(1.13: P6 empties this list with L3 — the key\'s ids in backticks'))
 })

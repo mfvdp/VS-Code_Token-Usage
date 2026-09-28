@@ -27,7 +27,8 @@ import script from 'webview:script'
 import { SOURCES, SOURCE_TITLE } from './adapters'
 import { MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS } from './agentTree'
 import { FLAG_SVG } from './flags'
-import { lang, locale, t } from './i18n'
+import { dir, lang, locale, t } from './i18n'
+import type { TextDirection } from './languages'
 import { WebviewMessage, parseWebviewMessage } from './viewModel'
 import type { CacheWatchCard, QuotaCard, ViewModel } from './viewModel'
 
@@ -146,16 +147,19 @@ export function pagePayload(vm: ViewModel): PageViewModel {
  * 1.9 A3.4: the page's words as a whole push carries them after a switch — the words' language (the
  * page's `lang`), the Intl tag its own numbers use, and exactly the dictionary `webviewDictionary()`
  * writes into a new page, every value HTML-escaped (the markup rule holds on the push path too).
+ * 1.13 A2 rule 1 (§0a.1): and the words' direction (the page's `dir`) — the words' language's, never VS Code's
+ * (`i18n.ts` `dir()`), so a switch at run time turns the page without a reload.
  */
 export interface PageWords {
   lang: string
   locale: string
+  dir: TextDirection
   dict: Record<string, string>
 }
 
 /** 1.9 A3.4: the words of now, for a whole push. */
 export function pageWords(): PageWords {
-  return { lang: lang(), locale: locale(), dict: webviewDictionaryObject() }
+  return { lang: lang(), locale: locale(), dir: htmlDir(), dict: webviewDictionaryObject() }
 }
 
 /** A field of the view model as a push carries it: the quota cards without the host's parts (1.8 P10). */
@@ -173,6 +177,16 @@ function pageField(vm: ViewModel, f: keyof ViewModel): unknown {
  */
 function htmlLang(): string {
   return lang()
+}
+
+/**
+ * 1.13 A2 rule 1 (§0a.1): the page's direction — the words' language's (`dir()`, set by `applyLanguage` from the
+ * registry's `languageDir`), exactly 'ltr' or 'rtl': the allow-list the page's `applyWords` holds a push to as well.
+ * Never `auto` on the root — the words' language is known — and never VS Code's tag: an English page under VS Code's
+ * `ar` without the Arabic bundle is left to right.
+ */
+function htmlDir(): TextDirection {
+  return dir() === 'rtl' ? 'rtl' : 'ltr'
 }
 
 function nonceOf(): string {
@@ -270,10 +284,13 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
    * 1.9 A3.4: the language (`lang()`) whose words the page's document holds — set by html() and by every
    * push that carries words. With `wordsLocale`, the tag its own numbers are formatted with (`LOCALE`):
    * a switch that keeps the words' language but moves the formats (`auto` under VS Code's `hu` → `en`)
-   * has to reach the page too. Undefined while no document was written.
+   * has to reach the page too. Undefined while no document was written. 1.13 A2 rule 1: with `wordsDir`, the
+   * direction the document is laid out in (its root's `dir`) — the words' language's, so it moves with `wordsLang`;
+   * held apart all the same, so that no switch can leave a page in the other direction.
    */
   private wordsLang: string | undefined
   private wordsLocale: string | undefined
+  private wordsDir: TextDirection | undefined
 
   constructor(
     private readonly onMessage: (m: WebviewMessage) => void,
@@ -400,11 +417,12 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
       // 1.8 L-3: without the host's own fields — the page never reads them. 1.9 A3.4: and with the
       // page's words when its document holds another language's (a switch), never otherwise.
       const message: { type: 'data'; payload: PageViewModel; words?: PageWords } = { type: 'data', payload: pagePayload(vm) }
-      const wordsDue = this.wordsLang !== lang() || this.wordsLocale !== locale()
+      const wordsDue = this.wordsLang !== lang() || this.wordsLocale !== locale() || this.wordsDir !== htmlDir()
       if (wordsDue) {
         message.words = pageWords()
         this.wordsLang = lang()
         this.wordsLocale = locale()
+        this.wordsDir = htmlDir()
       }
       const delivered: unknown = view.webview.postMessage(message)
       // A post VS Code reports as not delivered leaves the document in its old words: the next whole
@@ -515,8 +533,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
     // 1.9 A3.4: the document is written in the words of now — a push carries words only after a switch.
     this.wordsLang = lang()
     this.wordsLocale = locale()
+    this.wordsDir = htmlDir()
     return `<!DOCTYPE html>
-<html lang="${htmlLang().replace(/[^A-Za-z0-9-]/g, '')}">
+<html lang="${htmlLang().replace(/[^A-Za-z0-9-]/g, '')}" dir="${htmlDir()}">
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
@@ -671,9 +690,12 @@ summary::-webkit-details-marker { display: none; }
 summary h2 { display: flex; align-items: center; gap: 6px; margin: 0; flex: 1 1 auto; }
 /* Only while the body is there: a folded section's own margin is the whole gap. */
 details[open] summary { margin-bottom: 8px; }
-/* The twisty is drawn, not typed: a glyph in the markup would end up in the copied text. */
+/* The twisty is drawn, not typed: a glyph in the markup would end up in the copied text. 1.13 A2 rule 2: a closed one
+   points to the inline end — ▸ left to right, ◂ right to left (--tp-closed, the one [dir="rtl"] rule below the tree's
+   rows turns it for the three closed disclosures of the page), as Chromium's own disclosure-closed marker turns. */
+:root { --tp-closed: "▸"; }
 summary h2::before { content: "▾"; font-size: 9px; line-height: 1; opacity: .7; }
-details:not([open]) summary h2::before { content: "▸"; }
+details:not([open]) summary h2::before { content: var(--tp-closed); }
 summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 /* The gear at the end of a section header: quiet until it is wanted, and never a reason for
    the header to grow. 24 x 24 of target around the 16 px icon, because the whole summary row
@@ -776,7 +798,7 @@ input[type=date] { cursor: text; }
 /* The open list, under the button and aligned to its end: the menu's own colours, the page's tokens where a
    theme has none; never wider than the view (no sideways page scroll at 260 px), at most min(70vh, 440px)
    tall — the list scrolls inside, the two lines under it stay. */
-.lng-pop { position: absolute; top: 100%; right: 0; z-index: 20; margin-top: 4px; box-sizing: border-box;
+.lng-pop { position: absolute; top: 100%; inset-inline-end: 0; z-index: 20; margin-top: 4px; box-sizing: border-box;
            width: min(320px, calc(100vw - 16px)); max-height: min(70vh, 440px);
            display: flex; flex-direction: column; padding: 4px 0 6px; border-radius: 4px;
            background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
@@ -803,7 +825,7 @@ input[type=date] { cursor: text; }
 .lng-check { flex: none; }
 .lng-note { margin: 6px 10px 0; flex: none; }
 /* The caption ends the range row; a little air keeps it apart from the last chip. */
-.bar .cap { margin-left: 2px; }
+.bar .cap { margin-inline-start: 2px; }
 .icon { display: inline-flex; align-items: center; justify-content: center; line-height: 0;
         padding: 3px 5px; justify-self: end; }
 .icon svg { display: block; }
@@ -821,14 +843,18 @@ input[type=date] { cursor: text; }
    is hard to make out; track between the end of the fill and the marker is time the window
    still has in hand and is a stronger grey than the rest of the track — more foreground mixed
    in, which reads lighter on a dark theme and darker on a light one. */
-.fill.over { position: absolute; top: 0; left: 0; border-radius: 0 4px 4px 0; }
+/* 1.13 A2 rule 7 (§7a Q3): the bar is mirrored in a right-to-left page — the parts drawn from the inline start (the
+   script sets their inset-inline-start from data-x, applyStyles), the rounded end at the inline end. */
+.fill.over { position: absolute; top: 0; inset-inline-start: 0; border-radius: 0; border-start-end-radius: 4px;
+             border-end-end-radius: 4px; }
 .fill.over.ok { background: color-mix(in srgb, var(--ok) 65%, black); }
 .fill.over.warn { background: color-mix(in srgb, var(--warn) 65%, black); }
 .fill.over.warn2 { background: color-mix(in srgb, var(--warn2) 65%, black); }
 .fill.over.error { background: color-mix(in srgb, var(--error) 65%, black); }
-.slack { position: absolute; top: 0; left: 0; height: 100%; border-radius: 0 4px 4px 0;
+.slack { position: absolute; top: 0; inset-inline-start: 0; height: 100%; border-radius: 0; border-start-end-radius: 4px;
+         border-end-end-radius: 4px;
          background: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
-.mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px;
+.mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-inline-start: -1px;
         background: var(--vscode-foreground); opacity: .6; border-radius: 1px; }
 .mark.fc { background: var(--warn); opacity: .9; border-radius: 0; width: 2px;
            border-top: 2px solid var(--vscode-foreground); }
@@ -848,7 +874,7 @@ input[type=date] { cursor: text; }
    narrow sidebar loses the countdown, which is the one thing the header is for. */
 .win-top span { min-width: 0; }
 .win-top b { color: var(--vscode-foreground); font-variant-numeric: tabular-nums; flex: none;
-             margin-left: auto; }
+             margin-inline-start: auto; }
 .verdict { color: var(--dim); overflow-wrap: anywhere; }
 /* 1.10 B5 rule 1 (row 13): a window's figure never stands alone on a line, in any language. The label takes the
    room the row has and wraps inside itself; the verdict and the figure are one box that wraps as a whole — on a
@@ -857,7 +883,7 @@ input[type=date] { cursor: text; }
 .win-top > span:first-child { flex: 1 1 auto; }
 /* Never shrunk by the row (flex: none) — its width is its content's, at most the row's (max-width), so a verdict longer
    than the row wraps inside the box and the figure stays whole beside its last line. */
-.vf { display: inline-flex; flex: none; flex-wrap: nowrap; align-items: last baseline; gap: 0 8px; margin-left: auto;
+.vf { display: inline-flex; flex: none; flex-wrap: nowrap; align-items: last baseline; gap: 0 8px; margin-inline-start: auto;
       min-width: 0; max-width: 100%; }
 .vf .verdict { min-width: 0; }
 .vf b { flex: none; }
@@ -869,14 +895,16 @@ input[type=date] { cursor: text; }
    columns that are all visible would be a lie. */
 .scrollhint { margin: 2px 0 6px; }
 table { border-collapse: collapse; width: 100%; font-size: 11px; font-variant-numeric: tabular-nums; }
-th { text-align: right; font-weight: 500; color: var(--dim); padding: 3px 0 3px 8px;
+/* 1.13 A2 rule 3 (§7a Q4): the columns follow the direction — the text column at the inline start, the figures at the
+   inline end (at the left edge in a right-to-left table, as right-to-left spreadsheets put them). */
+th { text-align: end; font-weight: 500; color: var(--dim); padding: 3px 0; padding-inline-start: 8px;
      white-space: nowrap; border-bottom: 1px solid var(--line); }
 th.sortable { cursor: pointer; }
 th[aria-sort="ascending"]::after { content: " ▲"; }
 th[aria-sort="descending"]::after { content: " ▼"; }
-th:first-child, td:first-child { text-align: left; padding-left: 0; }
-td { text-align: right; padding: 3px 0 3px 8px; white-space: nowrap; }
-tr.more td { color: var(--dim); font-style: italic; text-align: left; }
+th:first-child, td:first-child { text-align: start; padding-inline-start: 0; }
+td { text-align: end; padding: 3px 0; padding-inline-start: 8px; white-space: nowrap; }
+tr.more td { color: var(--dim); font-style: italic; text-align: start; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px;
         margin-bottom: 8px; }
 /* The card is the popover's containing block, so the explanation hangs under the very figure
@@ -1046,7 +1074,7 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .key polyline.halo, .costline polyline.halo { stroke: var(--vscode-sideBar-background, var(--vscode-editor-background));
                                              stroke-width: 4; }
 .key circle, .costline circle { fill: var(--vscode-charts-foreground, var(--vscode-foreground)); }
-.legend svg.key { width: 22px; height: 10px; overflow: visible; vertical-align: -1px; margin-right: 4px; }
+.legend svg.key { width: 22px; height: 10px; overflow: visible; vertical-align: -1px; margin-inline-end: 4px; }
 .axis { display: flex; gap: 2px; font-size: 9px; color: var(--dim); margin-top: 3px; }
 /* The chart's own axis shares the plot's gutter, so every day label stays under its column;
    the hour strip below has no gutter and keeps the plain rule. */
@@ -1063,7 +1091,7 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
    Wrapped into the middle of a line it read as one more entry instead of as the label of
    the entries after it. Only the chart's legend has such a child. */
 .legend > span.meta { flex-basis: 100%; }
-.dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-inline-end: 4px; }
 /* A chart swatch is bigger than the others: at 8 px a 4 px stripe pitch is two strokes, and
    two strokes are not a pattern anyone can match against a band. */
 .legend .dot.band { width: 14px; height: 14px; }
@@ -1114,15 +1142,15 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .hgrid i.l4 { background: var(--claude); }
 .hgrid i.none { background: repeating-linear-gradient(45deg, var(--track), var(--track) 2px,
                 transparent 2px, transparent 4px); }
-.box { border-left: 2px solid var(--warn); background: var(--vscode-inputValidation-warningBackground,
+.box { border-inline-start: 2px solid var(--warn); background: var(--vscode-inputValidation-warningBackground,
        rgba(255,200,0,.10)); padding: 6px 8px; font-size: 11px; margin: 8px 0;
-       border-radius: 0 3px 3px 0; }
+       border-radius: 0; border-start-end-radius: 3px; border-end-end-radius: 3px; }
 .box.info { border-color: var(--claude);
             background: var(--vscode-textBlockQuote-background, rgba(127,127,127,.12)); }
 .box button { margin-top: 6px; }
 .foot { margin-top: 18px; font-size: 10px; color: var(--dim); line-height: 1.6; }
 .foot li { margin-bottom: 2px; }
-ul { margin: 6px 0; padding-left: 18px; }
+ul { margin: 6px 0; padding-inline-start: 18px; }
 /* The agent tree: one list per level, each indented 16 px, so a node's children start under its
    glyph and the glyphs of one level stand in a column. A row is two targets of the mouse — the
    fold, and the row itself, which opens the node's details — without a chip's border: a tree of
@@ -1149,12 +1177,12 @@ ul { margin: 6px 0; padding-left: 18px; }
    panel to that sibling without a gap. --ag-ind stays the panel's level; these names do not reuse it. */
 .agtree { --ag-step: 16px; --ag-fold-w: 24px; --ag-guide-y: 9px;
           --ag-guide: var(--vscode-tree-indentGuidesStroke, var(--rule)); }
-.agtree ul ul { padding-left: var(--ag-step); }
+.agtree ul ul { padding-inline-start: var(--ag-step); }
 .agtree ul[role="group"] > li { position: relative; display: flow-root; }
 .agtree ul[role="group"] > li::before,
 .agtree ul[role="group"] > li::after { content: ""; position: absolute; pointer-events: none;
-                                       left: calc(var(--ag-fold-w) / 2 - var(--ag-step)); }
-.agtree ul[role="group"] > li::before { top: 0; bottom: 0; border-left: 1px solid var(--ag-guide); }
+                                       inset-inline-start: calc(var(--ag-fold-w) / 2 - var(--ag-step)); }
+.agtree ul[role="group"] > li::before { top: 0; bottom: 0; border-inline-start: 1px solid var(--ag-guide); }
 .agtree ul[role="group"] > li:last-child::before { bottom: auto; height: var(--ag-guide-y); }
 /* The stub ends 2 px before the first thing the child's line draws: its toggle's arrow, or — a leaf, the
    "more" line — its row's box, which holds the glyph and the open row's 2 px edge. The arrow, a 9 px
@@ -1186,9 +1214,9 @@ ul { margin: 6px 0; padding-left: 18px; }
            cursor: pointer; user-select: none; }
 /* The twisty is drawn, like the section heads', so it never ends up in the copied text. */
 .ag-fold::before { content: "▾"; font-size: 9px; }
-[aria-expanded="false"] > .ag-line > .ag-fold::before { content: "▸"; }
+[aria-expanded="false"] > .ag-line > .ag-fold::before { content: var(--tp-closed); }
 .ag-row { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 4px;
-          min-height: 24px; padding: 1px 4px; border: none; background: none; text-align: left;
+          min-height: 24px; padding: 1px 4px; border: none; background: none; text-align: start;
           font-size: var(--vscode-font-size); box-sizing: border-box; border-radius: 3px;
           color: var(--vscode-foreground); line-height: normal; cursor: pointer; }
 .agtree .ag-row { user-select: none; }
@@ -1205,6 +1233,14 @@ ul { margin: 6px 0; padding-left: 18px; }
    "this one", quieter than a pressed chip, which would paint a whole row in the button colour. */
 .ag-row[aria-pressed="true"], .agtree .ag-row[data-pressed="true"] { background: var(--track); color: var(--vscode-foreground);
                                box-shadow: inset 2px 0 0 var(--vscode-focusBorder); }
+/* 1.13 A2 rule 2: the two things CSS has no logical form for, in a right-to-left page — the open row's edge (an inset
+   box-shadow's offset is physical) at the row's inline start, and the three closed disclosures (a section's head, a
+   tree node's fold, the 7-day block's button) pointing to the inline end, ◂ (--tp-closed above). Nothing else of the
+   stylesheet names a direction: every other rule is in logical properties, which compute to the left-to-right ones in a
+   left-to-right page, and the charts keep their own physical rules (they stay left to right, §7a Q1). */
+[dir="rtl"] .ag-row[aria-pressed="true"], [dir="rtl"] .agtree .ag-row[data-pressed="true"] {
+  box-shadow: inset -2px 0 0 var(--vscode-focusBorder); }
+[dir="rtl"] { --tp-closed: "◂"; }
 /* The name on one line (1.6 P7b, the lead's call). When the line has no room for all of it, its
    parts give way one after the other, each on an ellipsis — first what the row can best do
    without: an agent's model, the dot in front of it with it; a session's project, then a
@@ -1223,7 +1259,7 @@ ul { margin: 6px 0; padding-left: 18px; }
 .ag-label > .ag-give { flex-shrink: 1000000; min-width: 1.5em; }
 .ag-label > .ag-type, .ag-label > .ag-pre, .ag-label > .ag-np:only-child { flex-shrink: 1; min-width: 1.5em; }
 .ag-label > .ag-sid { color: var(--dim); }
-.ag-label > .ag-gone { position: absolute; left: 0; top: 0; width: 1px; height: 1px; clip-path: inset(50%); }
+.ag-label > .ag-gone { position: absolute; inset-inline-start: 0; top: 0; width: 1px; height: 1px; clip-path: inset(50%); }
 /* Launched, but its transcript not seen yet: the name is the launch's hint, not the agent's. */
 .ag-k-pending > .ag-line .ag-label { font-style: italic; }
 /* Usage, duration and the live clock, the silence and the tally — a session's, a run's and a
@@ -1319,7 +1355,7 @@ ul { margin: 6px 0; padding-left: 18px; }
    not shown" — in the column of its siblings' glyphs. A borderless button like a row while one
    more step can be taken, the dim words of a count once none can; 24 px high, a target (N9). */
 .ag-more { flex: 1 1 auto; min-width: 0; min-height: 24px; padding: 1px 4px; border: none;
-           background: none; text-align: left; font-size: 11px; font-variant-numeric: tabular-nums;
+           background: none; text-align: start; font-size: 11px; font-variant-numeric: tabular-nums;
            box-sizing: border-box; border-radius: 3px; user-select: none; }
 /* 1.6 L1: while a step can be taken the words are the mouse's target — the item is the keyboard's —
    in the foreground colour and centred in their 24 px as a button's would be; the count alone is dim. */
@@ -1342,7 +1378,7 @@ ul { margin: 6px 0; padding-left: 18px; }
 .ag-now { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; align-items: center; }
 .ag-now > :not(:first-child):not(.ag-wkbtn) { grid-column: 1 / -1; }
 .ag-wkbtn { justify-self: end; min-height: 24px; white-space: nowrap; }
-.ag-wkbtn::after { content: "\\00a0▸" / ""; font-size: 9px; }
+.ag-wkbtn::after { content: "\\00a0" var(--tp-closed) / ""; font-size: 9px; }
 .ag-wkbtn[aria-expanded="true"]::after { content: "\\00a0▾" / ""; }
 /* 1.6 L3: where the agent tokens of the last 7 days went — after the running list, before the tree.
    The table is the page's own, and stacks at a narrow width as every table does; the name of a
@@ -1363,7 +1399,7 @@ ul { margin: 6px 0; padding-left: 18px; }
    In the tree it stands between the row and the node's children and steps back out of the levels
    above it — --ag-ind is the node's level, set from data-ind — so it takes the tree's whole width
    however deep the node sits; in the running list it is a line of its own under the row. */
-.ag-details { margin: 4px 0 6px calc(var(--ag-ind, 0) * -16px); border: 1px solid var(--line); border-radius: 4px;
+.ag-details { margin: 4px 0 6px; margin-inline-start: calc(var(--ag-ind, 0) * -16px); border: 1px solid var(--line); border-radius: 4px;
               padding: 6px 8px; }
 .ag-now li > .ag-details { flex: 1 1 100%; min-width: 0; }
 .ag-details dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px;
@@ -1379,7 +1415,7 @@ ul { margin: 6px 0; padding-left: 18px; }
 /* The ID row: the whole identifier, which may break anywhere rather than leave the panel, and
    the button that copies it, as small as the text beside it. */
 .ag-details .ag-id { overflow-wrap: anywhere; }
-.ag-copy { margin-left: 4px; padding: 0 6px; }
+.ag-copy { margin-inline-start: 4px; padding: 0 6px; }
 /* 1.6 L2: an agent's token mix — one bar across the panel, a part per kind of token in the Tokens
    section's own colours, each as wide as its share (set through the CSSOM), and its words under it. */
 .ag-mix { display: flex; height: 8px; margin: 3px 0 2px; border-radius: 4px; overflow: hidden; background: var(--track); }
@@ -1443,7 +1479,7 @@ ul { margin: 6px 0; padding-left: 18px; }
      is the first one long enough to notice — into text running past the card. Nothing is lost,
      the wrapper still scrolls, but needing a sideways scroll to read one "label: value" line is
      exactly what the stacked layout exists to avoid. */
-  td { text-align: left; padding: 1px 0; white-space: normal; }
+  td { text-align: start; padding: 1px 0; white-space: normal; }
   /* Only cells that carry a header: the sub-rows and the drill lines span the whole table
      and would otherwise be prefixed with a bare ": ". 1.10 D10: the label as the language writes it —
      data-hl is the column name in the words' "{0}:" ("Période :" with a no-break space, "期間："). 1.11 D1: with
@@ -1455,7 +1491,7 @@ ul { margin: 6px 0; padding-left: 18px; }
    to a line as fit; the two cells the row of all agents leaves empty are not drawn at all. */
 @media (max-width: 320px) {
   .ag-wkt td:first-child::before { content: none; }
-  .ag-wkt td:not(:first-child) { display: inline-block; margin-right: 10px; padding: 0; white-space: nowrap; }
+  .ag-wkt td:not(:first-child) { display: inline-block; margin-inline-end: 10px; padding: 0; white-space: nowrap; }
   .ag-wkt td:empty { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }

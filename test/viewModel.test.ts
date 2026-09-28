@@ -3002,15 +3002,16 @@ test('the picker offers Automatic, then every available language in the registry
   const pick = (setting: import('../src/languages').LanguageSetting, available: import('../src/languages').LanguageId[], vscode = 'en') =>
     buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage(setting, vscode, available), available, vscode } }).language
 
-  // Without the input: English, auto, only English offered.
+  // Without the input: English, auto, only English offered. 1.13 P3 (pinned and changed: no `dir`): each option with the
+  // direction of its own name — null for Automatic, in the reader's language and direction (§3 A2 rule 5, §0a.1).
   const none = buildViewModel(makeInput()).language
   assert.equal(none.setting, 'auto')
   assert.equal(none.shown, 'en')
   assert.equal(none.flag, 'us')
   assert.equal(none.buttonLabel, 'Language: English (automatic)')
   assert.deepEqual(none.options, [
-    { id: 'auto', native: 'Automatic — as VS Code (English)', name: null, lang: null, flag: 'auto', checked: true },
-    { id: 'en', native: 'English', name: null, lang: 'en', flag: 'us', checked: false },
+    { id: 'auto', native: 'Automatic — as VS Code (English)', name: null, lang: null, dir: null, flag: 'auto', checked: true },
+    { id: 'en', native: 'English', name: null, lang: 'en', dir: 'ltr', flag: 'us', checked: false },
   ])
 
   // English, explicitly, with the German bundle on disk too: the US flag, "English" — never "United States".
@@ -3020,9 +3021,9 @@ test('the picker offers Automatic, then every available language in the registry
   assert.equal(en.note, "Token Pace's own texts switch at once. The settings, the command titles and the walkthrough follow VS Code's display language (Configure Display Language).")
   assert.equal(en.quality, 'The languages beyond English and German were translated by AI agents and checked by tests, not by native speakers.')
   assert.deepEqual(en.options, [
-    { id: 'auto', native: 'Automatic — as VS Code (English)', name: null, lang: null, flag: 'auto', checked: false },
-    { id: 'en', native: 'English', name: null, lang: 'en', flag: 'us', checked: true },
-    { id: 'de', native: 'Deutsch', name: 'German', lang: 'de', flag: 'de', checked: false },
+    { id: 'auto', native: 'Automatic — as VS Code (English)', name: null, lang: null, dir: null, flag: 'auto', checked: false },
+    { id: 'en', native: 'English', name: null, lang: 'en', dir: 'ltr', flag: 'us', checked: true },
+    { id: 'de', native: 'Deutsch', name: 'German', lang: 'de', dir: 'ltr', flag: 'de', checked: false },
   ])
 
   // In German: the reader's names, the native ones unchanged; German's own name is no second name.
@@ -3059,10 +3060,22 @@ test('the picker offers Automatic, then every available language in the registry
   assert.equal(all.options.length, LANGUAGE_IDS.length + 1)
   assert.deepEqual(all.options.map((o) => o.id), ['auto', ...LANGUAGE_IDS])
   assert.deepEqual(all.options.filter((o) => o.checked).map((o) => o.id), ['ja'])
-  assert.deepEqual(all.options.find((o) => o.id === 'zh-tw'), { id: 'zh-tw', native: '繁體中文', name: 'Chinese (Traditional)', lang: 'zh-TW', flag: 'tw', checked: false })
-  assert.deepEqual(all.options.find((o) => o.id === 'pt-br'), { id: 'pt-br', native: 'Português (Brasil)', name: 'Portuguese (Brazil)', lang: 'pt-BR', flag: 'br', checked: false })
+  assert.deepEqual(all.options.find((o) => o.id === 'zh-tw'), { id: 'zh-tw', native: '繁體中文', name: 'Chinese (Traditional)', lang: 'zh-TW', dir: 'ltr', flag: 'tw', checked: false })
+  assert.deepEqual(all.options.find((o) => o.id === 'pt-br'), { id: 'pt-br', native: 'Português (Brasil)', name: 'Portuguese (Brazil)', lang: 'pt-BR', dir: 'ltr', flag: 'br', checked: false })
   // An id the reader's host has no file for is not offered, whatever `available` was written as.
   assert.deepEqual(pick('auto', ['de', 'en']).options.map((o) => o.id), ['auto', 'en', 'de'])
+})
+
+test('1.13 A2 rule 5 (§0a.1): each option carries the direction of its own name — rtl for exactly Arabic, Hebrew and Persian, ltr for every other language, none for Automatic — whatever the reader\'s language', () => {
+  const { resolveLanguage, LANGUAGE_IDS, languageDir } = require('../src/languages') as typeof import('../src/languages')
+  for (const shown of ['en', 'ar', 'de'] as const) {
+    const l = buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage(shown, shown, [...LANGUAGE_IDS]), available: [...LANGUAGE_IDS], vscode: shown } }).language
+    assert.deepEqual(l.options.map((o) => [o.id, o.dir]), [['auto', null], ...LANGUAGE_IDS.map((id) => [id, languageDir(id)])], shown)
+    assert.deepEqual(l.options.filter((o) => o.dir === 'rtl').map((o) => o.id), ['ar', 'he', 'fa'], shown)
+    // The direction belongs to the name, never to the reader: the same in every list.
+    assert.deepEqual(l.options.find((o) => o.id === 'ar'), { id: 'ar', native: 'العربية', name: l.options.find((o) => o.id === 'ar')?.name ?? null,
+      lang: 'ar', dir: 'rtl', flag: 'eg', checked: shown === 'ar' })
+  }
 })
 
 test('the picker follows the registry, not the order the bundles came in: the fourteen bundles of the repository before 1.11\'s join offer fifteen options, and a language of 1.11 joins after cs in the registry\'s place — its own name, its lang, its flag, its English name (1.11 A1, P2)', () => {
@@ -3087,8 +3100,9 @@ test('the picker follows the registry, not the order the bundles came in: the fo
   assert.deepEqual(withNew.options.filter((o) => o.checked).map((o) => o.id), ['hi'])
   assert.equal(withNew.shown, 'hi')
   assert.equal(withNew.flag, 'in')
-  assert.deepEqual(withNew.options.find((o) => o.id === 'hi'), { id: 'hi', native: 'हिन्दी', name: 'Hindi', lang: 'hi', flag: 'in', checked: true })
-  assert.deepEqual(withNew.options.find((o) => o.id === 'nl'), { id: 'nl', native: 'Nederlands', name: 'Dutch', lang: 'nl', flag: 'nl', checked: false })
+  // 1.13 P3 (pinned and changed: no `dir`): each with the direction of its own name, left to right for the two.
+  assert.deepEqual(withNew.options.find((o) => o.id === 'hi'), { id: 'hi', native: 'हिन्दी', name: 'Hindi', lang: 'hi', dir: 'ltr', flag: 'in', checked: true })
+  assert.deepEqual(withNew.options.find((o) => o.id === 'nl'), { id: 'nl', native: 'Nederlands', name: 'Dutch', lang: 'nl', dir: 'ltr', flag: 'nl', checked: false })
   // Every language of 1.11, each by its own name — never translated — beside its English name.
   const every = pick('auto', [...LANGUAGE_IDS])
   for (const e of LANGUAGES.slice(14)) {

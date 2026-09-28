@@ -23,9 +23,10 @@ import * as nodeVm from 'node:vm'
 import { test } from 'node:test'
 import { EARLIER_KEY, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS, TreeNode } from '../src/agentTree'
 import { tallySpoken, tallyText } from '../src/agentTreeBuild'
-import { setBundle, setLang, setLocale, t } from '../src/i18n'
+import { setBundle, setDir, setLang, setLocale, t } from '../src/i18n'
 import { agentTreeFor, buildViewModel, parseWebviewMessage } from '../src/viewModel'
 import { AGENT_WORLD, agentNode as agentNodeOf, agentWorld, everyParent, treeNodes } from './fixtures/agentWorld'
+import { ARAB_WORD, pseudoRtlBundle } from './helpers/nls'
 import { NOW, addCacheSession, buildAgg, makeConfig, makeInput } from './fixtures/viewFixtures'
 import { codexMeta, codexTokenCount, codexTurnContext, ctxFor } from './fixtures/helpers'
 import type { PromptCacheReading } from '../src/quotaSources'
@@ -701,30 +702,32 @@ function germanPage(extra: Record<string, string> = {}): string {
 test('the page\'s lang is the language its words are in, region kept: pt-BR, zh-TW, en — never the formatters\' tag (1.9 A3.5, A7 test 5)', () => {
   // The three resolved languages of §3 A2 rule 2, as applyLanguage installs them: the words' tag
   // (setLang) beside the Intl tag (setLocale). An English page under VS Code's `hu` keeps `en`.
+  // 1.13 P3 (pinned and changed: the root carried `lang` alone): and `dir`, left to right for every one of them.
   const cases: Array<[string, string, string]> = [['pt-BR', 'pt-BR', 'pt-BR'], ['zh-TW', 'zh-TW', 'zh-TW'], ['en', 'hu', 'en'],
     ['de', 'de-ch', 'de'], ['zh-CN', 'zh-CN', 'zh-CN']]
   try {
     for (const [words, intl, expected] of cases) {
       setLang(words)
       setLocale(intl)
-      assert.match(page(), new RegExp(`<html lang="${expected}">`), `${words} / ${intl}`)
+      assert.match(page(), new RegExp(`<html lang="${expected}" dir="ltr">`), `${words} / ${intl}`)
     }
     // A tag that is no tag never reaches the attribute: `setLang` keeps English.
     setLang('x y"><script>')
-    assert.match(page(), /<html lang="en">/)
+    assert.match(page(), /<html lang="en" dir="ltr">/)
   } finally {
     setLang(undefined)
     setLocale(undefined)
   }
-  assert.match(PAGE, /<html lang="en">/)
+  assert.match(PAGE, /<html lang="en" dir="ltr">/)
 })
 
 test('a German bundle reaches the page, the script inside it and the language of the markup', () => {
   const html = germanPage()
   // The markup says which language it is in: a German page announced as English is read out
-  // in the wrong accent and hyphenated by the wrong rules.
-  assert.match(html, /<html lang="de">/)
-  assert.match(PAGE, /<html lang="en">/)
+  // in the wrong accent and hyphenated by the wrong rules. 1.13 P3 (pinned and changed: `lang` alone): and its
+  // direction, left to right.
+  assert.match(html, /<html lang="de" dir="ltr">/)
+  assert.match(PAGE, /<html lang="en" dir="ltr">/)
   assert.ok(html.indexOf('Wird geladen …') >= 0, 'the loading line is still English')
   // 1.12 D6 (pinned and changed: the key was 'Loading …'): the English sets no space before the ellipsis, German keeps
   // Duden's.
@@ -1023,7 +1026,8 @@ test('the verdict stands in the header row between the label and the figure', ()
   assert.match(STYLE, /\n\.win-top > span:first-child \{ flex: 1 1 auto; \}/)
   const vf = STYLE.match(/\n\.vf \{[^}]*\}/)
   assert.ok(vf, 'the .vf rule is missing')
-  for (const decl of ['display: inline-flex', 'flex: none', 'flex-wrap: nowrap', 'align-items: last baseline', 'margin-left: auto',
+  // 1.13 P3 (pinned and changed: margin-left): the push to the row's end in the page's direction (§3 A2 rule 2).
+  for (const decl of ['display: inline-flex', 'flex: none', 'flex-wrap: nowrap', 'align-items: last baseline', 'margin-inline-start: auto',
     'min-width: 0', 'max-width: 100%']) assert.ok(vf[0].includes(decl), decl + ' — ' + vf[0])
   assert.match(STYLE, /\n\.vf \.verdict \{ min-width: 0; \}/)
   assert.match(STYLE, /\n\.vf b \{ flex: none; \}/)
@@ -4446,9 +4450,12 @@ test('an opened node shows its children closed in turn, each with its tally; a s
   const hh = treePart(agentsHtml(a, { agents: hostile }))
   assert.ok(hh.indexOf('<span class="ag-t" aria-hidden="true">&lt;b&gt;1&lt;/b&gt; started</span>') >= 0, hh)
   assert.ok(hh.indexOf(' aria-label="Session Tue 10:55 · 9d0eb37a, active session, derived, &quot;1&quot; &lt;started&gt;"') >= 0, hh)
-  // The twisty is drawn, not typed, and turns with the attribute.
+  // The twisty is drawn, not typed, and turns with the attribute. 1.13 P3 (pinned and changed: "▸" itself): the closed
+  // one is the page's closed disclosure, ▸ left to right and ◂ right to left (§3 A2 rule 2).
   assert.match(STYLE, /\.ag-fold::before \{ content: "▾";/)
-  assert.match(STYLE, /\[aria-expanded="false"\] > \.ag-line > \.ag-fold::before \{ content: "▸"; \}/)
+  assert.match(STYLE, /\[aria-expanded="false"\] > \.ag-line > \.ag-fold::before \{ content: var\(--tp-closed\); \}/)
+  assert.match(STYLE, /\n:root \{ --tp-closed: "▸"; \}\n/)
+  assert.match(STYLE, /\n\[dir="rtl"\] \{ --tp-closed: "◂"; \}\n/)
   assert.equal(/[▾▸]/.test(open + one), false)
 })
 
@@ -4543,10 +4550,12 @@ test('the details open inside the entry of the row that was clicked, after its l
   assert.ok(top.indexOf('data-pressed="true">') < top.indexOf(panelOf(top)), top)
   // The level the panel steps out of comes from the page's own stylesheet, through the CSSOM
   // (the page's CSP allows no style attribute): one indent of the tree per level.
-  assert.match(STYLE, /\.ag-details \{ margin: 4px 0 6px calc\(var\(--ag-ind, 0\) \* -16px\);/)
+  // 1.13 P3 (pinned and changed: the step back was the margin's left value, the indent padding-left): both toward the
+  // tree's inline start (§3 A2 rule 6).
+  assert.match(STYLE, /\.ag-details \{ margin: 4px 0 6px; margin-inline-start: calc\(var\(--ag-ind, 0\) \* -16px\);/)
   // 1.7 F6 (pinned and changed: the step was the literal `padding-left: 16px`): the indent is the tree's
   // --ag-step, 16 px, which the guide lines measure their places by.
-  assert.match(STYLE, /\.agtree ul ul \{ padding-left: var\(--ag-step\); \}/)
+  assert.match(STYLE, /\.agtree ul ul \{ padding-inline-start: var\(--ag-step\); \}/)
   assert.match(STYLE, /\.agtree \{ --ag-step: 16px;/)
   assert.match(SCRIPT, /querySelectorAll\("\[data-ind\]"\)\.forEach\(\(el\) => \{\s*el\.style\.setProperty\("--ag-ind", el\.dataset\.ind\);/)
   // In the running list the panel is an item's second line, the whole width of the list.
@@ -6699,7 +6708,8 @@ test('the 7-day block\'s rows are rows of the running list\'s kind: the styleshe
   assert.match(STYLE, /\.ag-now > :not\(:first-child\):not\(\.ag-wkbtn\) \{ grid-column: 1 \/ -1; \}/)
   // A target of 24 px (WCAG 2.5.8); the twisty drawn, silent to a screen reader.
   assert.match(STYLE, /\.ag-wkbtn \{ justify-self: end; min-height: 24px; white-space: nowrap; \}/)
-  assert.match(STYLE, /\.ag-wkbtn::after \{ content: "\\00a0▸" \/ ""; font-size: 9px; \}/)
+  // 1.13 P3 (pinned and changed: "▸" itself): the page's closed disclosure, ◂ right to left (§3 A2 rule 2).
+  assert.match(STYLE, /\.ag-wkbtn::after \{ content: "\\00a0" var\(--tp-closed\) \/ ""; font-size: 9px; \}/)
   assert.match(STYLE, /\.ag-wkbtn\[aria-expanded="true"\]::after \{ content: "\\00a0▾" \/ ""; \}/)
   assert.match(STYLE, /\.ag-week li \{ display: flex; flex-wrap: wrap; \}/)
   assert.match(STYLE, /\.ag-week li > \.ag-details \{ flex: 1 1 100%; min-width: 0; \}/)
@@ -6708,7 +6718,8 @@ test('the 7-day block\'s rows are rows of the running list\'s kind: the styleshe
   assert.match(STYLE, /\.ag-wkt \{ overflow-wrap: normal; \}/)
   assert.match(STYLE, /\.ag-wkt th, \.ag-wkt td:first-child \{ white-space: normal; \}/)
   assert.match(STYLE, /\.ag-wkt tr\.ag-wkall \{ border-top: 1px solid var\(--line\); \}/)
-  assert.match(STYLE, /@media \(max-width: 320px\) \{\n  \.ag-wkt td:first-child::before \{ content: none; \}\n  \.ag-wkt td:not\(:first-child\) \{ display: inline-block; margin-right: 10px; padding: 0; white-space: nowrap; \}\n  \.ag-wkt td:empty \{ display: none; \}\n\}/)
+  // 1.13 P3 (pinned and changed: margin-right): the gap after a figure toward the inline end (§3 A2 rule 3).
+  assert.match(STYLE, /@media \(max-width: 320px\) \{\n  \.ag-wkt td:first-child::before \{ content: none; \}\n  \.ag-wkt td:not\(:first-child\) \{ display: inline-block; margin-inline-end: 10px; padding: 0; white-space: nowrap; \}\n  \.ag-wkt td:empty \{ display: none; \}\n\}/)
 })
 
 interface Rig {
@@ -7614,7 +7625,8 @@ test('a name is one line: an agent\'s model gives way before its type and its sh
   // The short id and a session's project in the dim tone.
   assert.match(STYLE, /\.ag-label > \.ag-sid \{ color: var\(--dim\); \}/)
   // A model taken off the name whole (fitAgentNames) is out of sight and still in the page.
-  assert.match(STYLE, /\.ag-label > \.ag-gone \{ position: absolute; left: 0; top: 0; width: 1px; height: 1px; clip-path: inset\(50%\); \}/)
+  // 1.13 P3 (pinned and changed: left: 0): at the label's inline start (§3 A2 rule 2).
+  assert.match(STYLE, /\.ag-label > \.ag-gone \{ position: absolute; inset-inline-start: 0; top: 0; width: 1px; height: 1px; clip-path: inset\(50%\); \}/)
   // A session and a run: the prefix word and the time the name ends on — the node's clock time —
   // then the short id that gives way; a session's project after it. German the same.
   const run = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.wf, 'done', { kind: 'workflow',
@@ -8271,13 +8283,15 @@ function flatStyle(): { css: string; forcedAt: number; forcedEnd: number } {
  * 1.7 F6: the guide lines' rules as §3 F6 gives them, and the package's three (the item's flow-root, the "more" line's two heights).
  * 1.8 L-4 (pinned and changed: the last rule was the details panel's, opaque and stacked over the lines): the vertical's gap
  * at an open details panel.
+ * 1.13 P3 (pinned and changed: padding-left, left, border-left): the indent, the lines' place and the vertical toward the
+ * tree's inline start — the left left to right, the right right to left (§3 A2 rule 6).
  */
 const GUIDE_RULES = [
   '.agtree { --ag-step: 16px; --ag-fold-w: 24px; --ag-guide-y: 9px; --ag-guide: var(--vscode-tree-indentGuidesStroke, var(--rule)); }',
-  '.agtree ul ul { padding-left: var(--ag-step); }',
+  '.agtree ul ul { padding-inline-start: var(--ag-step); }',
   '.agtree ul[role="group"] > li { position: relative; display: flow-root; }',
-  '.agtree ul[role="group"] > li::before, .agtree ul[role="group"] > li::after { content: ""; position: absolute; pointer-events: none; left: calc(var(--ag-fold-w) / 2 - var(--ag-step)); }',
-  '.agtree ul[role="group"] > li::before { top: 0; bottom: 0; border-left: 1px solid var(--ag-guide); }',
+  '.agtree ul[role="group"] > li::before, .agtree ul[role="group"] > li::after { content: ""; position: absolute; pointer-events: none; inset-inline-start: calc(var(--ag-fold-w) / 2 - var(--ag-step)); }',
+  '.agtree ul[role="group"] > li::before { top: 0; bottom: 0; border-inline-start: 1px solid var(--ag-guide); }',
   '.agtree ul[role="group"] > li:last-child::before { bottom: auto; height: var(--ag-guide-y); }',
   '.agtree ul[role="group"] > li::after { top: var(--ag-guide-y); border-top: 1px solid var(--ag-guide); width: calc(var(--ag-step) - var(--ag-fold-w) / 2 + var(--ag-fold-w) - 2px); }',
   '.agtree ul[role="group"] > li:has(> .ag-line > .ag-fold)::after { width: calc(var(--ag-step) - var(--ag-fold-w) / 2 + 7px); }',
@@ -8316,14 +8330,15 @@ test('1.7 F6: the stylesheet draws the guide lines behind the rows — two pseud
     assert.equal(/content:\s*"[^"]/.test(r.body), false, r.sel)
   }
   assert.equal(/\.ag-(now|week)[^{,]*li[^{,]*::(before|after)|role="none"\][^{,]*::(before|after)/.test(css), false)
-  // The panel keeps its level variable; the lines' names are their own.
-  assert.ok(css.indexOf('.ag-details { margin: 4px 0 6px calc(var(--ag-ind, 0) * -16px);') >= 0)
+  // The panel keeps its level variable; the lines' names are their own. 1.13 P3 (pinned and changed: the margin's left
+  // value): the step back toward the inline start.
+  assert.ok(css.indexOf('.ag-details { margin: 4px 0 6px; margin-inline-start: calc(var(--ag-ind, 0) * -16px);') >= 0)
   for (const r of rules.filter((x) => /--ag-(step|fold-w|guide)/.test(x.body))) assert.equal(r.body.indexOf('--ag-ind'), -1, r.sel)
   // The tokens agree with the boxes they stand for: the indent step is the panel's step back out of a
   // level, the fold width the toggle's and the leaf slot's.
   const num = (re: RegExp): number => { const m = re.exec(css); assert.ok(m, String(re)); return Number((m as RegExpExecArray)[1]) }
   const step = num(/--ag-step: (\d+)px;/), fold = num(/--ag-fold-w: (\d+)px;/)
-  assert.equal(step, num(/\.ag-details \{ margin: 4px 0 6px calc\(var\(--ag-ind, 0\) \* -(\d+)px\);/))
+  assert.equal(step, num(/\.ag-details \{ margin: 4px 0 6px; margin-inline-start: calc\(var\(--ag-ind, 0\) \* -(\d+)px\);/))
   assert.equal(fold, num(/\.ag-fold, \.ag-pad \{ flex: none; width: (\d+)px; min-height: 24px; \}/))
   const twisty = num(/\.ag-fold::before \{ content: "▾"; font-size: (\d+)px; \}/)
   // The geometry the rules give (§3 F6), in the frame of the child's item: the vertical at the parent's
@@ -8452,7 +8467,8 @@ test('1.8 L-4: the details panel paints no colour of its own and is not stacked 
   const panel = rules.filter((r) => r.sel.split(',').some((x) => /\.ag-details$/.test(x.trim())))
   assert.ok(panel.length >= 3, panel.map((r) => r.sel).join(' | '))
   for (const r of panel) assert.equal(/(^|;)\s*(background(-color|-image)?|z-index|position)\s*:/.test(r.body), false, r.sel + ' { ' + r.body + ' }')
-  assert.ok(css.indexOf('.ag-details { margin: 4px 0 6px calc(var(--ag-ind, 0) * -16px); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }') >= 0)
+  // 1.13 P3 (pinned and changed: the margin's left value): the step back toward the inline start.
+  assert.ok(css.indexOf('.ag-details { margin: 4px 0 6px; margin-inline-start: calc(var(--ag-ind, 0) * -16px); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }') >= 0)
   assert.equal(css.indexOf('z-index: 1; background: var(--bg)'), -1)
   // The gap: one rule, outside the forced-colours block — the vertical drawn above --ag-gap-t and below
   // --ag-gap-b, and not between — on an item that wears ag-gap; the class and the two values are the
@@ -8977,13 +8993,15 @@ test('the open list: Automatic first, then every language — its flag, its own 
   assert.ok(h.includes('aria-expanded="true"'), h)
   const pop = h.slice(h.indexOf('<div class="lng-pop">'))
   const globe = FLAG_SVG.auto.replace('<svg class="flag"', '<svg class="flag flag-auto"')
+  // 1.13 P3 (pinned and changed: each own name in its own lang alone): and in its own direction (§3 A2 rule 5, §0a.1);
+  // Automatic, in the reader's language, in none — it takes the page's.
   assert.equal(pop, '<div class="lng-pop"><ul id="lng-menu" role="menu" aria-label="Language">'
     + '<li role="menuitemradio" aria-checked="false" tabindex="-1" data-act="lang" data-id="auto">' + globe
     + '<span class="lng-text"><span>Automatic — as VS Code (English)</span></span></li>'
     + '<li role="menuitemradio" aria-checked="true" tabindex="-1" data-act="lang" data-id="en">' + FLAG_SVG.us
-    + '<span class="lng-text"><span lang="en">English</span></span><span class="lng-check" aria-hidden="true">✓</span></li>'
+    + '<span class="lng-text"><span lang="en" dir="ltr">English</span></span><span class="lng-check" aria-hidden="true">✓</span></li>'
     + '<li role="menuitemradio" aria-checked="false" tabindex="-1" data-act="lang" data-id="de">' + FLAG_SVG.de
-    + '<span class="lng-text"><span lang="de">Deutsch</span><span class="lng-sep">,</span> <span class="meta">German</span></span></li>'
+    + '<span class="lng-text"><span lang="de" dir="ltr">Deutsch</span><span class="lng-sep">,</span> <span class="meta">German</span></span></li>'
     + '</ul><p class="meta lng-note">' + LANG_NOTE.replace(/'/g, '&#39;') + '</p><p class="meta lng-note">' + LANG_QUALITY + '</p></div></div>')
   // Every language of the registry, each in its own lang — the Han glyphs of ja, zh-CN and zh-TW are the browser's to pick by it.
   const { resolveLanguage, LANGUAGE_IDS, LANGUAGES } = require('../src/languages') as typeof import('../src/languages')
@@ -8993,11 +9011,16 @@ test('the open list: Automatic first, then every language — its flag, its own 
   assert.equal(all.split('role="menuitemradio"').length - 1, LANGUAGE_IDS.length + 1)
   assert.equal(all.split('aria-checked="true"').length - 1, 1)
   assert.equal(all.split('lng-check').length - 1, 1)
-  for (const e of LANGUAGES) assert.ok(all.includes('data-id="' + e.id + '">' + FLAG_SVG[e.flag] + '<span class="lng-text"><span lang="' + e.locale + '">' + e.native + '</span>'), e.id)
+  // 1.13 P3 (pinned and changed: `lang` alone): and its own direction — العربية, עברית and فارسی right to left (§3 A2 rule 5).
+  for (const e of LANGUAGES) {
+    assert.ok(all.includes('data-id="' + e.id + '">' + FLAG_SVG[e.flag] + '<span class="lng-text"><span lang="' + e.locale + '" dir="'
+      + (e.dir === 'rtl' ? 'rtl' : 'ltr') + '">' + e.native + '</span>'), e.id)
+  }
   // The list's rules: never wider than the view, at most min(70vh, 440px) tall and scrolling inside, items
   // of 24 px at least, the menu's own colours with the page's tokens behind them.
   assert.match(STYLE, /\.lng-pop \{[^}]*width: min\(320px, calc\(100vw - 16px\)\); max-height: min\(70vh, 440px\);/)
-  assert.match(STYLE, /\.lng-pop \{[^}]*right: 0;[^}]*background: var\(--vscode-menu-background, /)
+  // 1.13 P3 (pinned and changed: right: 0): aligned to the button's inline end (§3 A2 rule 5).
+  assert.match(STYLE, /\.lng-pop \{[^}]*inset-inline-end: 0;[^}]*background: var\(--vscode-menu-background, /)
   assert.match(STYLE, /\.lng-pop \{[^}]*color: var\(--vscode-menu-foreground, var\(--vscode-foreground\)\);/)
   assert.match(STYLE, /\.lng-pop \{[^}]*border: 1px solid var\(--vscode-menu-border, /)
   assert.match(STYLE, /\n\.lng-pop ul \{ list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; \}\n/)
@@ -10939,4 +10962,489 @@ test('a band\'s share of the day is written to a tenth in the page\'s decimal ma
   const bar = renderIn(wordsPage({}), 'sQuota()', { quotas: [card({ windows: [win({ percent: 61.25 })] })] })
   assert.match(bar, /<div class="fill ok" data-w="61\.25"><\/div>/)
   assert.equal(/data-(w|x|bh)="[^"]*,/.test(de + bar), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.13 A2 (P3): the page mirrored — the root's and the options' direction, the stylesheet in logical properties, the
+// quota bars' marks, the room of an agent's figures, the tree's arrow keys
+// ---------------------------------------------------------------------------
+
+/** 1.13 §0a.3: the bidi format characters (BIDI_CONTROLS) — none of them on the page, which lays out by `dir`. */
+const PAGE_BIDI_CONTROLS = /[؜‎‏‪-‮⁦-⁩]/u
+
+/**
+ * The page as the provider writes it in the pseudo-RTL language (test/helpers/nls.ts `pseudoRtlBundle`, every word كلمة)
+ * under `ar` — its Intl tag pinned as applyLanguage installs it (1.13 A1 rule 4) — laid out in direction `d`: 'rtl' as
+ * the extension writes it, 'ltr' for its twin, which only a test writes.
+ */
+function rtlPage(d: 'rtl' | 'ltr' = 'rtl'): string {
+  try {
+    setBundle(pseudoRtlBundle())
+    setLocale('ar-u-ca-gregory-nu-latn')
+    setLang('ar')
+    setDir(d)
+    return page()
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+    setLang(undefined)
+    setDir(undefined)
+  }
+}
+
+/** A page's markup with its nonce, which differs per page, made one placeholder. */
+const unnonced = (h: string): string => h.replace(/nonce="[0-9a-f]{32}"/g, 'nonce="N"').replace(/'nonce-[0-9a-f]{32}'/g, "'nonce-N'")
+
+/** A context for a page's script whose document has a root element — its `lang` and `dir` as the markup wrote them. */
+function rootCtx(html: string): { c: nodeVm.Context; root: Record<string, string>; out: { innerHTML: string } } {
+  const m = /<html lang="([^"]*)" dir="([^"]*)">/.exec(html)
+  assert.ok(m, 'the page has no root with lang and dir')
+  const root = { lang: (m as RegExpExecArray)[1], dir: (m as RegExpExecArray)[2] }
+  const out = { innerHTML: '', dataset: {}, style: {} }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }),
+    document: {
+      documentElement: root,
+      addEventListener: () => undefined,
+      getElementById: () => out,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    },
+    window: { addEventListener: () => undefined },
+    console,
+  })
+  nodeVm.runInContext(between(html, /<script nonce="[A-Za-z0-9]+">/, '</script>'), c)
+  return { c, root, out }
+}
+
+test('1.13 A2 rule 1 (§0a.1): the page\'s root carries the words\' direction — rtl for an Arabic page, ltr for German and English — and a right-to-left page is its left-to-right twin but for that one attribute', () => {
+  const rtl = rtlPage('rtl')
+  assert.match(rtl, /<!DOCTYPE html>\n<html lang="ar" dir="rtl">\n/)
+  assert.match(germanPage(), /<html lang="de" dir="ltr">/)
+  assert.match(PAGE, /<html lang="en" dir="ltr">/)
+  // Exactly one direction on the host's markup — the root's — and never auto (the words' language is known).
+  const markup = rtl.slice(0, rtl.indexOf('<script'))
+  assert.equal(markup.split(' dir="').length - 1, 1)
+  assert.equal(/dir="auto"/.test(rtl + PAGE), false)
+  // The twin — the same words laid out left to right, which only a test (and the harness) writes — is the same document
+  // but for the root's dir: no word, no rule, no element moved (3.0(f): the DOM a screen reader reads is one order).
+  const twin = rtlPage('ltr')
+  assert.match(twin, /<html lang="ar" dir="ltr">/)
+  assert.equal(unnonced(rtl).replace('<html lang="ar" dir="rtl">', '<html lang="ar" dir="ltr">'), unnonced(twin))
+  // Whatever setDir was handed, the root says one of the two (i18n.ts's rule; the page's allow-list is the same).
+  try {
+    setDir('rtl"><img src=x>')
+    assert.match(page(), /<html lang="en" dir="ltr">/)
+    setDir('rtl')
+    const { pageWords } = loadDashboard()
+    assert.equal(pageWords().dir, 'rtl')
+    setDir('ltr')
+    assert.equal(pageWords().dir, 'ltr')
+  } finally {
+    setDir(undefined)
+  }
+  // The pseudo words are the page's (the frame's fixture): every word كلمة, the names kept.
+  assert.ok(rtl.includes(ARAB_WORD))
+  assert.ok(/"[^"]*Claude Code[^"]*كلمة[^"]*"|"[^"]*كلمة[^"]*Claude Code[^"]*"/.test(rtl))
+})
+
+test('1.13 A2 rule 8 (3.0(f)): the right-to-left page renders the markup its left-to-right twin renders — the DOM never reordered — and no aria value, no text of it holds a bidi control', () => {
+  const vmOf = (): unknown => {
+    try {
+      setBundle(pseudoRtlBundle())
+      setLocale('ar-u-ca-gregory-nu-latn')
+      setLang('ar')
+      const { pagePayload } = loadDashboard()
+      return JSON.parse(JSON.stringify(pagePayload(buildViewModel(makeInput()))))
+    } finally {
+      setBundle(undefined)
+      setLocale(undefined)
+      setLang(undefined)
+    }
+  }
+  const payload = vmOf()
+  const drawn = (d: 'rtl' | 'ltr'): { html: string; dir: string } => {
+    const r = rootCtx(rtlPage(d))
+    ;(r.c as Record<string, unknown>).fixture = payload
+    nodeVm.runInContext('vm = fixture; renderAll();', r.c)
+    return { html: String(r.out.innerHTML), dir: String(nodeVm.runInContext('DIR', r.c)) }
+  }
+  const rtl = drawn('rtl'), ltr = drawn('ltr')
+  // The script reads the root's direction at load.
+  assert.deepEqual([rtl.dir, ltr.dir], ['rtl', 'ltr'])
+  // A page of every default section, in the pseudo words, drawn once each way: the same string.
+  assert.ok(rtl.html.length > 20000 && rtl.html.includes(ARAB_WORD), String(rtl.html.length))
+  assert.equal(rtl.html, ltr.html)
+  // No bidi control anywhere in it — the page lays out by `dir`, never by characters (§0a.3) —, in an aria value least of all.
+  assert.equal(PAGE_BIDI_CONTROLS.test(rtl.html), false)
+  const aria = [...rtl.html.matchAll(/ aria-[a-z]+="([^"]*)"/g)].map((m) => m[1])
+  assert.ok(aria.length > 50, String(aria.length))
+  assert.deepEqual(aria.filter((v) => PAGE_BIDI_CONTROLS.test(v)), [])
+})
+
+test('1.13 A2 rule 1 (§0a.1): a words push turns the page — its root\'s dir and DIR — only with exactly ltr or rtl; any other value leaves the direction, and the words are taken all the same', () => {
+  const r = rootCtx(PAGE)
+  const state = (): unknown => JSON.parse(String(nodeVm.runInContext('JSON.stringify({ dir: document.documentElement.dir, lang: document.documentElement.lang, DIR: DIR, loc: LOCALE })', r.c)))
+  const apply = (w: unknown): boolean => {
+    ;(r.c as Record<string, unknown>).words = w
+    return nodeVm.runInContext('applyWords(words)', r.c) as boolean
+  }
+  assert.deepEqual(state(), { dir: 'ltr', lang: 'en', DIR: 'ltr', loc: 'en-US' })
+  // To Arabic: the root turns, DIR with it, the pinned tag as the page's locale, the plain tag as its lang.
+  assert.equal(apply({ lang: 'ar', locale: 'ar-u-ca-gregory-nu-latn', dir: 'rtl', dict: { Refresh: ARAB_WORD } }), true)
+  assert.deepEqual(state(), { dir: 'rtl', lang: 'ar', DIR: 'rtl', loc: 'ar-u-ca-gregory-nu-latn' })
+  assert.equal(nodeVm.runInContext("tr('Refresh')", r.c), ARAB_WORD)
+  // A direction that is not one of the two moves nothing — a word, markup, a case, none at all —, the words are taken.
+  for (const odd of ['up', 'rtl"><img src=x>', 'RTL', 'auto', '', 7, null, undefined]) {
+    assert.equal(apply({ lang: 'de', locale: 'de', dir: odd, dict: { Refresh: 'Aktualisieren' } }), true, String(odd))
+    assert.deepEqual(state(), { dir: 'rtl', lang: 'de', DIR: 'rtl', loc: 'de' }, String(odd))
+    assert.equal(nodeVm.runInContext("tr('Refresh')", r.c), 'Aktualisieren')
+  }
+  assert.equal(apply({ lang: 'de', locale: 'de', dict: {} }), true)
+  assert.equal(nodeVm.runInContext('document.documentElement.dir', r.c), 'rtl')
+  // Back to German, left to right.
+  assert.equal(apply({ lang: 'de', locale: 'de', dir: 'ltr', dict: {} }), true)
+  assert.deepEqual(state(), { dir: 'ltr', lang: 'de', DIR: 'ltr', loc: 'de' })
+  // Words that are refused as a whole (a lang that is no tag) move no direction either.
+  assert.equal(apply({ lang: 'x y', locale: 'ar', dir: 'rtl', dict: {} }), false)
+  assert.deepEqual(state(), { dir: 'ltr', lang: 'de', DIR: 'ltr', loc: 'de' })
+  // A page written right to left starts so: DIR reads the root at load.
+  assert.equal(nodeVm.runInContext('DIR', rootCtx(rtlPage('rtl')).c), 'rtl')
+  // A page without a root element (the other tests' fake document) is left to right.
+  assert.equal(nodeVm.runInContext('DIR', ctx), 'ltr')
+})
+
+test('1.13 A2 rule 1 (§0a.1): after a switch to a right-to-left language the whole push carries dir rtl beside lang and locale, back to English ltr — the document never reloaded', () => {
+  const r = wordsRig()
+  try {
+    const en = buildViewModel(makeInput())
+    r.p.update(en)
+    r.p.resolveWebviewView(r.view)
+    // The switch, as extension.ts applies it: the bundle, the locale, the words' tag and direction.
+    setBundle(pseudoRtlBundle())
+    setLocale('ar-u-ca-gregory-nu-latn')
+    setLang('ar')
+    setDir('rtl')
+    r.p.languageChanged()
+    r.posted.length = 0
+    r.p.update(buildViewModel(makeInput()))
+    assert.deepEqual(r.posted.map((x) => [x.type, x.words && x.words.lang, x.words && x.words.locale, x.words && x.words.dir]),
+      [['data', 'ar', 'ar-u-ca-gregory-nu-latn', 'rtl']])
+    assert.deepEqual(Object.keys(r.posted[0].words), ['lang', 'locale', 'dir', 'dict'])
+    // Back to English: ltr.
+    setBundle(undefined)
+    setLocale(undefined)
+    setLang(undefined)
+    setDir(undefined)
+    r.p.languageChanged()
+    r.posted.length = 0
+    r.p.update(en)
+    assert.deepEqual(r.posted.map((x) => [x.type, x.words && x.words.lang, x.words && x.words.dir]), [['data', 'en', 'ltr']])
+    // A direction moved alone — no switch the extension makes, held apart all the same — reaches the page too.
+    setDir('rtl')
+    r.p.languageChanged()
+    r.posted.length = 0
+    r.p.update(en)
+    assert.deepEqual(r.posted.map((x) => [x.type, x.words && x.words.lang, x.words && x.words.dir]), [['data', 'en', 'rtl']])
+    assert.equal(r.htmlSets(), 1)
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+    setLang(undefined)
+    setDir(undefined)
+  }
+})
+
+test('1.13 A2 rule 5 (§0a.1): each language\'s own name in its own lang and dir — العربية rtl inside an English list, Deutsch ltr inside an Arabic one —, Automatic in the page\'s; a dir that is not ltr or rtl writes none', () => {
+  const { resolveLanguage } = require('../src/languages') as typeof import('../src/languages')
+  const listOf = (shown: 'en' | 'ar'): string => {
+    const vm = buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage(shown, shown, ['en', 'de', 'ar']), available: ['en', 'de', 'ar'], vscode: shown } })
+    return render('langOpen = true; var __h = sLanguage(); langOpen = false; __h', { language: JSON.parse(JSON.stringify(vm.language)) })
+  }
+  for (const shown of ['en', 'ar'] as const) {
+    const h = listOf(shown)
+    assert.ok(h.includes('data-id="ar">'), h)
+    assert.ok(h.includes('<span lang="ar" dir="rtl">العربية</span>'), h)
+    assert.ok(h.includes('<span lang="de" dir="ltr">Deutsch</span>'), h)
+    assert.ok(h.includes('<span lang="en" dir="ltr">English</span>'), h)
+    // Automatic is in the reader's language and takes the page's direction: neither lang nor dir.
+    assert.match(h, /data-id="auto"><svg[^]*?<\/svg><span class="lng-text"><span>[^<]+<\/span><\/span><\/li>/)
+  }
+  // A payload's dir is taken only as exactly 'ltr' or 'rtl'.
+  const odd = (dir: unknown): string => render('langOpen = true; var __h = sLanguage(); langOpen = false; __h', { language: languageVmOf('en', {
+    options: [{ id: 'de', native: 'Deutsch', name: 'German', lang: 'de', dir, flag: 'de', checked: true }] }) })
+  for (const dir of ['up', 'rtl"><img src=x>', 'RTL', 'auto', 7, null, undefined]) {
+    const h = odd(dir)
+    assert.ok(h.includes('<span lang="de">Deutsch</span>'), String(dir) + ' ' + h)
+    assert.equal(/ dir=/.test(h), false, String(dir))
+  }
+  assert.ok(odd('rtl').includes('<span lang="de" dir="rtl">Deutsch</span>'))
+})
+
+/**
+ * 1.13 A2 rule 2 (§7a Q2): what the stylesheet keeps physical, by selector, each with its reason. Every other rule is in
+ * logical properties — the margin, padding, border and inset of the inline start and end, text-align start and end, the
+ * corners' logical radii —, which compute to the physical ones of 1.12 in a left-to-right page.
+ */
+const PHYSICAL_KEPT: ReadonlyArray<readonly [string, string]> = [
+  ['.pop', 'a key figure\'s or a window\'s explanation hangs by measurement, not by the direction: showPop anchors it at the card\'s left edge and, for a card in the viewport\'s right half (`.right`), at its right edge — the geometry that keeps it on the page in either direction; the sparkline\'s label inside .sparkbox is placed from the left by its own script (P4\'s box)'],
+  ['.pop.right', 'the same measurement\'s other edge'],
+  ['.plot', 'a chart stays left to right in every direction (§7a Q1): the gutter for its tick labels at its right'],
+  ['.grid', 'the chart\'s grid line, across the whole plot (left and right 0)'],
+  ['.grid span', 'the chart\'s tick label, in the plot\'s right gutter'],
+  ['.plot + .axis', 'the chart\'s day axis shares the plot\'s gutter, each label under its column'],
+  ['.ag-row[aria-pressed="true"], .agtree .ag-row[data-pressed="true"]', 'the open row\'s edge: an inset box-shadow has no logical form — the [dir="rtl"] rule turns it'],
+]
+
+/**
+ * 1.13 A2 rule 2: the rules of code fact 3 as they stand now — selector, the 1.12 declaration, the 1.13 one. The static
+ * test holds each (the new form there, the old one gone); with PHYSICAL_KEPT it accounts for every physical property the
+ * stylesheet had.
+ */
+const LOGICAL_NOW: ReadonlyArray<readonly [string, string, string]> = [
+  ['.lng-pop', 'right: 0', 'inset-inline-end: 0'],
+  ['.bar .cap', 'margin-left: 2px', 'margin-inline-start: 2px'],
+  ['.fill.over', 'left: 0', 'inset-inline-start: 0'],
+  ['.fill.over', 'border-radius: 0 4px 4px 0', 'border-radius: 0; border-start-end-radius: 4px; border-end-end-radius: 4px'],
+  ['.slack', 'left: 0', 'inset-inline-start: 0'],
+  ['.slack', 'border-radius: 0 4px 4px 0', 'border-radius: 0; border-start-end-radius: 4px; border-end-end-radius: 4px'],
+  ['.mark', 'margin-left: -1px', 'margin-inline-start: -1px'],
+  ['.win-top b', 'margin-left: auto', 'margin-inline-start: auto'],
+  ['.vf', 'margin-left: auto', 'margin-inline-start: auto'],
+  ['th', 'text-align: right', 'text-align: end'],
+  ['th', 'padding: 3px 0 3px 8px', 'padding: 3px 0; padding-inline-start: 8px'],
+  ['th:first-child, td:first-child', 'text-align: left; padding-left: 0', 'text-align: start; padding-inline-start: 0'],
+  ['td', 'text-align: right; padding: 3px 0 3px 8px', 'text-align: end; padding: 3px 0; padding-inline-start: 8px'],
+  ['tr.more td', 'text-align: left', 'text-align: start'],
+  ['.legend svg.key', 'margin-right: 4px', 'margin-inline-end: 4px'],
+  ['.dot', 'margin-right: 4px', 'margin-inline-end: 4px'],
+  ['.box', 'border-left: 2px solid var(--warn)', 'border-inline-start: 2px solid var(--warn)'],
+  ['.box', 'border-radius: 0 3px 3px 0', 'border-radius: 0; border-start-end-radius: 3px; border-end-end-radius: 3px'],
+  ['ul', 'padding-left: 18px', 'padding-inline-start: 18px'],
+  ['.agtree ul ul', 'padding-left: var(--ag-step)', 'padding-inline-start: var(--ag-step)'],
+  ['.agtree ul[role="group"] > li::before, .agtree ul[role="group"] > li::after', 'left: calc(var(--ag-fold-w) / 2 - var(--ag-step))', 'inset-inline-start: calc(var(--ag-fold-w) / 2 - var(--ag-step))'],
+  ['.agtree ul[role="group"] > li::before', 'border-left: 1px solid var(--ag-guide)', 'border-inline-start: 1px solid var(--ag-guide)'],
+  ['.ag-row', 'text-align: left', 'text-align: start'],
+  ['.ag-label > .ag-gone', 'left: 0', 'inset-inline-start: 0'],
+  ['.ag-more', 'text-align: left', 'text-align: start'],
+  ['.ag-details', 'margin: 4px 0 6px calc(var(--ag-ind, 0) * -16px)', 'margin: 4px 0 6px; margin-inline-start: calc(var(--ag-ind, 0) * -16px)'],
+  ['.ag-copy', 'margin-left: 4px', 'margin-inline-start: 4px'],
+  ['@media (max-width: 320px) td', 'text-align: left', 'text-align: start'],
+  ['@media (max-width: 320px) .ag-wkt td:not(:first-child)', 'margin-right: 10px', 'margin-inline-end: 10px'],
+  ['details:not([open]) summary h2::before', 'content: "▸"', 'content: var(--tp-closed)'],
+  ['[aria-expanded="false"] > .ag-line > .ag-fold::before', 'content: "▸"', 'content: var(--tp-closed)'],
+  ['.ag-wkbtn::after', 'content: "\\00a0▸" / ""', 'content: "\\00a0" var(--tp-closed) / ""'],
+]
+
+/** 1.13 A2 rule 2: the only rules that name a direction — the two CSS has no logical form for. */
+const DIR_RULES: ReadonlyArray<readonly [string, string]> = [
+  ['[dir="rtl"] .ag-row[aria-pressed="true"], [dir="rtl"] .agtree .ag-row[data-pressed="true"]', 'box-shadow: inset -2px 0 0 var(--vscode-focusBorder)'],
+  ['[dir="rtl"]', '--tp-closed: "◂"'],
+]
+
+/** The stylesheet's rules, comments out: each selector (an @media rule's prefixed with its condition) and its declarations. */
+function styleRules(css: string): Array<{ sel: string; decls: Array<[string, string]> }> {
+  const out: Array<{ sel: string; decls: Array<[string, string]> }> = []
+  const split = (body: string): Array<[string, string]> => {
+    const parts: string[] = []
+    let depth = 0, quote = '', at = 0
+    for (let i = 0; i < body.length; i++) {
+      const ch = body[i]
+      if (quote) { if (ch === '\\') i++; else if (ch === quote) quote = ''; continue }
+      if (ch === '"' || ch === "'") quote = ch
+      else if (ch === '(') depth++
+      else if (ch === ')') depth--
+      else if (ch === ';' && depth === 0) { parts.push(body.slice(at, i)); at = i + 1 }
+    }
+    parts.push(body.slice(at))
+    return parts.map((x) => x.trim()).filter(Boolean).map((x) => {
+      const c = x.indexOf(':')
+      return [x.slice(0, c).trim(), x.slice(c + 1).trim().replace(/\s+/g, ' ')] as [string, string]
+    })
+  }
+  const walk = (text: string, prefix: string): void => {
+    let i = 0
+    for (;;) {
+      const open = text.indexOf('{', i)
+      if (open < 0) return
+      let depth = 1, j = open + 1
+      for (; j < text.length && depth > 0; j++) if (text[j] === '{') depth++; else if (text[j] === '}') depth--
+      const sel = text.slice(i, open).trim().replace(/\s+/g, ' ')
+      const body = text.slice(open + 1, j - 1)
+      if (sel.startsWith('@media')) walk(body, sel + ' ')
+      else if (!sel.startsWith('@')) out.push({ sel: prefix + sel, decls: split(body) })
+      i = j
+    }
+  }
+  walk(css.replace(/\/\*[\s\S]*?\*\//g, ''), '')
+  return out
+}
+
+/** The top-level values of a declaration (a shorthand's parts), parentheses kept whole. */
+function cssValues(v: string): string[] {
+  const out: string[] = []
+  let depth = 0, cur = ''
+  for (const ch of v) {
+    if (ch === '(') depth++
+    if (ch === ')') depth--
+    if (ch === ' ' && depth === 0) { if (cur) out.push(cur); cur = '' } else cur += ch
+  }
+  if (cur) out.push(cur)
+  return out
+}
+
+/** 1.13 A2 rule 2: why a declaration names a side of the page — or null for one that follows the direction. */
+function physicalOf(prop: string, value: string): string | null {
+  if (/^(margin|padding|border)-(left|right)(-(width|style|color))?$/.test(prop)) return 'a physical side'
+  if (/^border-(top|bottom)-(left|right)-radius$/.test(prop)) return 'a physical corner'
+  if (prop === 'left' || prop === 'right') return 'a physical offset'
+  if (prop === 'text-align' && /^(left|right)\b/.test(value)) return 'a physical alignment'
+  if ((prop === 'float' || prop === 'clear') && /\b(left|right)\b/.test(value)) return 'a physical float'
+  if (prop === 'margin' || prop === 'padding' || prop === 'inset') {
+    const v = cssValues(value)
+    if (v.length === 4 && v[1] !== v[3]) return 'a shorthand whose left and right differ'
+  }
+  if (prop === 'border-radius' && !value.includes('/')) {
+    const v = cssValues(value)
+    const [tl, tr, br, bl] = v.length === 1 ? [v[0], v[0], v[0], v[0]] : v.length === 2 ? [v[0], v[1], v[0], v[1]]
+      : v.length === 3 ? [v[0], v[1], v[2], v[1]] : v
+    if (tl !== tr || bl !== br) return 'corners whose left and right differ'
+  }
+  if (prop === 'box-shadow' && /\binset\s+(-?[\d.]+)px/.test(value) && Number(/\binset\s+(-?[\d.]+)px/.exec(value)![1]) !== 0) return 'an inset shadow with a sideways offset'
+  if (prop === 'content' && /[▸◂▶◀]/.test(value)) return 'a sideways triangle — the direction\'s own (--tp-closed)'
+  return null
+}
+
+test('1.13 A2 rule 2 (§7a Q2): the stylesheet is in logical properties — no physical side, offset, corner, alignment or float outside the charts\' own rules and the measured popover, each kept with its reason; the two [dir="rtl"] rules and no other', () => {
+  const rules = styleRules(STYLE)
+  assert.ok(rules.length > 300, String(rules.length))
+  const kept = new Map(PHYSICAL_KEPT)
+  // Every physical declaration of the page, by selector: only the kept ones.
+  const found: Array<[string, string]> = []
+  for (const r of rules) {
+    if (DIR_RULES.some(([sel]) => sel === r.sel)) continue
+    for (const [prop, value] of r.decls) {
+      const why = physicalOf(prop, value)
+      if (why && !kept.has(r.sel)) found.push([r.sel, `${prop}: ${value} (${why})`])
+    }
+  }
+  assert.deepEqual(found, [])
+  // Every kept selector is a rule of the page and names a side still — a stale entry of the list is an error too.
+  for (const [sel, why] of PHYSICAL_KEPT) {
+    const r = rules.filter((x) => x.sel === sel)
+    assert.equal(r.length, 1, sel)
+    assert.ok(r[0].decls.some(([p, v]) => physicalOf(p, v) !== null), sel)
+    assert.ok(why.length > 20, sel)
+  }
+  // Every property of code fact 3 accounted for: its logical form in its rule, the physical one gone.
+  for (const [sel, before, now] of LOGICAL_NOW) {
+    const r = rules.filter((x) => x.sel === sel)
+    assert.equal(r.length, 1, sel)
+    const body = r[0].decls.map(([p, v]) => `${p}: ${v}`).join('; ')
+    assert.ok(body.includes(now), `${sel}: ${now} — ${body}`)
+    for (const d of before.split('; ')) assert.equal(body.split('; ').includes(d), false, `${sel}: ${d} — ${body}`)
+  }
+  // The two rules CSS has no logical form for, each once — and nothing else of the stylesheet names a direction.
+  const dirRules = rules.filter((r) => /\[dir|:dir\(/.test(r.sel))
+  assert.deepEqual(dirRules.map((r) => [r.sel, r.decls.map(([p, v]) => `${p}: ${v}`).join('; ')]), DIR_RULES.map(([s, d]) => [s, d]))
+  // The closed disclosure's two glyphs: ▸ left to right, ◂ right to left.
+  assert.deepEqual(rules.filter((r) => r.decls.some(([p]) => p === '--tp-closed')).map((r) => [r.sel, r.decls]),
+    [[':root', [['--tp-closed', '"▸"']]], ['[dir="rtl"]', [['--tp-closed', '"◂"']]]])
+  // The one logical property of 1.12 stays: the picker at the row's end.
+  assert.ok(rules.some((r) => r.sel === '.lng' && r.decls.some(([p, v]) => p === 'margin-inline-start' && v === 'auto')))
+})
+
+test('1.13 A2 rule 7 (§7a Q3): the quota bar\'s parts and marks are placed from the bar\'s inline start — insetInlineStart from data-x, never left', () => {
+  const els = [7.5, 61.25].map((x) => ({ dataset: { x: String(x) }, style: {} as Record<string, string> }))
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }),
+    document: {
+      addEventListener: () => undefined, getElementById: () => null, querySelector: () => null,
+      querySelectorAll: (q: string) => (q === '[data-x]' ? els : []),
+    },
+    window: { addEventListener: () => undefined },
+    console,
+  })
+  nodeVm.runInContext(SCRIPT, c)
+  nodeVm.runInContext('applyStyles()', c)
+  assert.deepEqual(els.map((e) => e.style), [{ insetInlineStart: '7.5%' }, { insetInlineStart: '61.25%' }])
+  // data-x is the bar's alone: its over-part, its slack, its two marks.
+  const bar = render('sQuota()', { quotas: [card({ windows: [win({ percent: 70, elapsed: 40, forecastEnd: 90, gap: true })] })] })
+  const xs = [...bar.matchAll(/<(\w+) class="([^"]+)" data-x="/g)].map((m) => m[1] + '.' + m[2].split(' ').slice(0, 2).join('.'))
+  assert.ok(xs.length >= 1, bar)
+  for (const x of xs) assert.match(x, /^(span\.fill\.over|span\.slack|i\.mark|i\.mark\.fc)$/, x)
+  assert.equal(SOURCE.split('data-x="').length - 1, 4)
+})
+
+test('1.13 A2 rule 6: an agent\'s figures give way from the line\'s inline end — the right edge left to right, the left edge right to left: the last parts in reading order go, the first stays', () => {
+  // The room function itself: the x the parts may reach, whether a part passes it, what a part keeps of itself.
+  const call = (expr: string): unknown => JSON.parse(JSON.stringify(nodeVm.runInContext(expr, ctx)))
+  assert.equal(call('figureRoom({ left: 0, right: 120 }, 120, 15.4, "ltr")'), 104.6)
+  assert.equal(call('figureRoom({ left: 0, right: 120 }, 120, 15.4, "rtl")'), 15.4)
+  assert.equal(call('figureRoom({ left: 30, right: 150 }, 110, 15.4, "rtl")'), 150 - 110 + 15.4)
+  assert.deepEqual(call('[pastRoom({ left: 50, right: 110 }, 104.6, "ltr"), pastRoom({ left: 10, right: 60 }, 15.4, "rtl"), pastRoom({ left: 20, right: 60 }, 15.4, "rtl")]'), [true, true, false])
+  assert.deepEqual(call('[roomFrom({ left: 58, right: 160 }, 104.6, "ltr"), roomFrom({ left: -40, right: 62 }, 15.4, "rtl")]'), [104.6 - 58, 62 - 15.4])
+  // A right-to-left line of 120 px, its four parts starting at its right edge and running on to the left of it (the
+  // left-to-right test's line mirrored: a part that ended at x there starts at 120 − x here).
+  const a = agentCtx()
+  const doc = (a.c as Record<string, unknown>).document as Record<string, unknown>
+  const part = (left: number, hidden = false) => {
+    const p = fakePart(0, hidden)
+    return Object.assign(p, { getBoundingClientRect: () => ({ left, right: left + 1 }) })
+  }
+  const lineOf = (parts: Array<ReturnType<typeof part>>, clientWidth: number, scrollWidth: number) => {
+    const cls = new Set<string>()
+    return {
+      parts, clientWidth, scrollWidth, children: parts, cls,
+      getBoundingClientRect: () => ({ left: 0, right: clientWidth }),
+      classList: { contains: (c: string) => cls.has(c), add: (c: string) => { cls.add(c) }, remove: (c: string) => { cls.delete(c) } },
+      querySelectorAll: (q: string) => (q === '.ag-gone' ? parts.filter((p) => p.classList.has.has('ag-gone')) : []),
+    }
+  }
+  const cut = lineOf([part(70), part(20), part(-30), part(-80)], 120, 200)
+  const fits = lineOf([part(80), part(30)], 120, 90)
+  const narrow = lineOf([part(-20), part(-100)], 60, 160)
+  doc.querySelectorAll = (q: string) => (q === '.ag-fig' ? [cut, fits, narrow] : [])
+  const gone = (l: { parts: Array<ReturnType<typeof part>> }): boolean[] => l.parts.map((p) => p.classList.has.has('ag-gone'))
+  try {
+    nodeVm.runInContext('DIR = "rtl"; fitAgentFigures()', a.c)
+    assert.deepEqual([gone(cut), cut.cls.has('ag-cut')], [[false, false, true, true], true])
+    assert.deepEqual([gone(fits), fits.cls.has('ag-cut')], [[false, false], false])
+    assert.deepEqual([gone(narrow), narrow.cls.has('ag-cut')], [[false, true], true])
+    // Measured as a left-to-right line, the same boxes would keep the parts at the left — the ones that stand past the
+    // line's start in a right-to-left page — and drop none of the right ones: the direction is what the fit reads.
+    nodeVm.runInContext('DIR = "ltr"; fitAgentFigures()', a.c)
+    assert.deepEqual(gone(cut), [false, false, false, false])
+  } finally {
+    nodeVm.runInContext('DIR = "ltr"', a.c)
+  }
+})
+
+test('1.13 A2 rule 6 (§7a Q12): in a right-to-left page the tree\'s ← opens and goes in, → closes and goes out — the arrow points where the children are; ↑/↓, Home, End, Enter and Space are the same, and a left-to-right page is unchanged', () => {
+  const move = (items: unknown[], i: number, key: string): unknown =>
+    JSON.parse(String(nodeVm.runInContext('JSON.stringify(agentKeyMove(' + JSON.stringify(items) + ', ' + i + ', ' + JSON.stringify(key) + ')) || "null"', ctx)))
+  const it = (level: number, parent: boolean, open: boolean, more = false): Record<string, unknown> => ({ level, parent, open, more })
+  const items = [it(1, true, true), it(2, true, true), it(3, false, false), it(3, true, false), it(3, false, false, true),
+    it(2, false, false), it(1, true, false)]
+  const every = (): unknown => ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', ' ', 'x']
+    .map((k) => items.map((_, i) => move(items, i, k)))
+  const ltr = every()
+  try {
+    nodeVm.runInContext('DIR = "rtl"', ctx)
+    // ←: a closed node opens, an open one hands the focus to its first child; a leaf and a "more" line keep it.
+    assert.deepEqual([3, 6].map((i) => move(items, i, 'ArrowLeft')), [{ act: 'toggle' }, { act: 'toggle' }])
+    assert.deepEqual([0, 1].map((i) => move(items, i, 'ArrowLeft')), [{ focus: 1 }, { focus: 2 }])
+    assert.deepEqual([2, 4, 5].map((i) => move(items, i, 'ArrowLeft')), [{ focus: 2 }, { focus: 4 }, { focus: 5 }])
+    // →: an open node closes; anything else hands the focus to the item above it; a root keeps it.
+    assert.deepEqual([0, 1].map((i) => move(items, i, 'ArrowRight')), [{ act: 'toggle' }, { act: 'toggle' }])
+    assert.deepEqual([2, 3, 4, 5].map((i) => move(items, i, 'ArrowRight')), [{ focus: 1 }, { focus: 1 }, { focus: 1 }, { focus: 0 }])
+    assert.deepEqual(move(items, 6, 'ArrowRight'), { focus: 6 })
+    // Exactly the left-to-right answers with the two arrows swapped, every other key the same.
+    const rtl = every() as unknown[][]
+    const [l, r, ...rest] = ltr as unknown[][]
+    assert.deepEqual(rtl, [r, l, ...rest])
+  } finally {
+    nodeVm.runInContext('DIR = "ltr"', ctx)
+  }
+  assert.deepEqual(every(), ltr)
 })

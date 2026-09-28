@@ -1135,7 +1135,8 @@ test('a language switch reaches the open dashboard as one whole push with the pa
     })
     await waitFor('the first page', () => sent.some((m) => m.type === 'data'))
     assert.equal(sent.some((m) => 'words' in m), false, 'a page of the words it already has carried them')
-    assert.match(html, /<html lang="en">/)
+    // 1.13 P3 (pinned and changed: the root carried lang alone): and the words' direction (§3 A2 rule 1).
+    assert.match(html, /<html lang="en" dir="ltr">/)
     sent.length = 0
     state.set('tokenPace.language', 'de')
     state.fireConfigChange(['tokenPace.language'])
@@ -1144,6 +1145,7 @@ test('a language switch reaches the open dashboard as one whole push with the pa
     assert.equal(whole.length, 1)
     assert.equal(whole[0].words.lang, 'de')
     assert.equal(whole[0].words.locale, 'de')
+    assert.equal(whole[0].words.dir, 'ltr')
     assert.equal(whole[0].words.dict.Refresh, 'Aktualisieren')
     assert.equal(whole[0].payload.language.buttonLabel, 'Sprache: Deutsch')
     assert.equal('allBudgets' in whole[0].payload, false)

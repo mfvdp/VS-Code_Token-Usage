@@ -50,6 +50,18 @@ let shownDrill: string | null = null;
 let langOpen = false;
 /** 1.9 A3.4: a language was chosen — the next whole render puts the focus back on the picker's button. */
 let focusLanguageAfterRender = false;
+/**
+ * 1.13 A2 rule 1 (§0a.1): the direction the page is laid out in — its root's `dir`, which the host writes from the
+ * words' language (`dir="rtl"` for Arabic, Hebrew and Persian) and a switch sets anew (`applyWords`). What the
+ * stylesheet cannot mirror by itself reads it: the quota bars' marks (applyStyles), the room of an agent's figures
+ * (fitAgentFigures), the tree's arrow keys (agentKeyMove). Exactly 'ltr' or 'rtl' (textDir).
+ */
+let DIR: 'ltr' | 'rtl' = typeof document !== 'undefined' && document.documentElement && document.documentElement.dir === 'rtl'
+  ? 'rtl' : 'ltr';
+/** 1.13 §0a.1: a direction the page takes — exactly 'ltr' or 'rtl', anything else none (a push's field, an option's). */
+function textDir(v: unknown): 'ltr' | 'rtl' | null {
+  return v === 'ltr' || v === 'rtl' ? v : null;
+}
 const esc = (s: unknown): string => String(s === null || s === undefined ? '' : s)
   .replace(/[&<>"']/g, c => (({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'} as Record<string, string>)[c]));
 const post = (m: unknown): void => vscode.postMessage(m);
@@ -497,7 +509,11 @@ function sLanguage(): string {
 function languagePop(l: Payload): string {
   const items = (l.options as Payload[]).filter((o) => !!o && typeof o === 'object').map((o) => {
     const checked = o.checked === true;
-    const own = '<span' + (typeof o.lang === 'string' && o.lang ? ' lang="' + esc(o.lang) + '"' : '') + '>' + esc(o.native) + '</span>';
+    // 1.13 A2 rule 5 (§0a.1): the own name in its own direction as well — Deutsch left to right inside an Arabic list,
+    // العربية right to left inside an English one —, exactly 'ltr' or 'rtl' (textDir); Automatic, in the reader's
+    // language, takes the page's.
+    const own = '<span' + (typeof o.lang === 'string' && o.lang ? ' lang="' + esc(o.lang) + '"' : '')
+      + (textDir(o.dir) ? ' dir="' + textDir(o.dir) + '"' : '') + '>' + esc(o.native) + '</span>';
     const theirs = typeof o.name === 'string' && o.name ? '<span class="lng-sep">,</span> <span class="meta">' + esc(o.name) + '</span>' : '';
     return '<li role="menuitemradio" aria-checked="' + checked + '" tabindex="-1" data-act="lang" data-id="' + esc(o.id) + '">'
       + flagSvg(o.flag) + '<span class="lng-text">' + own + theirs + '</span>'
@@ -655,7 +671,9 @@ function wordsTag(tag: unknown): boolean {
  * 1.9 A3.4: the words of a whole push after a language switch — checked before anything of them is used:
  * `lang` and `locale` a language tag each (wordsTag), `dict` a plain object whose string values replace the whole
  * dictionary (other values dropped). Anything else and the page keeps the words it has (false). The host
- * escaped every value already, as it does for the dictionary written into a new page.
+ * escaped every value already, as it does for the dictionary written into a new page. 1.13 A2 rule 1 (§0a.1): `dir`
+ * turns the page — its root's `dir` and DIR — before the render the push carries, and only when it is exactly 'ltr'
+ * or 'rtl' (textDir): any other value leaves the direction as it was, the words taken all the same.
  */
 function applyWords(w: unknown): boolean {
   if (!w || typeof w !== 'object' || Array.isArray(w)) return false;
@@ -669,6 +687,11 @@ function applyWords(w: unknown): boolean {
   for (const k of Object.keys(next)) L10N[k] = next[k];
   if (document.documentElement) document.documentElement.lang = x.lang;
   LOCALE = x.locale;
+  const d = textDir(x.dir);
+  if (d) {
+    if (document.documentElement) document.documentElement.dir = d;
+    DIR = d;
+  }
   return true;
 }
 
@@ -4081,12 +4104,18 @@ interface AgentKeyItem { level: number; parent: boolean; open: boolean; more: bo
  * - Enter, Space: a node is selected — or, whose details stand under its row, cleared —; on a
  *   "more" line the next fifty. 1.7 F2: on the group of earlier sessions, whose row is a toggle
  *   (agentNode), the same target opens and closes it.
+ *
+ * 1.13 A2 rule 6 (§7a Q12): → and ← follow the layout — in a right-to-left page the children are indented to the left,
+ * so ← opens a closed node and goes to the first child, → closes and goes to the parent: the arrow points where the
+ * thing is. ↑/↓, Home, End, Enter and Space are the same in either direction.
  */
 function agentKeyMove(items: AgentKeyItem[], i: number, key: string): { focus?: number; act?: 'toggle' | 'select' | 'more' } | null {
   const it = items[i];
   if (!it) return null;
   const last = items.length - 1;
-  switch (key) {
+  // The key as a left-to-right tree reads it: in a right-to-left page ← is the → below, → the ←.
+  const k = DIR !== 'rtl' ? key : key === 'ArrowLeft' ? 'ArrowRight' : key === 'ArrowRight' ? 'ArrowLeft' : key;
+  switch (k) {
     case 'ArrowDown': return { focus: Math.min(i + 1, last) };
     case 'ArrowUp': return { focus: Math.max(i - 1, 0) };
     case 'Home': return { focus: 0 };
@@ -4129,7 +4158,9 @@ function agentControlOf(li: HTMLElement, what: 'toggle' | 'select' | 'more'): HT
 function applyStyles(): void {
   document.querySelectorAll<HTMLElement>('[data-w]').forEach(el => { el.style.width = el.dataset.w! + '%'; });
   document.querySelectorAll<HTMLElement>('[data-bh]').forEach(el => { el.style.height = el.dataset.bh! + '%'; });
-  document.querySelectorAll<HTMLElement>('[data-x]').forEach(el => { el.style.left = el.dataset.x! + '%'; });
+  // 1.13 A2 rule 7 (§7a Q3): the quota bars' parts and marks from the bar's inline start — the left edge left to right,
+  // the right edge right to left; data-x is the bar's only such attribute (the charts place by data-b and data-bh).
+  document.querySelectorAll<HTMLElement>('[data-x]').forEach(el => { el.style.insetInlineStart = el.dataset.x! + '%'; });
   document.querySelectorAll<HTMLElement>('[data-b]').forEach(el => { el.style.bottom = el.dataset.b! + '%'; });
   // 1.6 N2: a details panel inside a nested entry of the agent tree steps back out of the levels
   // above it (the stylesheet multiplies the level by the indent of one).
@@ -4231,6 +4262,25 @@ function fitAgentNames(): void {
 }
 
 /**
+ * 1.13 A2 rule 6: the x a figures' line's parts may reach — its content's inline end with `ellipsis` px left for the
+ * line's own "\u00a0…": the right edge of the content box left to right (its left edge plus its client width, as since
+ * 1.6), the left edge right to left, where the line ends. `box` is the line's border box, `clientWidth` its content.
+ */
+function figureRoom(box: { left: number; right: number }, clientWidth: number, ellipsis: number, dir: 'ltr' | 'rtl'): number {
+  return dir === 'rtl' ? box.right - clientWidth + ellipsis : box.left + clientWidth - ellipsis;
+}
+
+/** 1.13 A2 rule 6: whether a part's box passes the room — ends right of it left to right, left of it right to left. */
+function pastRoom(part: { left: number; right: number }, room: number, dir: 'ltr' | 'rtl'): boolean {
+  return dir === 'rtl' ? part.left < room : part.right > room;
+}
+
+/** 1.13 A2 rule 6: the width from a box's inline start to the room — what a part cut at the room keeps of itself. */
+function roomFrom(box: { left: number; right: number }, room: number, dir: 'ltr' | 'rtl'): number {
+  return dir === 'rtl' ? box.right - room : room - box.left;
+}
+
+/**
  * 1.6 N6: an agent row's figures are one line (see agentFigLine). Where a narrow sidebar leaves
  * that line too little room, its last parts come off it whole — on an agent's row the tally's last
  * counts first, then the tally, the silence, the clock; on a session's, a run's and a collector's
@@ -4260,21 +4310,22 @@ function fitAgentFigures(): void {
     if (typeof el.getBoundingClientRect !== 'function' || !(el.scrollWidth > el.clientWidth + 0.5)) return;
     const parts = Array.from(el.children).filter(p => p.classList && p.classList.contains('ag-fp')
       && !(p as HTMLElement).hidden) as HTMLElement[];
-    // The room the ellipsis needs at the end of the line: a no-break space and the ellipsis.
+    // The room the ellipsis needs at the end of the line: a no-break space and the ellipsis. 1.13 A2 rule 6: the end in
+    // the page's direction (figureRoom) — the parts that give way are the last ones in reading order either way.
     const size = (typeof getComputedStyle === 'function' ? parseFloat(getComputedStyle(el).fontSize) : NaN) || 11;
-    const room = el.getBoundingClientRect().left + el.clientWidth - size * 1.4;
+    const room = figureRoom(el.getBoundingClientRect(), el.clientWidth, size * 1.4, DIR);
     // 1.6 O4: the agent hook's marker, where the line has one — right after the usage.
     const hookAt = parts.findIndex(p => typeof p.querySelector === 'function' && !!p.querySelector('.ag-hook'));
     const hookEl = hookAt >= 0 ? parts[hookAt].querySelector<HTMLElement>('.ag-hook') : null;
     let keep = parts.length;
-    while (keep > 1 && parts[keep - 1].getBoundingClientRect().right > room) {
+    while (keep > 1 && pastRoom(parts[keep - 1].getBoundingClientRect(), room, DIR)) {
       // The marker is what the row is there to say while an agent waits: with the parts behind it
       // off the line, it gives way on the ellipsis while it has AGENT_HOOK_ROOM_EM left.
-      if (hookEl && keep - 1 === hookAt && room - hookEl.getBoundingClientRect().left >= size * AGENT_HOOK_ROOM_EM) break;
+      if (hookEl && keep - 1 === hookAt && roomFrom(hookEl.getBoundingClientRect(), room, DIR) >= size * AGENT_HOOK_ROOM_EM) break;
       keep--;
     }
-    const shrink = hookEl && keep - 1 === hookAt && parts[hookAt].getBoundingClientRect().right > room
-      ? { el: hookEl, w: Math.max(0, Math.floor(room - hookEl.getBoundingClientRect().left)) } : null;
+    const shrink = hookEl && keep - 1 === hookAt && pastRoom(parts[hookAt].getBoundingClientRect(), room, DIR)
+      ? { el: hookEl, w: Math.max(0, Math.floor(roomFrom(hookEl.getBoundingClientRect(), room, DIR))) } : null;
     plan.push({ el: el, gone: parts.slice(keep), hook: shrink });
   });
   plan.forEach(x => {

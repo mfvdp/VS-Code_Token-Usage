@@ -29,7 +29,8 @@ import {
 import { digest } from './digest'
 import { locale, t } from './i18n'
 import {
-  FlagId, LANGUAGES, LanguageId, LanguageSetting, ResolvedLanguage, isLanguageId, languageEntry, languageName, resolveLanguage,
+  FlagId, LANGUAGES, LanguageId, LanguageSetting, ResolvedLanguage, TextDirection, isLanguageId, languageDir, languageEntry,
+  languageName, resolveLanguage,
 } from './languages'
 import {
   Calibration, ForecastConfig, calibration, forecast, retrospective, Retro,
@@ -1021,6 +1022,11 @@ export interface LanguageOptionVm {
   name: string | null
   /** The `lang` of `native` (the entry's `locale`); null for 'auto', which is in the reader's language. */
   lang: string | null
+  /**
+   * 1.13 A2 rule 5 (§0a.1): the direction `native` is written in (`languageDir`) — العربية right to left inside an English
+   * list, Deutsch left to right inside an Arabic one; null for 'auto', which is in the reader's language and direction.
+   */
+  dir: TextDirection | null
   flag: FlagId | 'auto'
   checked: boolean
 }
@@ -2548,13 +2554,13 @@ function languageVm(input: VmInput['language']): LanguageVm {
   const checked: LanguageSetting | null = offered.has(resolved.setting) ? resolved.setting : null
   const shown = languageEntry(resolved.id)
   const options: LanguageOptionVm[] = [
-    { id: 'auto', native: autoLine, name: null, lang: null, flag: 'auto', checked: checked === 'auto' },
+    { id: 'auto', native: autoLine, name: null, lang: null, dir: null, flag: 'auto', checked: checked === 'auto' },
     ...available.map((id): LanguageOptionVm => {
       const e = languageEntry(id)
       // The same word in another case is no second name — "Français" beside "français" in a French list.
       const name = languageName(id)
       const same = name.toLowerCase() === e.native.toLowerCase()
-      return { id, native: e.native, name: same ? null : name, lang: e.locale, flag: e.flag, checked: checked === id }
+      return { id, native: e.native, name: same ? null : name, lang: e.locale, dir: languageDir(id), flag: e.flag, checked: checked === id }
     }),
   ]
   return {

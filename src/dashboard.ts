@@ -862,6 +862,12 @@ input[type=date] { cursor: text; }
    the unit, and neither must the provider in front of it. The only break left in a heading
    like "Claude Code · 7 d" is the separator itself. */
 .nobr { white-space: nowrap; }
+/* 1.13 A3 rule 3 (the page's half, §7a Q5): a figure, a day, a clock, a money figure or an identifier inside a right-to-left
+   line is a unit of its own (a span.fig laid out left to right by its own dir attribute, which isolates it —
+   isolateFigures) and keeps to one line as a word does, the whole unit moving to the next line; a unit longer than
+   FIGURE_WHOLE_MAX (.long — an agent's id, a long path) breaks where the text around it may, so it never widens the page.
+   Only a right-to-left page has one. */
+.fig:not(.long) { white-space: nowrap; }
 /* Positioned for the same reason the KPI card is: the window block is the containing block of
    its own explanation, so the popover hangs under the bar it explains. */
 .win { margin-top: 8px; position: relative; }
@@ -982,7 +988,10 @@ tr.more td { color: var(--dim); font-style: italic; text-align: start; }
    and the newest days are the ones worth reading. Because those labels sit outside the box,
    the plot must not hide its overflow: an overflow rule here would cut every one of them off.
    240 px rather than the 120 px this started at — split six ways, a 120 px column turns every
-   model but the largest into a hairline. */
+   model but the largest into a hairline.
+   1.13 A2 rule 1 (§7a Q1): the charts are boxes kept left to right — a dir of ltr in their markup (the plot, its day axis,
+   the sparkline, the year strip, the hour strip, its hours and the weekday grid) —, so the physical sides of their own
+   rules below are the box's, the same in either direction; their words carry the page's direction (pageDir). */
 .plot { position: relative; height: 240px; margin-top: 6px; margin-right: 38px;
         border-bottom: 1px solid var(--rule); }
 .grid { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--rule); z-index: 2;

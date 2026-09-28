@@ -2110,11 +2110,12 @@ test('every axis label carries its text and index, so the browser can thin them'
 
 test('the hour strip has an axis of its own and marks its empty hours', () => {
   const h = render('sHours()')
-  const strip = h.slice(h.indexOf('<div class="hours">'))
+  // 1.13 P4 (pinned and changed: the three boxes without a dir): each a box kept left to right (§7a Q1).
+  const strip = h.slice(h.indexOf('<div class="hours" dir="ltr">'))
   assert.ok(strip.indexOf('class="hb none"') >= 0, strip)
   // Its own axis, right after the bars and before the weekday grid.
-  const axis = strip.indexOf('<div class="axis">')
-  const grid = strip.indexOf('<div class="hgrid">')
+  const axis = strip.indexOf('<div class="axis" dir="ltr">')
+  const grid = strip.indexOf('<div class="hgrid" dir="ltr">')
   assert.ok(axis > 0 && grid > axis, strip)
   assert.ok(strip.indexOf('>00</span>') >= 0 && strip.indexOf('>12</span>') >= 0, strip)
   // The four-hour blocks are labelled as belonging to the grid, not to the strip.
@@ -2123,7 +2124,8 @@ test('the hour strip has an axis of its own and marks its empty hours', () => {
 
 test('the weekday grid draws the blocks it has, hatches the rest and says what it stands on', () => {
   const h = render('sHours()')
-  const grid = h.slice(h.indexOf('<div class="hgrid">'))
+  // 1.13 P4 (pinned and changed: the grid without a dir): a box kept left to right (§7a Q1).
+  const grid = h.slice(h.indexOf('<div class="hgrid" dir="ltr">'))
   // Seven cells with a level, thirty-five hatched — and nothing claiming a missing sample.
   assert.equal(grid.split('<i class="l').length - 1, 7, grid)
   assert.equal(grid.split('<i class="none"').length - 1, 35, grid)
@@ -2164,7 +2166,8 @@ function sparkOf(s: Record<string, unknown>): string {
 test('the quota sparkline is time-proportional: one unit per slot, holes as wide as their time', () => {
   // Two adjacent slots are one polyline, x is the slot index, y is the inverted percentage.
   const two = sparkOf(slotted([{ i: 10, p: 20, level: 'ok' }, { i: 11, p: 30, level: 'ok' }]))
-  assert.match(two, /^<div class="sparkbox"><svg class="spark q" viewBox="0 0 672 100" preserveAspectRatio="none" role="img" tabindex="0" aria-label="quota sparkline, 7 days">/)
+  // 1.13 P4 (pinned and changed: the box without a dir): a box kept left to right (§7a Q1).
+  assert.match(two, /^<div class="sparkbox" dir="ltr"><svg class="spark q" viewBox="0 0 672 100" preserveAspectRatio="none" role="img" tabindex="0" aria-label="quota sparkline, 7 days">/)
   assert.equal(two.split('<polyline').length - 1, 1, two)
   assert.match(two, /<polyline class="ok" points="10,80.0 11,70.0"\/>/)
   // With its time a reading sits where it was taken, not at the start of its slot.
@@ -2307,7 +2310,9 @@ test('the quota sparkline can be hovered and reached by keyboard; the KPI sparks
   const h = render('sQuota()', { quotas: [card({ windows: [win({ spark })] })] })
   // The svg is the focusable, labelled element; the provider and the window it belongs to
   // are written on it so the hover finds the readings in the view model, not in a copy.
-  assert.match(h, /<div class="sparkbox"><svg class="spark q" viewBox="0 0 672 100" preserveAspectRatio="none" role="img" tabindex="0" aria-label="quota sparkline, 7 days, 2 readings, peak 30 %" data-src="claude" data-win="session:300">/)
+  // 1.13 P4 (pinned and changed: the box without a dir): a box kept left to right (§7a Q1); its label in the page's
+  // direction (none of its own in a left-to-right page).
+  assert.match(h, /<div class="sparkbox" dir="ltr"><svg class="spark q" viewBox="0 0 672 100" preserveAspectRatio="none" role="img" tabindex="0" aria-label="quota sparkline, 7 days, 2 readings, peak 30 %" data-src="claude" data-win="session:300">/)
   // The overlay takes the pointer, the empty marker waits for a reading, and the label box
   // is the KPI explanation's, hidden until there is something to say.
   assert.match(h, /<rect class="ov" x="0" y="0" width="672" height="100"\/><path class="hov"\/><\/svg><div class="pop" role="tooltip" aria-live="polite" hidden><\/div><\/div>/)
@@ -11072,9 +11077,15 @@ test('1.13 A2 rule 8 (3.0(f)): the right-to-left page renders the markup its lef
   const rtl = drawn('rtl'), ltr = drawn('ltr')
   // The script reads the root's direction at load.
   assert.deepEqual([rtl.dir, ltr.dir], ['rtl', 'ltr'])
-  // A page of every default section, in the pseudo words, drawn once each way: the same string.
+  // A page of every default section, in the pseudo words, drawn once each way: the same string. 1.13 P4 (pinned and
+  // changed: the same string whole): but for the page's direction on the words inside the boxes kept left to right (the
+  // sparklines' labels, the weekdays, the charts' marks whose tooltips are sentences — dir="rtl" right to left, nothing
+  // left to right) and the range caption's arrow (rangeArrow: ← right to left); the figures' units are made in a
+  // document (isolateFigures), which this string holder is not — the P4 test below draws into one.
   assert.ok(rtl.html.length > 20000 && rtl.html.includes(ARAB_WORD), String(rtl.html.length))
-  assert.equal(rtl.html, ltr.html)
+  const dirs = rtl.html.split(' dir="rtl"').length - 1
+  assert.ok(dirs > 30, String(dirs))
+  assert.equal(rtl.html.split(' dir="rtl"').join('').replace(/(<span class="meta cap">[^<]*<span class="nobr">[^<]*<\/span>) ← /, '$1 → '), ltr.html)
   // No bidi control anywhere in it — the page lays out by `dir`, never by characters (§0a.3) —, in an aria value least of all.
   assert.equal(PAGE_BIDI_CONTROLS.test(rtl.html), false)
   const aria = [...rtl.html.matchAll(/ aria-[a-z]+="([^"]*)"/g)].map((m) => m[1])
@@ -11182,18 +11193,24 @@ test('1.13 A2 rule 5 (§0a.1): each language\'s own name in its own lang and dir
 })
 
 /**
- * 1.13 A2 rule 2 (§7a Q2): what the stylesheet keeps physical, by selector, each with its reason. Every other rule is in
- * logical properties — the margin, padding, border and inset of the inline start and end, text-align start and end, the
- * corners' logical radii —, which compute to the physical ones of 1.12 in a left-to-right page.
+ * 1.13 A2 rule 2 (§7a Q2): what the stylesheet keeps physical — by selector and property, each with its reason. Every other
+ * rule is in logical properties — the margin, padding, border and inset of the inline start and end, text-align start and
+ * end, the corners' logical radii —, which compute to the physical ones of 1.12 in a left-to-right page.
+ * 1.13 P4 (pinned and changed: by selector alone, Review 1 F4 — a margin-left added to the open row's rule passed; and the
+ * charts' rules "waiting for P4"): one entry per physical declaration, so a second one in a kept rule fails; the charts'
+ * rules are inside a box kept left to right (their markup's dir="ltr", §7a Q1), where a physical side is the box's.
  */
-const PHYSICAL_KEPT: ReadonlyArray<readonly [string, string]> = [
-  ['.pop', 'a key figure\'s or a window\'s explanation hangs by measurement, not by the direction: showPop anchors it at the card\'s left edge and, for a card in the viewport\'s right half (`.right`), at its right edge — the geometry that keeps it on the page in either direction; the sparkline\'s label inside .sparkbox is placed from the left by its own script (P4\'s box)'],
-  ['.pop.right', 'the same measurement\'s other edge'],
-  ['.plot', 'a chart stays left to right in every direction (§7a Q1): the gutter for its tick labels at its right'],
-  ['.grid', 'the chart\'s grid line, across the whole plot (left and right 0)'],
-  ['.grid span', 'the chart\'s tick label, in the plot\'s right gutter'],
-  ['.plot + .axis', 'the chart\'s day axis shares the plot\'s gutter, each label under its column'],
-  ['.ag-row[aria-pressed="true"], .agtree .ag-row[data-pressed="true"]', 'the open row\'s edge: an inset box-shadow has no logical form — the [dir="rtl"] rule turns it'],
+const PHYSICAL_KEPT: ReadonlyArray<readonly [string, string, string]> = [
+  ['.pop', 'left', 'a key figure\'s or a window\'s explanation hangs by measurement, not by the direction: showPop anchors it at the card\'s left edge and, for a card in the viewport\'s right half (`.right`), at its right edge — the geometry that keeps it on the page in either direction; the sparkline\'s label inside .sparkbox is placed from the left by its own script, inside a box kept left to right'],
+  ['.pop.right', 'left', 'the same measurement\'s other edge (its left edge let go)'],
+  ['.pop.right', 'right', 'the same measurement\'s other edge'],
+  ['.plot', 'margin-right', 'inside a kept-LTR box (§7a Q1): the gutter for the chart\'s tick labels at its right, the newest days\' side in either direction'],
+  ['.grid', 'left', 'inside a kept-LTR box: the chart\'s grid line, across the whole plot'],
+  ['.grid', 'right', 'inside a kept-LTR box: the chart\'s grid line, across the whole plot'],
+  ['.grid span', 'left', 'inside a kept-LTR box: the chart\'s tick label, in the plot\'s right gutter'],
+  ['.grid span', 'margin-left', 'inside a kept-LTR box: the tick label\'s gap from the plot'],
+  ['.plot + .axis', 'margin-right', 'inside a kept-LTR box: the day axis shares the plot\'s gutter, each label under its column'],
+  ['.ag-row[aria-pressed="true"], .agtree .ag-row[data-pressed="true"]', 'box-shadow', 'the open row\'s edge: an inset box-shadow has no logical form — the [dir="rtl"] rule turns it'],
 ]
 
 /**
@@ -11312,28 +11329,37 @@ function physicalOf(prop: string, value: string): string | null {
   }
   if (prop === 'box-shadow' && /\binset\s+(-?[\d.]+)px/.test(value) && Number(/\binset\s+(-?[\d.]+)px/.exec(value)![1]) !== 0) return 'an inset shadow with a sideways offset'
   if (prop === 'content' && /[▸◂▶◀]/.test(value)) return 'a sideways triangle — the direction\'s own (--tp-closed)'
+  // 1.13 P4 (Review 1 F4): a sideways move, a scroll snap's side and a background's side are physical too.
+  if (/^(transform|translate)$/.test(prop) && /translateX\(|translate3?d?\(\s*-?[\d.]*[1-9]|^-?[\d.]*[1-9][\d.]*(px|%|em|rem)\b/.test(value)) return 'a sideways translation'
+  if (/^scroll-(padding|margin)-(left|right)$/.test(prop)) return 'a physical scroll side'
+  if (/^background-position(-x)?$/.test(prop) && /\b(left|right)\b/.test(value)) return 'a physical background side'
   return null
 }
 
-test('1.13 A2 rule 2 (§7a Q2): the stylesheet is in logical properties — no physical side, offset, corner, alignment or float outside the charts\' own rules and the measured popover, each kept with its reason; the two [dir="rtl"] rules and no other', () => {
-  const rules = styleRules(STYLE)
-  assert.ok(rules.length > 300, String(rules.length))
-  const kept = new Map(PHYSICAL_KEPT)
-  // Every physical declaration of the page, by selector: only the kept ones.
+/** 1.13 A2 rule 2: every physical declaration of the rules outside the two [dir="rtl"] ones and the kept pairs. */
+function physicalFound(rules: Array<{ sel: string; decls: Array<[string, string]> }>): Array<[string, string]> {
+  const kept = new Set(PHYSICAL_KEPT.map(([sel, prop]) => sel + '\u0000' + prop))
   const found: Array<[string, string]> = []
   for (const r of rules) {
     if (DIR_RULES.some(([sel]) => sel === r.sel)) continue
     for (const [prop, value] of r.decls) {
       const why = physicalOf(prop, value)
-      if (why && !kept.has(r.sel)) found.push([r.sel, `${prop}: ${value} (${why})`])
+      if (why && !kept.has(r.sel + '\u0000' + prop)) found.push([r.sel, `${prop}: ${value} (${why})`])
     }
   }
-  assert.deepEqual(found, [])
-  // Every kept selector is a rule of the page and names a side still — a stale entry of the list is an error too.
-  for (const [sel, why] of PHYSICAL_KEPT) {
+  return found
+}
+
+test('1.13 A2 rule 2 (§7a Q2): the stylesheet is in logical properties — no physical side, offset, corner, alignment or float outside the charts\' own rules and the measured popover, each kept with its reason; the two [dir="rtl"] rules and no other', () => {
+  const rules = styleRules(STYLE)
+  assert.ok(rules.length > 300, String(rules.length))
+  // Every physical declaration of the page, by selector and property: only the kept ones (1.13 P4: the pair, Review 1 F4).
+  assert.deepEqual(physicalFound(rules), [])
+  // Every kept pair is a declaration of the page that names a side still — a stale entry of the list is an error too.
+  for (const [sel, prop, why] of PHYSICAL_KEPT) {
     const r = rules.filter((x) => x.sel === sel)
     assert.equal(r.length, 1, sel)
-    assert.ok(r[0].decls.some(([p, v]) => physicalOf(p, v) !== null), sel)
+    assert.ok(r[0].decls.some(([p, v]) => p === prop && physicalOf(p, v) !== null), sel + ' ' + prop)
     assert.ok(why.length > 20, sel)
   }
   // Every property of code fact 3 accounted for: its logical form in its rule, the physical one gone.
@@ -11352,6 +11378,31 @@ test('1.13 A2 rule 2 (§7a Q2): the stylesheet is in logical properties — no p
     [[':root', [['--tp-closed', '"▸"']]], ['[dir="rtl"]', [['--tp-closed', '"◂"']]]])
   // The one logical property of 1.12 stays: the picker at the row's end.
   assert.ok(rules.some((r) => r.sel === '.lng' && r.decls.some(([p, v]) => p === 'margin-inline-start' && v === 'auto')))
+})
+
+test('1.13 P4 (Review 1 F4): the static test refuses a sideways translation, a scroll snap\'s side and a background\'s side, and holds a kept rule to its own physical properties — a margin-left added to the open row\'s rule, or to the plot\'s, fails it', () => {
+  const pressed = '.ag-row[aria-pressed="true"], .agtree .ag-row[data-pressed="true"]'
+  const refused = (css: string): string[] => physicalFound(styleRules(STYLE + '\n' + css)).map(([sel, d]) => sel + ' { ' + d + ' }')
+  assert.deepEqual(refused(''), [])
+  const cases: Array<[string, RegExp]> = [
+    [pressed + ' { margin-left: 1px; }', /margin-left: 1px \(a physical side\)/],
+    ['.plot { margin-left: 2px; }', /^\.plot \{ margin-left: 2px/],
+    ['.x { transform: translateX(3px); }', /a sideways translation/],
+    ['.x { transform: translate(-50%, 0); }', /a sideways translation/],
+    ['.x { translate: 4px 0; }', /a sideways translation/],
+    ['.x { scroll-padding-left: 4px; }', /a physical scroll side/],
+    ['.x { scroll-margin-right: 4px; }', /a physical scroll side/],
+    ['.x { background-position: left top; }', /a physical background side/],
+    ['.x { background-position-x: right; }', /a physical background side/],
+  ]
+  for (const [css, want] of cases) {
+    const r = refused(css)
+    assert.equal(r.length, 1, css + ' ' + JSON.stringify(r))
+    assert.match(r[0], want, css)
+  }
+  // What follows the direction, or moves nothing sideways, passes.
+  for (const css of ['.x { transform: translateY(2px); }', '.x { translate: 0 4px; }', '.x { scroll-padding-inline-start: 4px; }',
+    '.x { background-position: 0 50%; }', '.x { transform: rotate(90deg); }']) assert.deepEqual(refused(css), [], css)
 })
 
 test('1.13 A2 rule 7 (§7a Q3): the quota bar\'s parts and marks are placed from the bar\'s inline start — insetInlineStart from data-x, never left', () => {
@@ -11447,4 +11498,343 @@ test('1.13 A2 rule 6 (§7a Q12): in a right-to-left page the tree\'s ← opens a
     nodeVm.runInContext('DIR = "ltr"', ctx)
   }
   assert.deepEqual(every(), ltr)
+})
+
+// ---------------------------------------------------------------------------
+// 1.13 A2 rule 1, A3 rule 3 (P4): the charts kept left to right, each figure and identifier one left-to-right unit, the
+// page's range arrows, the stylesheet's static test hardened (Review 1 F4)
+// ---------------------------------------------------------------------------
+
+/**
+ * 1.13 P4: a small DOM for isolateFigures — elements and texts with the calls the page makes (nodeType, childNodes,
+ * parentNode, getAttribute/setAttribute, className, insertBefore, removeChild, appendChild, textContent), parsed from the
+ * markup a renderer writes. Bounded (MINI_MAX_NODES a document), its links hidden from util.inspect (the memory rule:
+ * an assertion never inspects the tree), and compared only as strings.
+ */
+const MINI_MAX_NODES = 40000
+const MINI_VOID = new Set(['br', 'input', 'img', 'hr', 'meta', 'wbr', 'col', 'link', 'source'])
+const SVG_NS = 'http://www.w3.org/2000/svg'
+const hideKey = (o: object, k: string, v: unknown): void => { Object.defineProperty(o, k, { value: v, writable: true, enumerable: false, configurable: true }) }
+class MiniDoc {
+  nodes = 0
+  documentElement: MEl
+  constructor(dir: 'ltr' | 'rtl') {
+    this.documentElement = new MEl(this, 'html', { lang: 'ar', dir })
+  }
+  count(): void { if (++this.nodes > MINI_MAX_NODES) throw new Error('mini DOM: more than ' + MINI_MAX_NODES + ' nodes') }
+  createElement(tag: string): MEl { return new MEl(this, tag) }
+  createTextNode(s: string): MText { return new MText(this, s) }
+}
+class MText {
+  nodeType = 3
+  data: string
+  declare parentNode: MEl | null
+  constructor(doc: MiniDoc, data: string) { doc.count(); hideKey(this, 'parentNode', null); this.data = String(data) }
+  get textContent(): string { return this.data }
+}
+class MEl {
+  nodeType = 1
+  tagName: string
+  namespaceURI: string
+  attrs: Record<string, string>
+  declare parentNode: MEl | null
+  declare childNodes: Array<MEl | MText>
+  declare doc: MiniDoc
+  constructor(doc: MiniDoc, tag: string, attrs: Record<string, string> = {}, ns = 'http://www.w3.org/1999/xhtml') {
+    doc.count()
+    hideKey(this, 'doc', doc)
+    hideKey(this, 'parentNode', null)
+    hideKey(this, 'childNodes', [])
+    this.tagName = tag.toUpperCase()
+    this.namespaceURI = ns
+    this.attrs = { ...attrs }
+  }
+  get dir(): string { return this.attrs.dir ?? '' }
+  getAttribute(k: string): string | null { return k in this.attrs ? this.attrs[k] : null }
+  setAttribute(k: string, v: string): void { this.attrs[k] = String(v) }
+  get className(): string { return this.attrs.class ?? '' }
+  set className(v: string) { this.attrs.class = String(v) }
+  appendChild<T extends MEl | MText>(n: T): T { return this.insertBefore(n, null) }
+  insertBefore<T extends MEl | MText>(n: T, ref: MEl | MText | null): T {
+    if (n.parentNode) n.parentNode.removeChild(n)
+    const at = ref === null ? this.childNodes.length : this.childNodes.indexOf(ref)
+    if (at < 0) throw new Error('insertBefore: not a child')
+    this.childNodes.splice(at, 0, n)
+    n.parentNode = this
+    return n
+  }
+  removeChild<T extends MEl | MText>(n: T): T {
+    const at = this.childNodes.indexOf(n)
+    if (at < 0) throw new Error('removeChild: not a child')
+    this.childNodes.splice(at, 1)
+    n.parentNode = null
+    return n
+  }
+  get textContent(): string { return this.childNodes.map((c) => c.textContent).join('') }
+  set textContent(v: string) {
+    for (const c of this.childNodes) c.parentNode = null
+    this.childNodes.length = 0
+    if (v !== '') this.appendChild(new MText(this.doc, v))
+  }
+  set innerHTML(h: string) {
+    for (const c of this.childNodes) c.parentNode = null
+    this.childNodes.length = 0
+    miniParse(this.doc, h, this)
+  }
+  get innerHTML(): string { return this.childNodes.map(miniHtml).join('') }
+}
+const miniEntity = (s: string): string => s.replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (_, e) =>
+  ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", nbsp: '\u00a0' } as Record<string, string>)[e])
+/** The markup a renderer writes, as MiniDom children of `into`. */
+function miniParse(doc: MiniDoc, html: string, into: MEl): void {
+  const open: MEl[] = [into]
+  const re = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:\s+[a-zA-Z_:][-a-zA-Z0-9_:.]*(?:="[^"]*")?)*)\s*(\/?)>|([^<]+)/g
+  for (const m of html.matchAll(re)) {
+    const top = open[open.length - 1]
+    if (m[5] !== undefined) { top.appendChild(new MText(doc, miniEntity(m[5]))); continue }
+    const tag = m[2].toLowerCase()
+    if (m[1] === '/') {
+      assert.equal(top.tagName.toLowerCase(), tag, 'unbalanced </' + tag + '>')
+      open.pop()
+      continue
+    }
+    const attrs: Record<string, string> = {}
+    for (const a of m[3].matchAll(/\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:="([^"]*)")?/g)) attrs[a[1]] = miniEntity(a[2] ?? '')
+    const svg = tag === 'svg' || top.namespaceURI === SVG_NS
+    const el = new MEl(doc, tag, attrs, svg ? SVG_NS : undefined)
+    top.appendChild(el)
+    if (!MINI_VOID.has(tag) && m[4] !== '/') open.push(el)
+  }
+  assert.equal(open.length, 1, 'unclosed ' + open.map((e) => e.tagName).join(' > '))
+}
+const miniEsc = (s: string, q = false): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, q ? '&quot;' : '"')
+/** A MiniDom node as markup (a text escaped as the page escapes it, a no-break space as U+00A0). */
+function miniHtml(n: MEl | MText): string {
+  if (n instanceof MText) return miniEsc(n.data)
+  const tag = n.tagName.toLowerCase()
+  const attrs = Object.entries(n.attrs).map(([k, v]) => ' ' + k + '="' + miniEsc(v, true) + '"').join('')
+  return '<' + tag + attrs + '>' + (MINI_VOID.has(tag) ? '' : n.childNodes.map(miniHtml).join('') + '</' + tag + '>')
+}
+/** Every element of a MiniDom tree, in document order (bounded by the document). */
+function miniAll(root: MEl): MEl[] {
+  const out: MEl[] = []
+  const stack: Array<MEl | MText> = [...root.childNodes].reverse()
+  while (stack.length) {
+    const n = stack.pop()!
+    if (n instanceof MEl) { out.push(n); for (let i = n.childNodes.length - 1; i >= 0; i--) stack.push(n.childNodes[i]) }
+  }
+  return out
+}
+/** The markup with every unit isolateFigures made taken off again — its text left where it stood. */
+const unFig = (h: string): string => h.replace(/<span class="fig(?: long)?" dir="ltr">([^<]*)<\/span>/g, '$1')
+
+/**
+ * 1.13 P4: a context for the page's script in direction `d` over a MiniDom document: the root element carries `dir`, the
+ * page's #root is a MiniDom element (renderAll writes into it), and the document makes elements and texts the way a
+ * browser's does. Every query of the fits answers nothing (no layout here).
+ */
+function miniCtx(d: 'ltr' | 'rtl', script = SCRIPT): { c: nodeVm.Context; doc: MiniDoc; root: MEl } {
+  const doc = new MiniDoc(d)
+  const root = new MEl(doc, 'div', { id: 'root' })
+  doc.documentElement.appendChild(root)
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }),
+    document: {
+      documentElement: doc.documentElement,
+      addEventListener: () => undefined,
+      getElementById: (id: string) => (id === 'root' ? root : null),
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      createElement: (tag: string) => doc.createElement(tag),
+      createTextNode: (s: string) => doc.createTextNode(s),
+    },
+    window: { addEventListener: () => undefined },
+    console,
+  })
+  nodeVm.runInContext(script, c)
+  return { c, doc, root }
+}
+
+/** 1.13 P4: one markup string through isolateFigures in a right-to-left (or a left-to-right) page, as markup again. */
+function isolated(html: string, d: 'ltr' | 'rtl' = 'rtl'): string {
+  const m = miniCtx(d)
+  m.root.innerHTML = html
+  ;(m.c as Record<string, unknown>).scope = m.root
+  nodeVm.runInContext('isolateFigures(scope)', m.c)
+  return m.root.innerHTML
+}
+
+test('1.13 A3 rule 3 (§7a Q5): the page\'s figure grammar — a figure with its mark, sign and unit and a duration\'s parts, an ISO day, a range with →, a clock, a money figure with its currency, an identifier or a name of several words, each one unit; a single word passed over whole, a model id never split into a name and a figure', () => {
+  const units = (s: string): string[] => JSON.parse(String(nodeVm.runInContext(
+    'JSON.stringify(Array.from(' + JSON.stringify(s) + '.matchAll(FIGURE_RUN)).filter(function (m) { return m.groups.name === undefined || FIGURE_NAME_UNIT.test(m[0]); }).map(function (m) { return Object.keys(m.groups).filter(function (k) { return m.groups[k] !== undefined; })[0] + ":" + m[0]; }))', ctx)))
+  const nb = '\u00a0'
+  const cases: Array<[string, string[]]> = [
+    [`كلمة ~18${nb}h${nb}46${nb}min كلمة`, [`figure:~18${nb}h${nb}46${nb}min`]],
+    ['كلمة 22 % كلمة (10 %)', ['figure:22 %', 'figure:10 %']],
+    ['3 d 4 h · 4 m 10 s · 2h14m · 49 min 00 s', ['figure:3 d 4 h', 'figure:4 m 10 s', 'figure:2h14m', 'figure:49 min 00 s']],
+    ['-13% +725% ±0% ≈176.5K ⚠ 3.2M 23.2K', ['figure:-13%', 'figure:+725%', 'figure:±0%', 'figure:≈176.5K', 'figure:⚠ 3.2M', 'figure:23.2K']],
+    ['كلمة <1 % كلمة ≥ 5 min ~<1 %', ['figure:<1 %', 'figure:≥ 5 min', 'figure:~<1 %']],
+    [`1${nb}234,5 كلمة 84,210 / 200,000`, [`figure:1${nb}234,5`, 'figure:84,210', 'figure:200,000']],
+    ['2026-08-01 → 2026-08-05', ['range:2026-08-01 → 2026-08-05']],
+    ['2026-08-05 ← 2026-09-03', ['day:2026-08-05', 'day:2026-09-03']],
+    ['Do. 14:20 · 2:05 PM · 12:39:05', ['clock:14:20', 'clock:2:05 PM', 'clock:12:39:05']],
+    ['~$5.33 <$0.01 ~<$0.01 $1,234', ['money:~$5.33', 'money:<$0.01', 'money:~<$0.01', 'money:$1,234']],
+    [`\u200f12.50${nb}US$ من \u200e$${nb}12.50 \u200f12.50${nb}\u200f$`, [`money:\u200f12.50${nb}US$`, `money:\u200e$${nb}12.50`, `money:\u200f12.50${nb}\u200f$`]],
+    ['(claude-experimental-x, claude-haiku-3-5, gpt-5.3-codex-mini)', ['name:claude-experimental-x', 'name:claude-haiku-3-5', 'name:gpt-5.3-codex-mini']],
+    ['كلمة: claude-opus-4-6 كلمة', ['name:claude-opus-4-6']],
+    ['Claude Code 7 d Opus · Visual Studio Code · Token Pace', ['name:Claude Code', 'figure:7 d', 'name:Visual Studio Code', 'name:Token Pace']],
+    ['~/.claude, docs.claude.com (tokenPace.attribution) mcp__github__create_issue, 3f9a2c1d-7b4e', ['name:~/.claude', 'name:docs.claude.com', 'name:tokenPace.attribution', 'name:mcp__github__create_issue', 'name:3f9a2c1d-7b4e']],
+    // Latin words and identifiers next to each other are one left-to-right run for the bidi algorithm already: one unit.
+    ['كلمة claude-opus-4-6 Opus كلمة', ['name:claude-opus-4-6 Opus']],
+    ['كلمة $/1M كلمة', ['name:$/1M']],
+    // A single word is one left-to-right run already: passed over whole, its digits with it.
+    ['P90 · max20 · Codex · API · 20x · كلمة\'s 7-كلمة', ['figure:7']],
+  ]
+  for (const [s, want] of cases) assert.deepEqual(units(s), want, s)
+  // The kinds and their order, as P5's host FIGURE_RE (src/bidi.ts) reads them: `figure` is A3 rule 3's grammar.
+  assert.deepEqual(Object.keys(JSON.parse(String(nodeVm.runInContext('JSON.stringify(FIGURE_GRAMMAR)', ctx)))),
+    ['edge', 'end', 'space', 'range', 'day', 'clock', 'money', 'figure', 'name'])
+  assert.equal(nodeVm.runInContext('FIGURE_WHOLE_MAX', ctx), 24)
+})
+
+test('1.13 A3 rule 3 (§7a Q5): in a right-to-left page isolateFigures makes each figure, day, clock, money figure and identifier one <span class="fig" dir="ltr"> by the DOM API — the texts alone, never an attribute or an aria value, never inside a box kept left to right or an SVG, the formatter\'s marks left out; a left-to-right page is left as it is', () => {
+  const nb = '\u00a0'
+  const html = '<ul><li>كلمة ~18' + nb + 'h' + nb + '46' + nb + 'min كلمة (claude-experimental-x, claude-haiku-3-5) Claude Code 22 %</li>'
+    + '<li><b title="5 h · 22 %" aria-label="claude-opus-4-6 22 %">كلمة 2026-08-05 ← 2026-09-03</b></li></ul>'
+    + '<div class="plot" dir="ltr"><div class="grid"><span>12.5K</span></div></div>'
+    + '<div class="sparkbox" dir="ltr"><svg class="spark q"><text>5 h</text></svg><div class="pop" dir="rtl">كلمة 14:20 · 61 %</div></div>'
+    + '<span lang="de" dir="ltr">Deutsch 2</span><textarea>5 h</textarea><select><option>5 h</option></select>'
+    + '<div>\u200f12.50' + nb + 'US$ كلمة</div><p>a9f3c2e1-7b4e-4c8a-9e21-5d6f7a8b9c0d</p>'
+  const out = isolated(html)
+  const fig = (s: string): string => '<span class="fig" dir="ltr">' + s + '</span>'
+  assert.equal(out, '<ul><li>كلمة ' + fig('~18' + nb + 'h' + nb + '46' + nb + 'min') + ' كلمة (' + fig('claude-experimental-x') + ', '
+    + fig('claude-haiku-3-5') + ') ' + fig('Claude Code') + ' ' + fig('22 %') + '</li>'
+    + '<li><b title="5 h · 22 %" aria-label="claude-opus-4-6 22 %">كلمة ' + fig('2026-08-05') + ' ← ' + fig('2026-09-03') + '</b></li></ul>'
+    + '<div class="plot" dir="ltr"><div class="grid"><span>12.5K</span></div></div>'
+    + '<div class="sparkbox" dir="ltr"><svg class="spark q"><text>5 h</text></svg><div class="pop" dir="rtl">كلمة ' + fig('14:20') + ' · ' + fig('61 %') + '</div></div>'
+    + '<span lang="de" dir="ltr">Deutsch 2</span><textarea>5 h</textarea><select><option>5 h</option></select>'
+    + '<div>' + fig('12.50' + nb + 'US$') + ' كلمة</div><p><span class="fig long" dir="ltr">a9f3c2e1-7b4e-4c8a-9e21-5d6f7a8b9c0d</span></p>')
+  // The DOM is never reordered: the same text in the same order, the formatter's one mark left out of its unit.
+  assert.equal(unFig(out), html.replace('\u200f', ''))
+  // Run again, nothing moves: a unit is laid out left to right already.
+  assert.equal(isolated(out), out)
+  // Left to right the page is left as it is (DIR), whatever it is handed.
+  assert.equal(isolated(html, 'ltr'), html)
+  // A scope inside a box kept left to right is the box's; a text in the page's direction inside it is the page's again.
+  const m = miniCtx('rtl')
+  m.root.innerHTML = '<div class="heat" dir="ltr"><i title="كلمة 5 h">5 h</i><span dir="rtl">كلمة 5 h</span></div>'
+  ;(m.c as Record<string, unknown>).scope = m.root.childNodes[0]
+  nodeVm.runInContext('isolateFigures(scope)', m.c)
+  assert.equal(m.root.innerHTML, '<div class="heat" dir="ltr"><i title="كلمة 5 h">5 h</i><span dir="rtl">كلمة ' + fig('5 h') + '</span></div>')
+  // setText: a text the page writes itself, isolated as it is written.
+  const t = miniCtx('rtl')
+  t.root.innerHTML = '<div class="pr-flash"></div>'
+  ;(t.c as Record<string, unknown>).el = t.root.childNodes[0]
+  nodeVm.runInContext("setText(el, 'كلمة 12 / 500 كلمة')", t.c)
+  assert.equal(t.root.innerHTML, '<div class="pr-flash">كلمة ' + fig('12') + ' / ' + fig('500') + ' كلمة</div>')
+})
+
+test('1.13 A2 rule 1 (§7a Q1): the charts are boxes kept left to right — the daily bars\' plot and day axis, the sparkline, the year strip, the hour strip and its hours, the weekday grid carry dir="ltr" in their markup; the words inside them carry the page\'s direction in a right-to-left page, and nothing else of them a dir', () => {
+  const over = { sections: ['quota', 'chart', 'heatmap', 'hours'],
+    quotas: [card({ windows: [win({ spark: { slots: 4, from: 0, to: 4, points: [{ i: 0, t: 1, p: 10, label: 'Mon 14:20 · 10 %' }, { i: 2, t: 3, p: 40, label: 'Mon 15:20 · 40 %' }] } })] })] }
+  const draw = (): string => render('sQuota() + sChart() + sHeatmap() + sHours()', over)
+  const ltr = draw()
+  let rtl = ''
+  try {
+    nodeVm.runInContext('DIR = "rtl"', ctx)
+    rtl = draw()
+  } finally {
+    nodeVm.runInContext('DIR = "ltr"', ctx)
+  }
+  const kept = (h: string): string[] => [...h.matchAll(/<div class="(plot|axis|sparkbox|heat|hours|hgrid)" dir="ltr">/g)].map((m) => m[1])
+  assert.deepEqual(kept(ltr), ['sparkbox', 'plot', 'axis', 'heat', 'hours', 'axis', 'hgrid'])
+  assert.deepEqual(kept(rtl), kept(ltr))
+  // Left to right the boxes' dir is the only one: the page's direction is theirs.
+  assert.equal(ltr.split(' dir="').length - 1, 7)
+  // Right to left the words inside them carry the page's: the sparkline's label, the seven weekdays, and each mark whose
+  // tooltip is a sentence (the bands, the squares, the hours, the grid's cells).
+  const own = [...rtl.matchAll(/<(\w+) class="([^"]*)"[^>]*? dir="rtl"/g)].map((m) => m[1] + '.' + m[2].split(' ')[0])
+  const tally = (xs: string[]): Record<string, number> => xs.reduce((a, x) => ({ ...a, [x]: (a[x] ?? 0) + 1 }), {} as Record<string, number>)
+  assert.deepEqual(tally(own), { 'div.pop': 1, 'div.seg': 3, 'i.l0': 1, 'div.hb': 24, 'span.meta': 7, 'i.l4': 7, 'i.none': 35 })
+  assert.match(rtl, /<div class="pop" role="tooltip" aria-live="polite" dir="rtl" hidden><\/div>/)
+  // And that is all that differs: the same markup, the page's dir added to those texts alone.
+  assert.equal(rtl.split(' dir="rtl"').join(''), ltr)
+})
+
+test('1.13 A2 (§7c P3, Review 1 F1\'s page half): the page\'s own two date ranges point the way the line reads — → left to right, ← right to left: the filter bar\'s caption and a budget card\'s period (rangeArrow); the translations\' and the host\'s ranges are theirs', () => {
+  assert.equal(nodeVm.runInContext('rangeArrow()', ctx), ' → ')
+  const budget = { budgets: [{ label: 'Claude · month', partial: false, shareText: '40 %', over: false, usedText: '$4.00', limitText: '$10.00',
+    from: '2026-09-01', last: '2026-09-03', share: 40, unmeasurable: null, projectedText: null, projectionBasis: null, projectedOver: false }] }
+  const both = (): string => render('controls() + sBudget()', budget)
+  const ltr = both()
+  assert.ok(ltr.includes('<span class="nobr">2026-08-05</span> → <span class="nobr">2026-09-03</span></span>'), ltr)
+  assert.ok(ltr.includes('<b>2026-09-01 → 2026-09-03</b>'), ltr)
+  let rtl = ''
+  try {
+    nodeVm.runInContext('DIR = "rtl"', ctx)
+    assert.equal(nodeVm.runInContext('rangeArrow()', ctx), ' ← ')
+    rtl = both()
+  } finally {
+    nodeVm.runInContext('DIR = "ltr"', ctx)
+  }
+  assert.ok(rtl.includes('<span class="nobr">2026-08-05</span> ← <span class="nobr">2026-09-03</span></span>'), rtl)
+  assert.ok(rtl.includes('<b>2026-09-01 ← 2026-09-03</b>'), rtl)
+  assert.equal(rtl.replace(/ ← /g, ' → '), ltr)
+  // The page writes no other → of its own between two values — rangeArrow's own is the one —: the rest are the
+  // translations' (T4) and the host's (P5).
+  const literals = [...SOURCE.matchAll(/' → '/g)].map((m) => SOURCE.slice(SOURCE.lastIndexOf('\nfunction ', m.index), m.index).split('(')[0])
+  assert.deepEqual(literals, ['\nfunction rangeArrow'])
+  // Its definition and its two uses.
+  assert.equal(SOURCE.split('rangeArrow()').length - 1, 3)
+})
+
+test('1.13 A3 rule 3, A2 rule 8 (3.0(f)): the pseudo-RTL page rendered whole into a document — every figure and identifier of its texts a unit, none inside a kept box, no aria value or attribute touched, no bidi control anywhere; taken off again, the units leave exactly the left-to-right twin\'s markup', () => {
+  const payload = ((): unknown => {
+    try {
+      setBundle(pseudoRtlBundle())
+      setLocale('ar-u-ca-gregory-nu-latn')
+      setLang('ar')
+      const { pagePayload } = loadDashboard()
+      return JSON.parse(JSON.stringify(pagePayload(buildViewModel(makeInput()))))
+    } finally {
+      setBundle(undefined)
+      setLocale(undefined)
+      setLang(undefined)
+    }
+  })()
+  const drawn = (d: 'rtl' | 'ltr'): { html: string; els: MEl[] } => {
+    const m = miniCtx(d, between(rtlPage(d), /<script nonce="[A-Za-z0-9]+">/, '</script>'))
+    ;(m.c as Record<string, unknown>).fixture = payload
+    nodeVm.runInContext('vm = fixture; renderAll();', m.c)
+    return { html: m.root.innerHTML, els: miniAll(m.root) }
+  }
+  const rtl = drawn('rtl'), ltr = drawn('ltr')
+  const figs = rtl.els.filter((e) => /^fig( long)?$/.test(e.className))
+  const texts = figs.map((e) => e.textContent)
+  assert.ok(figs.length > 150, String(figs.length))
+  // The figures, the model ids and the names of the default world, each one unit.
+  for (const want of ['claude-opus-4-6', 'gpt-5.3-codex', 'claude-experimental-x', 'Claude Code', '2026-08-05', '2026-09-03', '~/.claude', 'docs.claude.com', 'tokenPace.attribution', '$/1M']) {
+    assert.ok(texts.includes(want), want + ' ' + JSON.stringify([...new Set(texts)]))
+  }
+  assert.ok(texts.some((x) => /^\d+ %$/.test(x)) && texts.some((x) => /^~\$\d/.test(x)), JSON.stringify(texts.slice(0, 40)))
+  assert.equal(texts.some((x) => x === '3-5' || x === '4-6'), false)
+  // No unit inside a box kept left to right, none in an SVG; each a span with dir="ltr" and nothing else.
+  const inKept = (e: MEl): boolean => { for (let x = e.parentNode; x; x = x.parentNode) if (x.getAttribute('dir') === 'ltr') return true; return false }
+  assert.deepEqual(figs.filter(inKept).map((e) => e.textContent), [])
+  assert.ok(figs.every((e) => e.tagName === 'SPAN' && Object.keys(e.attrs).sort().join() === 'class,dir' && e.attrs.dir === 'ltr'))
+  // The left-to-right twin has none: isolateFigures leaves a left-to-right page as it is.
+  assert.equal(ltr.els.filter((e) => /^fig/.test(e.className)).length, 0)
+  // Every attribute of every other element the same, in the same order, as the twin's but for the page's dir on the kept
+  // boxes' words and the range caption's arrow — an aria value never gains a span or a control.
+  const attrsOf = (els: MEl[]): string[] => els.filter((e) => !/^fig/.test(e.className)).map((e) => e.tagName + JSON.stringify(e.attrs))
+  const A = attrsOf(rtl.els), B = attrsOf(ltr.els)
+  assert.equal(A.length, B.length)
+  assert.deepEqual(A.map((x) => x.replace(/,"dir":"rtl"|"dir":"rtl",?/, '')), B)
+  const aria = rtl.els.flatMap((e) => Object.entries(e.attrs).filter(([k]) => k.startsWith('aria-')).map(([, v]) => v))
+  assert.ok(aria.length > 50, String(aria.length))
+  assert.equal(aria.some((v) => PAGE_BIDI_CONTROLS.test(v)), false)
+  assert.equal(PAGE_BIDI_CONTROLS.test(rtl.html), false)
+  // Taken off again, the units leave the twin's markup: the DOM a screen reader reads is one order in both directions.
+  assert.equal(unFig(rtl.html).split(' dir="rtl"').join('').replace(/(<span class="meta cap">[^<]*<span class="nobr">[^<]*<\/span>) ← /, '$1 → '), ltr.html)
 })

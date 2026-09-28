@@ -97,6 +97,151 @@ function days(html: string): string {
 }
 
 /**
+ * 1.13 A3 rule 3, the page's half (§7a Q5): what one left-to-right unit of a right-to-left line is — the grammar
+ * isolateFigures wraps by. Strings, so that a test reads them from the page's script as it stands (the script is
+ * self-contained — build.mjs: no import, no export —, so the constant is reached as a global of the page's script, the
+ * way the tests reach DIR): 1.13 P5 writes the host's FIGURE_RE (src/bidi.ts) from `figure`, and its test holds the two
+ * to the same figures over the bar fixture's texts. In the order the page tries them at a position:
+ *   range   an ISO day to an ISO day written with → (a range the host built: one unit, read left to right; with ←, the
+ *           right-to-left range rangeArrow and an RTL translation write, each day is a unit and the arrow the line's)
+ *   day     an ISO day, 2026-08-05 (European digits after an Arabic letter are Arabic numbers to the bidi algorithm,
+ *           and a hyphen does not join those: 05-08-2026 without it)
+ *   clock   14:20, 14:20:05, 2:05 PM — the weekday before it is a word of the language's and stays outside
+ *   money   a money figure with its currency, either side of it (~$5.33, ~<$0.01, 12.50 US$, € 12.50) — the marks the
+ *           formatter writes around it in Arabic, Hebrew and Persian (U+200E, U+200F, U+061C) belong to the figure and
+ *           are left out of the unit, whose own dir does their work
+ *   figure  A3 rule 3: an optional ~, ⚠ or ≈ and its space (the page's also < > ≤ ≥ after it — "<1 %"), a sign,
+ *           a number (0–9 with . , and the no-break spaces), its unit — %, K, M, G, h, d, min, m, s, and ms (the details'
+ *           keepFigures) — after an optional space, and a duration's further parts (~18 h 46 min, 3 d 4 h, 4 m 10 s,
+ *           2h14m, 22 %, -13%, ≈176.5K, ⚠ 3.2M)
+ *   name    Latin words and identifiers — a model id (claude-haiku-3-5 whole: never a name and a figure 3-5), a project,
+ *           session, tool or provider name, a path (~/.claude), a host name, a setting's key, a product name of several
+ *           words (Claude Code, Visual Studio Code), a price's unit ($/1M); words next to each other are one unit, as
+ *           they are one left-to-right run for the bidi algorithm; a unit only with a space, a connector (- . : / @ _) or
+ *           a path's ~/ in it — a single word is one left-to-right run already, and is passed over whole (P90, max20
+ *           keep their digits)
+ * A unit stands between two characters that are neither a letter nor a digit (`edge`).
+ */
+const FIGURE_GRAMMAR = {
+  edge: '(?<![\\p{L}\\p{N}_])',
+  end: '(?![\\p{L}\\p{N}])',
+  space: '[ \\u00a0\\u202f]',
+  range: '\\d{4}-\\d{2}-\\d{2}[ \\u00a0]?\\u2192[ \\u00a0]?\\d{4}-\\d{2}-\\d{2}',
+  day: '\\d{4}-\\d{2}-\\d{2}',
+  clock: '\\d{1,2}:\\d{2}(?::\\d{2})?(?:[ \\u00a0\\u202f]?(?:AM|PM|am|pm))?',
+  money: '(?:[~\\u26a0\\u2248][ \\u00a0]?)?<?[\\u200e\\u200f\\u061c]*(?:(?:[A-Z]{1,3})?\\p{Sc}[ \\u00a0\\u202f]?[\\u200e\\u200f\\u061c]*\\d+(?:[.,\\u00a0\\u202f]\\d+)*'
+    + '|\\d+(?:[.,\\u00a0\\u202f]\\d+)*[ \\u00a0\\u202f]?[\\u200e\\u200f\\u061c]*(?:[A-Z]{1,3})?\\p{Sc})',
+  figure: '(?:[~\\u26a0\\u2248][ \\u00a0\\u202f]?)?(?:[<>\\u2264\\u2265][ \\u00a0\\u202f]?)?[+\\-\\u2212\\u00b1]?\\d+(?:[.,\\u00a0\\u202f]\\d+)*'
+    + '(?:[ \\u00a0\\u202f]?(?:%|K|M|G|min|ms|h|d|m|s)(?!\\p{L})(?:[ \\u00a0\\u202f]?\\d+[ \\u00a0\\u202f]?(?:min|ms|h|m|s)(?!\\p{L}))*)?',
+  name: '(?:[~\\p{Sc}]?\\/\\.?|\\.)?[A-Za-z0-9_]*[A-Za-z][A-Za-z0-9_]*(?:[\\-.:\\/@]+[A-Za-z0-9_]+)*'
+    + '(?:[ \\u00a0](?:[~\\p{Sc}]?\\/\\.?|\\.)?[A-Za-z0-9_]*[A-Za-z][A-Za-z0-9_]*(?:[\\-.:\\/@]+[A-Za-z0-9_]+)*)*',
+};
+/** 1.13 A3 rule 3: the grammar as one pattern, its kinds as named groups (FIGURE_GRAMMAR). */
+const FIGURE_RUN = new RegExp(FIGURE_GRAMMAR.edge + '(?:(?<range>' + FIGURE_GRAMMAR.range + ')|(?<day>' + FIGURE_GRAMMAR.day
+  + ')|(?<clock>' + FIGURE_GRAMMAR.clock + ')|(?<money>' + FIGURE_GRAMMAR.money + ')|(?<figure>' + FIGURE_GRAMMAR.figure
+  + ')|(?<name>' + FIGURE_GRAMMAR.name + '))' + FIGURE_GRAMMAR.end, 'gu');
+/** 1.13 A3 rule 3: a name is a unit only with a space, a connector or a path's ~ in it (FIGURE_GRAMMAR `name`). */
+const FIGURE_NAME_UNIT = /[ \u00a0\-.:/@_~]/;
+/** 1.13 A3 rule 3: the formatter's bidi marks around a money figure (money(), src/render.ts), left out of the unit. */
+const FIGURE_MARKS = /[\u200e\u200f\u061c]/g;
+/**
+ * 1.13 A3 rule 3: a unit up to this many characters keeps to one line (`.fig` — no break inside it, the whole unit
+ * moves to the next line); a longer one — an agent's id, a long path — may break where the text around it may, so that
+ * it never widens the page (the body's overflow-wrap).
+ */
+const FIGURE_WHOLE_MAX = 24;
+/** 1.13 A3 rule 3: the elements whose text is not the page's words to lay out — code, a form control's, a drawing's. */
+const FIGURE_SKIP = ['SCRIPT', 'STYLE', 'TEXTAREA', 'OPTION', 'SELECT', 'INPUT', 'TITLE', 'SVG'];
+
+/**
+ * 1.13 A3 rule 3, the page's half (§7a Q5, A2 rule 1): in a right-to-left page, every figure, ISO day, clock, money figure
+ * and inserted identifier or name of the page's texts (FIGURE_RUN) becomes one left-to-right unit — a
+ * `<span class="fig" dir="ltr">` of its own, made by the DOM API around the text it was (never a markup string, never in
+ * an attribute or an aria value: text nodes alone), so that "~18 h 46 min" reads as the English page shows it and
+ * claude-haiku-3-5 stays one word, where the bidi algorithm alone lays out "min 46 h 18~". Run after every render (the
+ * whole page, a section, a section put back, the open language list) and after every text the page writes itself (the
+ * live clocks, the Prompts section's lines, the sparkline's label: setText), before the fits measure. Nothing in a
+ * left-to-right page (DIR), nothing inside a box laid out left to right (a kept chart box, a picker's own name, a unit
+ * made before — an element whose `dir` is ltr), nothing of code, a form control or an SVG drawing; a text inside a kept
+ * box that carries the page's direction (the sparkline's label, the grid's weekdays) is the page's words again. The DOM
+ * is never reordered — the characters stay in their logical order, a screen reader reads the same text —, and the
+ * formatter's marks around a money figure are left out of its unit (the unit's dir does what they did).
+ */
+function isolateFigures(scope: Payload): void {
+  if (DIR !== 'rtl' || !scope || typeof scope.nodeType !== 'number' || typeof document.createElement !== 'function') return;
+  // The direction the scope stands in: its own `dir` or its nearest ancestor's below the root element — the root's is
+  // DIR, the page's.
+  let rtl = true;
+  for (let x = scope; x && x.nodeType === 1 && x !== document.documentElement; x = x.parentNode) {
+    const d = typeof x.getAttribute === 'function' ? textDir(x.getAttribute('dir')) : null;
+    if (d) { rtl = d === 'rtl'; break; }
+  }
+  const texts: Payload[] = [];
+  const stack: Array<[Payload, boolean]> = [[scope, rtl]];
+  while (stack.length) {
+    const [n, on] = stack.pop()!;
+    if (n.nodeType === 3) { if (on) texts.push(n); continue; }
+    if (n.nodeType !== 1 || FIGURE_SKIP.indexOf(String(n.tagName).toUpperCase()) >= 0) continue;
+    const d = typeof n.getAttribute === 'function' ? textDir(n.getAttribute('dir')) : null;
+    const next = d ? d === 'rtl' : on;
+    const kids = n.childNodes || [];
+    for (let i = kids.length - 1; i >= 0; i--) stack.push([kids[i], next]);
+  }
+  for (const t of texts) isolateText(t);
+}
+
+/** 1.13 A3 rule 3: one text node of a right-to-left line, its units each wrapped (isolateFigures). */
+function isolateText(t: Payload): void {
+  const s = typeof t.data === 'string' ? t.data : '';
+  const parent = t.parentNode;
+  if (!parent || !/\d|[A-Za-z]/.test(s)) return;
+  const out: Payload[] = [];
+  let last = 0;
+  FIGURE_RUN.lastIndex = 0;
+  for (let m = FIGURE_RUN.exec(s); m !== null; m = FIGURE_RUN.exec(s)) {
+    const g = m.groups || {};
+    if (g.name !== undefined && !FIGURE_NAME_UNIT.test(m[0])) continue;
+    const unit = m[0].replace(FIGURE_MARKS, '');
+    if (m.index > last) out.push(document.createTextNode(s.slice(last, m.index)));
+    const span = document.createElement('span');
+    span.className = unit.length > FIGURE_WHOLE_MAX ? 'fig long' : 'fig';
+    span.setAttribute('dir', 'ltr');
+    span.appendChild(document.createTextNode(unit));
+    out.push(span);
+    last = m.index + m[0].length;
+  }
+  if (!out.length) return;
+  if (last < s.length) out.push(document.createTextNode(s.slice(last)));
+  for (const x of out) parent.insertBefore(x, t);
+  parent.removeChild(t);
+}
+
+/** 1.13 A3 rule 3: a text the page writes itself (a live clock, a line of the Prompts section), its units isolated. */
+function setText(el: Payload, text: string): void {
+  el.textContent = text;
+  isolateFigures(el);
+}
+
+/**
+ * 1.13 A2 rule 1 (§7a Q1): the page's direction on a text inside a box kept left to right — the sparkline's label, the
+ * weekday grid's weekdays, a chart mark whose tooltip is a sentence: ' dir="rtl"' in a right-to-left page, nothing in a
+ * left-to-right one (the box's own direction is the page's there).
+ */
+function pageDir(): string {
+  return DIR === 'rtl' ? ' dir="rtl"' : '';
+}
+
+/**
+ * 1.13 A2 (§7c P3's list, Review 1 F1's page half): the arrow of the page's own two date ranges — the filter bar's
+ * caption and a budget card's period —, pointing the way the line reads: → left to right, ← right to left (the
+ * translations' ranges carry the translation's arrow, T4; the host-built ones — a custom range's label, the totals'
+ * tooltip — take theirs from the host, 1.13 P5).
+ */
+function rangeArrow(): string {
+  return DIR === 'rtl' ? ' ← ' : ' → ';
+}
+
+/**
  * The page's own words, in the reader's language.
  *
  * Everywhere else in this repository a string goes through `t()` from src/i18n.ts. That
@@ -278,9 +423,10 @@ function sparkSvg(spark: Payload, ref?: { src: Payload; win: Payload }): string 
     + '<path class="hov"/>';
   const names = ref ? ' data-src="' + esc(ref.src) + '" data-win="' + esc(ref.win) + '"' : '';
   const aria = typeof spark.aria === 'string' && spark.aria ? spark.aria : tr('quota sparkline, 7 days');
-  return '<div class="sparkbox"><svg class="spark q" viewBox="0 0 ' + W + ' ' + H + '" '
+  // 1.13 A2 rule 1 (§7a Q1): a chart kept left to right — the box's own dir; its label, words, in the page's (pageDir).
+  return '<div class="sparkbox" dir="ltr"><svg class="spark q" viewBox="0 0 ' + W + ' ' + H + '" '
     + 'preserveAspectRatio="none" role="img" tabindex="0" aria-label="' + esc(aria) + '"' + names + '>'
-    + body + overlay + '</svg><div class="pop" role="tooltip" aria-live="polite" hidden></div></div>';
+    + body + overlay + '</svg><div class="pop" role="tooltip" aria-live="polite"' + pageDir() + ' hidden></div></div>';
 }
 
 /** A list of 0..100 values evenly spaced, with -1 for a break: the KPI sparks. */
@@ -563,7 +709,10 @@ function setLanguageOpen(open: boolean, focus: 'checked' | 'button' | null): voi
   if (focus === 'button' && btn) btn.focus();
   const pop = box.querySelector('.lng-pop');
   if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
-  if (langOpen && l) box.insertAdjacentHTML('beforeend', languagePop(l));
+  if (langOpen && l) {
+    box.insertAdjacentHTML('beforeend', languagePop(l));
+    isolateFigures(box.querySelector('.lng-pop'));
+  }
   if (focus === 'checked') {
     const items = languageItems(box);
     const at = items.find((x) => x.getAttribute('aria-checked') === 'true') || items[0];
@@ -752,7 +901,7 @@ function controls(): string {
     + (allRanges && r.presets.length > RANGE_CHIPS.length
        ? '<button data-act="moreRanges">' + tr('fewer ▴') + '</button>' : '')
     // The range in words ends the row it belongs to rather than taking a line of its own.
-    + '<span class="meta cap">' + esc(r.label) + ' · ' + days(esc(r.from)) + ' → ' + days(esc(r.to))
+    + '<span class="meta cap">' + esc(r.label) + ' · ' + days(esc(r.from)) + rangeArrow() + days(esc(r.to))
     + '</span></div>'
     + '<button class="icon" data-act="refresh" aria-label="' + tr('Refresh') + '"'
     + ' title="' + tr('Rebuild from the transcripts and fetch the quota') + '">' + ICON_REFRESH + '</button>'
@@ -1384,7 +1533,7 @@ function sChart(): string {
       return '<div class="seg ' + bandStyle(s.source, s.rank, c.modelStyle, split) + '" data-bh="'
         + ((v / c.max) * 100).toFixed(2)
         + '" title="' + title
-        + '"></div>';
+        + '"' + pageDir() + '></div>';
     }).join('');
     return '<div class="col" data-act="drill" data-day="' + esc(d) + '" tabindex="0" role="button" '
       + 'title="' + esc(d + ': ' + fullNum(totals[i])) + '">'
@@ -1441,8 +1590,10 @@ function sChart(): string {
     + (c.costLine ? '<button data-act="costLine" aria-pressed="' + costLine + '">' + tr('cost line')
        + '</button>' : '')
     + '</span></div>'
-    + '<div class="plot">' + grids + '<div class="chart">' + cols + '</div>' + overlay + '</div>'
-    + '<div class="axis">' + labels + '</div>'
+    // 1.13 A2 rule 1 (§7a Q1): the daily bars, their grid, their cost line and their day axis kept left to right — the
+    // first day at the left in every direction; the legend under them is words, in the page's direction.
+    + '<div class="plot" dir="ltr">' + grids + '<div class="chart">' + cols + '</div>' + overlay + '</div>'
+    + '<div class="axis" dir="ltr">' + labels + '</div>'
     + '<div class="legend">' + legend
     + (costLine && c.costLine ? '<span>' + COST_KEY + tr('API cost (second axis)') + '</span>' : '')
     + '<span>' + tr('click a column for that day') + '</span></div>';
@@ -1521,8 +1672,10 @@ function sModels(): string {
 
 function sHeatmap(): string {
   const h = vm.heatmap;
+  // 1.13 A2 rule 1 (§7a Q1): the year strip kept left to right (the oldest week at the left, pinned at its newest,
+  // scrollHeat); each square's tooltip, a sentence, in the page's direction.
   const cells = h.weeks.map((w: Payload) => w.days.map((d: Payload) => '<i class="'
-    + (d.level === null ? 'out' : 'l' + esc(d.level)) + '" title="' + esc(d.text) + '"></i>').join('')).join('');
+    + (d.level === null ? 'out' : 'l' + esc(d.level)) + '" title="' + esc(d.text) + '"' + pageDir() + '></i>').join('')).join('');
   return '<div class="row"><span class="meta">'
     + tr('streak {0} · longest {1} · active {2}', esc(h.streak), esc(h.longestStreak), esc(h.activeDays))
     + (h.peakDay ? ' · ' + tr('peak {0} ({1})', days(esc(h.peakDay.day)), esc(h.peakDay.text)) : '')
@@ -1533,7 +1686,7 @@ function sHeatmap(): string {
     + ['usage', 'cost'].map(m => '<button data-act="heatmapMetric" data-metric="' + m
       + '" aria-pressed="' + (h.metric === m) + '">' + metricLabel(m) + '</button>').join('')
     + '</span></div>'
-    + '<div class="heat">' + cells + '</div>'
+    + '<div class="heat" dir="ltr">' + cells + '</div>'
     + '<div class="legend"><span>' + tr('less') + '</span><span><i class="dot l1"></i>'
     + '<i class="dot l2"></i><i class="dot l3"></i>'
     + '<i class="dot l4"></i></span><span>' + tr('more') + '</span>'
@@ -1550,19 +1703,21 @@ function zoneLabel(zone: string): string {
 function sHours(): string {
   const p = vm.hours;
   const max = Math.max.apply(null, p.profile.map((x: Payload) => x.value).concat([0])) || 1;
+  // 1.13 A2 rule 1 (§7a Q1): the hour strip, its hours and the weekday × block grid kept left to right (00 at the left);
+  // the tooltips and the weekdays, words, in the page's direction (pageDir).
   const bars = p.profile.map((x: Payload) => '<div class="hb' + (x.value > 0 ? '' : ' none') + '" data-bh="'
     + (x.value > 0 ? Math.max(1, (x.value / max) * 100).toFixed(2) : '0') + '" title="'
-    + esc(String(x.hour).padStart(2, '0') + ':00 · ' + x.text) + '"></div>').join('');
+    + esc(String(x.hour).padStart(2, '0') + ':00 · ' + x.text) + '"' + pageDir() + '></div>').join('');
   // The strip needs its own hours: the 00–04 … row below belongs to the weekday grid and is
   // offset by that grid's 28 px label column, so reading it as this axis is off by a block.
-  const hourAxis = '<div class="axis">' + p.profile.map((x: Payload, i: Payload) => '<span>'
+  const hourAxis = '<div class="axis" dir="ltr">' + p.profile.map((x: Payload, i: Payload) => '<span>'
     + (i % 6 === 0 ? esc(String(x.hour).padStart(2, '0')) : '') + '</span>').join('') + '</div>';
   const gmax = Math.max.apply(null, p.grid.map((c: Payload) => c.value || 0).concat([0])) || 1;
   const blocks = ['00–04', '04–08', '08–12', '12–16', '16–20', '20–24'];
-  let grid = '<div class="hgrid"><span></span>'
+  let grid = '<div class="hgrid" dir="ltr"><span></span>'
     + blocks.map(b => '<span class="meta">' + b + '</span>').join('');
   for (let d = 0; d < 7; d++) {
-    grid += '<span class="meta">' + esc(p.weekdayLabels[d] || String(d + 1)) + '</span>';
+    grid += '<span class="meta"' + pageDir() + '>' + esc(p.weekdayLabels[d] || String(d + 1)) + '</span>';
     for (let b = 0; b < 6; b++) {
       const cell = p.grid.find((c: Payload) => c.weekday === d && c.block === b) || { value: null, samples: 0 };
       const lvl = cell.value === null ? 'none'
@@ -1570,7 +1725,7 @@ function sHours(): string {
       grid += '<i class="' + lvl + '" title="' + (cell.value === null
         ? tr('no usage in this block')
         : tr('{0} tokens over {1} day(s)', fullNum(cell.value), esc(cell.samples)))
-        + '"></i>';
+        + '"' + pageDir() + '></i>';
     }
   }
   grid += '</div>';
@@ -1581,7 +1736,7 @@ function sHours(): string {
     + '</span><span class="wrap">'
     + ['local', 'utc'].map(z => '<button data-act="hourZone" data-zone="' + z + '" aria-pressed="'
       + (p.zone === z) + '">' + zoneLabel(z) + '</button>').join('') + '</span></div>'
-    + '<div class="hours">' + bars + '</div>' + hourAxis
+    + '<div class="hours" dir="ltr">' + bars + '</div>' + hourAxis
     + (p.note ? '<div class="meta">' + esc(p.note) + '</div>' : '')
     // The caption carries what the grid stands on. A picture whose thin weeks look exactly
     // like its thick ones has to say which it is, in the same line that names it.
@@ -1779,7 +1934,7 @@ function sBudget(): string {
       + (b.over ? ' · ' + tr('over') : '') + '</span></div>'
       + '<div class="win"><div class="win-top"><span>'
       + tr('{0} of {1}', esc(b.usedText), esc(b.limitText))
-      + '</span><b>' + esc(b.from) + ' → ' + esc(b.last) + '</b></div>';
+      + '</span><b>' + esc(b.from) + rangeArrow() + esc(b.last) + '</b></div>';
     // No denominator, no bar: a null share is a period we have not read, not an empty one.
     if (share !== null) {
       h += bar(share, cls, null, null,
@@ -3097,7 +3252,7 @@ function tickLive(): void {
     if (!Number.isFinite(ts)) return;
     const next = sinceText(Date.now() - ts);
     if (typeof el.textContent === 'string' && el.textContent.length !== next.length) grown = true;
-    el.textContent = next;
+    setText(el, next);
   });
   document.querySelectorAll<HTMLElement>('[data-live="silent"]').forEach(el => {
     const ts = Number(el.dataset.ts);
@@ -3110,7 +3265,7 @@ function tickLive(): void {
     if (min && due) {
       const next = silentText(ms);
       if (typeof min.textContent === 'string' && min.textContent.length !== next.length) grown = true;
-      min.textContent = next;
+      setText(min, next);
     }
   });
   // 1.8 L-4: a clock in the open details panel that grows a unit may give the panel a line more;
@@ -3394,7 +3549,7 @@ function promptAfter(body: Element | null, keep: PromptKeep): void {
   const text = promptFlashText();
   if (keep.flash && fresh && fresh !== keep.flash && fresh.parentNode) {
     fresh.parentNode.replaceChild(keep.flash, fresh);
-    if (keep.flash.textContent !== text) keep.flash.textContent = text;
+    if (keep.flash.textContent !== text) setText(keep.flash, text);
   }
   const d = promptDraft;
   if (d) {
@@ -3402,7 +3557,7 @@ function promptAfter(body: Element | null, keep: PromptKeep): void {
     if (t) t.value = d.title;
     if (x) x.value = d.text;
     const err = body.querySelector('.pr-err');
-    if (err) err.textContent = d.error;
+    if (err) setText(err, d.error);
   }
   const next = promptFocusNext;
   promptFocusNext = null;
@@ -3451,7 +3606,7 @@ function promptSay(text: string): void {
   promptNote = { text: text, handle: window.setTimeout(() => {
     promptNote = null;
     const line = document.querySelector('[data-body="prompts"] .pr-flash');
-    if (line) line.textContent = promptFlashText();
+    if (line) setText(line, promptFlashText());
   }, PROMPT_NOTE_MS) };
 }
 
@@ -3551,7 +3706,7 @@ function promptCommit(how: 'enter' | 'leave' | 'button'): void {
   const problem = promptProblem(title, text);
   d.error = problem;
   const err = document.querySelector('[data-body="prompts"] .pr-err');
-  if (err) err.textContent = problem;
+  if (err) setText(err, problem);
   if (problem) { d.saved = null; return; }
   const shown = vm && vm.prompts ? vm.prompts.flash : null;
   d.saved = { title: title, text: text, known: promptItems().map((x: Payload) => String(x.id)), waiting: !(shown && shown.ok === false) };
@@ -3842,6 +3997,8 @@ function renderAll(): void {
   } finally {
     promptWriting = false;
   }
+  // 1.13 A3 rule 3: the figures one left-to-right unit each in a right-to-left page — before anything is measured.
+  isolateFigures(document.getElementById('root'));
   applyStyles();
   promptAfter(promptBody(), prompts);
   promptRefocused = prompts.field && promptFocusInside();
@@ -3890,6 +4047,7 @@ function renderSection(key: string): void {
     agentFocusInTree = false;
     promptWriting = false;
   }
+  isolateFigures(body);
   applyStyles();
   restorePop(keep);
   if (focus) restoreFocus(body, focus);
@@ -3941,6 +4099,7 @@ function placeSection(key: string, body: Element | null, render: () => string): 
   if (after === null) after = document.querySelector('[data-sec="notices"]');
   if (after === null || typeof after.insertAdjacentHTML !== 'function') return true;
   after.insertAdjacentHTML('afterend', sectionHtml(key, render));
+  isolateFigures(after.nextElementSibling);
   applyStyles();
   return true;
 }
@@ -4411,6 +4570,7 @@ function fitScroll(): void {
     if (!over) return;
     el.insertAdjacentHTML('afterend',
       '<div class="meta scrollhint">' + tr('scroll sideways for the remaining columns →') + '</div>');
+    isolateFigures(el.nextElementSibling);
   });
 }
 
@@ -4425,6 +4585,9 @@ function fitScroll(): void {
  * the strip is still where we left it — or already at its right end, which is where the
  * browser clamps it when the sidebar is widened — it is pinned again on every render and
  * every resize. Anywhere else is the reader's doing and is not touched.
+ * 1.13 A2 rule 1 (§7a Q1): the strip is a box kept left to right (`dir="ltr"`), so its right end is the newest week in a
+ * right-to-left page too, and `scrollLeft = max` pins it there — in a right-to-left box the offset is 0 at the right end
+ * and negative toward the left, and the same assignment clamped to 0 left the oldest weeks on screen.
  */
 function scrollHeat(): void {
   document.querySelectorAll<HTMLElement>('.heat').forEach(el => {
@@ -4724,7 +4887,9 @@ function sparkHide(): void {
  * Marks one reading and shows its label under it. The label's anchor slides with the
  * reading — at the left edge the box starts there, at the right edge it ends there — so it
  * never leaves the card, whatever the panel's width. Any other explanation open on the page
- * closes: one hover card at a time, as everywhere else.
+ * closes: one hover card at a time, as everywhere else. 1.13 A2 rule 1: the box is kept left to right (`dir="ltr"`), so
+ * `style.left` is the reading's x in either direction; the label, words, reads in the page's (pageDir) and its figures
+ * are units of their own (setText).
  */
 function sparkShow(svg: Payload, g: SparkGeom | null, k: number): void {
   if (!g || !g.pts.length) return;
@@ -4739,7 +4904,7 @@ function sparkShow(svg: Payload, g: SparkGeom | null, k: number): void {
   const box = svg.parentNode;
   const pop = box && box.querySelector ? box.querySelector('.pop') : null;
   if (pop) {
-    pop.textContent = pt.label;
+    setText(pop, pt.label);
     const share = ((pt.x / g.W) * 100).toFixed(2);
     pop.style.left = share + '%';
     pop.style.transform = 'translateX(-' + share + '%)';
@@ -4937,7 +5102,7 @@ document.addEventListener('input', (ev) => {
   else d.text = String(t.value);
   const scope = typeof t.closest === 'function' ? t.closest('.pr-edit') : null;
   const count = scope ? scope.querySelector('.pr-count') : null;
-  if (count) count.textContent = promptCount(d.text.length);
+  if (count) setText(count, promptCount(d.text.length));
   if (d.error) {
     d.error = '';
     const err = scope ? scope.querySelector('.pr-err') : null;

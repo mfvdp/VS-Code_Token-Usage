@@ -76,6 +76,7 @@
   "Send anyway": "Skicka ändå",
   "Send “{0}” anyway?": "Skicka ”{0}” ändå?",
   "Send “{0}” to…": "Skicka ”{0}” till …",
+  "Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.": "Ange först `host`, `user`, `from` och `to` i tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Ange först chatten i tokenPace.notifications.telegram — botens token säger inte ensam vart meddelandet ska skickas.",
   "Set the server in tokenPace.notifications.ntfy first.": "Ange först servern i tokenPace.notifications.ntfy.",
   "Settings": "Inställningar",

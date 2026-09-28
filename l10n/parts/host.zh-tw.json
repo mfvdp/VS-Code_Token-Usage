@@ -76,6 +76,7 @@
   "Send anyway": "仍要送出",
   "Send “{0}” anyway?": "仍要送出「{0}」嗎？",
   "Send “{0}” to…": "將「{0}」送至…",
+  "Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.": "請先在 tokenPace.notifications.email 中設定 `host`、`user`、`from` 與 `to`。",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "請先在 tokenPace.notifications.telegram 中設定聊天 — 只有機器人的權杖無法得知要傳送到哪裡。",
   "Set the server in tokenPace.notifications.ntfy first.": "請先在 tokenPace.notifications.ntfy 中設定伺服器。",
   "Settings": "設定",

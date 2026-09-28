@@ -76,6 +76,7 @@
   "Send anyway": "Vẫn gửi",
   "Send “{0}” anyway?": "Vẫn gửi “{0}”?",
   "Send “{0}” to…": "Gửi “{0}” đến…",
+  "Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.": "Trước tiên hãy đặt `host`, `user`, `from` và `to` trong tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Trước tiên hãy đặt cuộc trò chuyện trong tokenPace.notifications.telegram — riêng token của bot không cho biết cần gửi đến đâu.",
   "Set the server in tokenPace.notifications.ntfy first.": "Trước tiên hãy đặt máy chủ trong tokenPace.notifications.ntfy.",
   "Settings": "Cài đặt",

@@ -76,6 +76,7 @@
   "Send anyway": "Enviar de todos modos",
   "Send “{0}” anyway?": "¿Enviar «{0}» de todos modos?",
   "Send “{0}” to…": "Enviar «{0}» a…",
+  "Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.": "Defina primero `host`, `user`, `from` y `to` en tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Defina primero el chat en tokenPace.notifications.telegram — el token del bot por sí solo no indica adónde enviar.",
   "Set the server in tokenPace.notifications.ntfy first.": "Defina primero el servidor en tokenPace.notifications.ntfy.",
   "Settings": "Configuración",

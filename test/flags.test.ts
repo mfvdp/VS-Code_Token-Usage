@@ -389,6 +389,11 @@ test('Egypt: red, white and black in three equal bands, and the eagle as one gol
   assert.ok(b.y0 > 20 / 3 && b.y1 < 40 / 3, `the eagle spans ${b.y0}–${b.y1}`)
   assert.ok(Math.abs((b.x0 + b.x1) / 2 - 15) < 0.1, `the eagle is not centred: ${b.x0}–${b.x1}`)
   assert.ok(b.y1 - b.y0 > (2 / 3) * (20 / 3), `the eagle is ${(b.y1 - b.y0).toFixed(2)} high`)
+  // The head faces the hoist (1.13 Review 1 F3): the beak — the head's leftmost point — lies farther from the middle than
+  // the head's rightmost point; the head is the topmost of the shapes. A head mirrored to face the fly fails it.
+  const head = shapes.map((t) => pointsOf(t.attrs[0][1])).sort((a, c) => Math.min(...a.map((p) => p[1])) - Math.min(...c.map((p) => p[1])))[0]
+  const hx = head.map((p) => p[0])
+  assert.ok(15 - Math.min(...hx) > Math.max(...hx) - 15, `the eagle's head faces the fly: x ${Math.min(...hx)}–${Math.max(...hx)}`)
   // The wings are symmetric about the middle: every point of the wings' path has its mirror image.
   const wings = tags(golden[1]).find((t) => t.name === 'path' && /V11/.test(t.attrs[0][1]))
   assert.ok(wings, 'no wings')

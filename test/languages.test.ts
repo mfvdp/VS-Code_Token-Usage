@@ -396,7 +396,7 @@ test('the join: every language of the registry but English has its four parts, i
   if (!pendingAllowed()) assert.deepEqual(notYet, [], `at the join every language is written: ${notYet.join(', ')} is not`)
 })
 
-test('the join: availableLanguages over the repository\'s l10n/ finds every language written, and the picker offers Automatic and each of them in the registry\'s order — all twenty-nine and thirty options at the join, the twenty-six of 1.12 and twenty-seven before it (1.9 B5, P19; 1.11 A8, P2; 1.13 P2)', () => {
+test('the join: availableLanguages over the repository\'s l10n/ finds every language written, and the picker offers Automatic and each of them in the registry\'s order — all twenty-nine and thirty options at the join, the twenty-six of 1.12 and twenty-seven before it —, each native name in its own direction, the three written right to left last (1.9 B5, P19; 1.11 A8, P2; 1.13 P2, P7)', () => {
   const { existsSync } = require('node:fs') as typeof import('node:fs')
   const { join } = require('node:path') as typeof import('node:path')
   const { ROOT } = require('./helpers/nls') as typeof import('./helpers/nls')
@@ -425,6 +425,12 @@ test('the join: availableLanguages over the repository\'s l10n/ finds every lang
   // 1.11 P8 (A1 rule 3, A8): Automatic and the twenty-six at the join; 1.13 (pinned and changed: 27): and the three.
   if (!pendingAllowed()) assert.equal(auto.options.length, 30)
   assert.deepEqual(auto.options.map((o) => o.id), ['auto', ...available])
+  // 1.13 P7 (§3 E3; A2 rule 5): at the join the three written right to left are offered, last, each native name in its
+  // own direction — Automatic in the reader's (null), every other one left to right.
+  if (!pendingAllowed()) {
+    assert.deepEqual(auto.options.slice(-3).map((o) => o.id), [...NEW_IN_1_13])
+    assert.deepEqual(auto.options.filter((o) => o.dir === 'rtl').map((o) => o.id), [...NEW_IN_1_13])
+  }
   assert.deepEqual(auto.options.filter((o) => o.checked).map((o) => o.id), ['auto'])
   // Each language by its own name, in its own lang, with its flag; its name in the reader's language beside it. A
   // language without its bundle is not offered (the setting's value shows English until it is).
@@ -435,8 +441,10 @@ test('the join: availableLanguages over the repository\'s l10n/ finds every lang
     assert.equal(o.native, e.native)
     assert.equal(o.lang, e.locale)
     assert.equal(o.flag, e.flag)
+    assert.equal(o.dir, languageDir(e.id))
     assert.equal(o.name, e.id === 'en' ? null : languageName(e.id))
   }
+  assert.equal(auto.options[0].dir, null)
   // Every language offered can be chosen and is then the one checked, its flag on the button.
   for (const id of available) {
     const l = picker(id)

@@ -70,9 +70,10 @@
  * RTL_LANGUAGES names (read from the registry's languageDir); RESET_CLOCK_KEYS lists the keys whose placeholder receives
  * a reset clock that may carry a weekday, held to the code by a scan; the kept-names guard reads its seventeen
  * notification texts from a literal of history (NOTIFY_TEXT_KEYS_1_12). The ledger started at 1.12.0's release commit
- * (l10n-rekey.mjs --start a09a405) with a list at cursor 0 for each of the twenty-four, and PENDING_ALLOWED is true
- * until 1.13's join (P7). 1.13 B3 (P6): the e-mail channel's setup hint writes its field ids in backticks, which
- * PROTECTED takes out and T5 holds, so FIELD_IDS_OF_A_KEY is empty — the declaration, its guard and its history stay.
+ * (l10n-rekey.mjs --start a09a405) with a list at cursor 0 for each of the twenty-four, and PENDING_ALLOWED was true
+ * until 1.13's join (P7 set it false). 1.13 B3 (P6): the e-mail channel's setup hint writes its field ids in
+ * backticks, which PROTECTED takes out and T5 holds, so FIELD_IDS_OF_A_KEY is empty — the declaration, its guard and
+ * its history stay.
  *
  * Every rule is a function over the files of one language, so it runs over the repository's files
  * and — each once with the mutation it exists to catch — over a synthetic language written into a
@@ -292,8 +293,11 @@ export const NLS_SPANS_READ_AS_WORDS: ReadonlyArray<readonly [string, string]> =
  * 0 for each of the twenty-four languages beyond English and German (Arabic, Hebrew and Persian have no files and are
  * never on the ledger: their packages write them whole); 1.13's join (P7) sets it false. test/languages.test.ts's join
  * test reads this line.
+ * 1.13 P7: false — group N wrote Arabic, Hebrew and Persian whole from the frozen English, and O1 worked the twenty-four
+ * lists to the ledger's end (11 entries) and deleted them; no list is left, and every rule holds every key of all
+ * twenty-seven languages and German again.
  */
-export const PENDING_ALLOWED: boolean = true
+export const PENDING_ALLOWED: boolean = false
 
 /**
  * 1.11 A3 rule 11 (b): a language name a language writes as the English does — `[id, English name, reason]`. T10
@@ -2828,7 +2832,7 @@ test('T16 catches a bidi control, a digit of another script, an Arabic presentat
   caught('T16', de, 'fr', fixture('german', 'fr'), `${J(key)} writes a bidi control`, 'U+200F')
 })
 
-test('T16 over the files on disk: none of the twenty-five carries a bidi control, a foreign digit, a presentation form or a turned placeholder — the scan counted, every bundle and manifest value (1.13 A4 rule 9)', () => {
+test('T16 over the files on disk: none of the twenty-eight carries a bidi control, a foreign digit, a presentation form or a turned placeholder — Arabic, Hebrew and Persian among them —, the scan counted, every bundle and manifest value (1.13 A4 rule 9; P7)', () => {
   let values = 0
   const problems: string[] = []
   for (const id of ON_DISK) {
@@ -2837,7 +2841,11 @@ test('T16 over the files on disk: none of the twenty-five carries a bidi control
     problems.push(...RULES.T16.rule(src(), l))
   }
   assert.deepEqual(problems, [])
-  assert.ok(ON_DISK.length >= 25 && values >= 25 * 1500, `only ${values} values read in ${ON_DISK.length} languages`)
+  // 1.13 P7 (pinned and changed: the twenty-five of 1.12, at least): at the join every language of the registry but
+  // English is on disk — German, the twenty-four and the three written right to left.
+  const atLeast = PENDING_ALLOWED ? 25 : LANGUAGES.length - 1
+  assert.ok(ON_DISK.length >= atLeast && values >= atLeast * 1500, `only ${values} values read in ${ON_DISK.length} languages`)
+  if (!PENDING_ALLOWED) assert.deepEqual(ON_DISK.filter((id) => RTL_LANGUAGES.has(id)), ['ar', 'he', 'fa'])
 })
 
 test('T9 catches three Latin words in a row in the arab fixture under ar — ar is in NON_LATIN — and two Latin names and a code span pass (1.13 A4 rule 2)', () => {

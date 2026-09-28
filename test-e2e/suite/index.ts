@@ -33,6 +33,20 @@ const SUMMARY_ITEM = 'tokenPace.summary'
 /** The scheme of the markdown usage document (`src/nativeViews.ts`). */
 const MARKDOWN_SCHEME = 'tokenpace'
 
+/**
+ * 1.13 A3 (§0a.3): the bidi format characters src/bidi.ts writes around a right-to-left language's texts on VS Code's
+ * left-to-right surfaces — RIGHT-TO-LEFT ISOLATE, POP DIRECTIONAL ISOLATE — and every control a text may carry
+ * (`BIDI_CONTROLS`). Written here as escapes, as bidi.ts writes them, and copied rather than imported: nothing of the
+ * extension is bundled into this suite (the note at `TokenPaceApi`'s import).
+ */
+const RLI = '\u2067'
+const PDI = '\u2069'
+const BIDI_CONTROLS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u
+/** An item's leading `$(icon)` tokens — outside the isolate, at the item's left (§7a Q29; bidi.ts `LEADING_CODICONS`). */
+const LEADING_CODICONS = /^(?:\$\([\w~-]+\)[ \u00A0]*)+/u
+/** A letter of the Arabic script — the proof that the words are Arabic, not only the marks. */
+const ARABIC_LETTER = /\p{Script=Arabic}/u
+
 /** How long a settings change may take to reach the bar before it counts as broken. */
 const SETTLE_MS = 5000
 /**
@@ -260,6 +274,79 @@ check('a language change reaches the status bar without a reload', async () => {
     )
   } finally {
     await settings().update('language', undefined, vscode.ConfigurationTarget.Global)
+    await settings().update('summary.period', undefined, vscode.ConfigurationTarget.Global)
+  }
+})
+
+// 1.13 P7 (§3 E3; A3 rules 1–2): VS Code's status bar has no right-to-left layout, so in Arabic, Hebrew and Persian the
+// host hands it each item's text as its icons, then RLI … PDI around the words (src/statusText.ts `finishItems`; the
+// icons outside, at the item's left — §7a Q29). The unit suite proves the helpers over every key; only a real window
+// proves the seam — the workbench's change event reaching the host, the Arabic bundle loaded from the installed
+// extension, the direction set with it (i18n.ts `setDir`) and the bar rebuilt through `finishItems` — and that English
+// carries no mark again once the setting is back. An empty `claudeQuotaSources` gives the first item its icon in this
+// empty profile (`$(circle-slash)`, "quota off": no source is read at all — nothing is fetched, nothing asked); without it
+// the Claude item reads "CC –", which has none.
+check('in Arabic the bar\'s texts are isolated right to left — the first item\'s text holds an RLI after its codicon — and back in English no item carries a mark', async () => {
+  const tp = extensionApi()
+  const marked = (items: ReadonlyArray<{ id: string; text: string }>): string[] =>
+    items.filter((i) => BIDI_CONTROLS.test(i.text)).map((i) => i.id)
+  await settings().update('summary.period', 'today', vscode.ConfigurationTarget.Global)
+  await settings().update('claudeQuotaSources', [], vscode.ConfigurationTarget.Global)
+  try {
+    const english = await waitFor(
+      `${TOKENS_ITEM} to show the "today" period in English, and the first item its icon`,
+      () => {
+        const items = tp.statusBar()
+        const text = textOf(items, TOKENS_ITEM)
+        return text !== undefined && text.endsWith('· today') && items.length > 0 && LEADING_CODICONS.test(items[0].text)
+          ? items : undefined
+      },
+      READY_MS,
+    )
+    // Left to right every helper returns its input byte for byte (1.13 A3): not one control on the bar.
+    assert.deepEqual(marked(english), [], `an English item carries a bidi control: ${describe(english)}`)
+
+    await settings().update('language', 'ar', vscode.ConfigurationTarget.Global)
+    const arabic = await waitFor(
+      'the bar to turn Arabic, its texts isolated, when tokenPace.language is ar',
+      () => {
+        const items = tp.statusBar()
+        const text = textOf(items, TOKENS_ITEM)
+        return text !== undefined && text.includes(RLI) && ARABIC_LETTER.test(text) && items[0].id === english[0].id ? items : undefined
+      },
+    )
+    // The first item: its icon first and bare, then RLI … PDI around everything after it.
+    const first = arabic[0]
+    const icons = LEADING_CODICONS.exec(first.text)?.[0] ?? ''
+    assert.notEqual(icons, '', `${first.id} lost its icon in Arabic: ${JSON.stringify(first.text)}`)
+    assert.equal(BIDI_CONTROLS.test(icons), false, `a mark inside the icons of ${first.id}: ${JSON.stringify(first.text)}`)
+    assert.equal(first.text.slice(icons.length, icons.length + 1), RLI, `${first.id} does not open an RLI after its codicon: ${JSON.stringify(first.text)}`)
+    assert.ok(first.text.endsWith(PDI), `${first.id} does not close its isolate: ${JSON.stringify(first.text)}`)
+    assert.ok(ARABIC_LETTER.test(first.text), `${first.id} has no Arabic word: ${JSON.stringify(first.text)}`)
+    // Every item that carries a word the same way, each isolate closed (a PDI for every LRI, RLI and FSI opened).
+    for (const item of arabic) {
+      const lead = LEADING_CODICONS.exec(item.text)?.[0] ?? ''
+      const rest = item.text.slice(lead.length)
+      if (!/\p{L}/u.test(rest)) continue
+      assert.equal(rest.startsWith(RLI) && rest.endsWith(PDI), true, `${item.id} is not isolated: ${JSON.stringify(item.text)}`)
+      const opened = (rest.match(/[\u2066-\u2068]/gu) ?? []).length
+      const closed = (rest.match(/\u2069/gu) ?? []).length
+      assert.equal(opened, closed, `${item.id}: ${opened} isolate(s) opened, ${closed} closed`)
+    }
+    console.log(`     arabic: ${first.id} = ${icons.trim()} + RLI … PDI (${arabic.length} item(s)); "${english[0].text}" → ${JSON.stringify(first.text)}`)
+
+    // And back: auto follows VS Code's display language again, English in this profile — the very English texts, no mark.
+    await settings().update('language', undefined, vscode.ConfigurationTarget.Global)
+    await waitFor(
+      'the bar to return to English under auto, without a mark',
+      () => {
+        const items = tp.statusBar()
+        return textOf(items, TOKENS_ITEM) === textOf(english, TOKENS_ITEM) && items[0]?.text === english[0].text && marked(items).length === 0
+      },
+    )
+  } finally {
+    await settings().update('language', undefined, vscode.ConfigurationTarget.Global)
+    await settings().update('claudeQuotaSources', undefined, vscode.ConfigurationTarget.Global)
     await settings().update('summary.period', undefined, vscode.ConfigurationTarget.Global)
   }
 })

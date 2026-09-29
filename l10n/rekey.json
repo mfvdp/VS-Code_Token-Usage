@@ -514,6 +514,30 @@
       "part": "text",
       "key": "Token Pace: usage summary copied as markdown (model names and project labels included).",
       "why": "1.14 (after P7, the lead): the Copy Usage Summary message with attribution on — the summary then carries project labels (folder names under basename, pseudonyms under hash), as the save dialog says — a whole sentence, not a stem, and the old key stays for attribution none — German Token Pace: Verbrauchsübersicht als Markdown kopiert (Modellnamen und Projektbezeichnungen enthalten)."
+    },
+    {
+      "n": 65,
+      "by": "P6",
+      "kind": "add",
+      "part": "dashboard",
+      "key": "projects ({0}) ▾",
+      "why": "1.14 A5 rule 1: the Projects row of the filter bar folds beyond four chips behind this button, as the Models row does behind models ({0}) ▾ — write it as your models ({0}) ▾ with your word for projects, {0} the number of projects, the arrow kept, German Projekte ({0}) ▾"
+    },
+    {
+      "n": 66,
+      "by": "P6",
+      "kind": "add",
+      "part": "dashboard",
+      "key": "All projects — the project filter does not apply to this section.",
+      "why": "1.14 A5 rule 4 (§7a Q23): a line under the head of each section a pressed project chip does not filter (the quota cards, the agents, the context, the tools, the budgets, the history, the data quality, the prompts) — your word for the project filter as in project filter: {0}, German Alle Projekte — der Projektfilter gilt für diesen Abschnitt nicht."
+    },
+    {
+      "n": 67,
+      "by": "P6",
+      "kind": "add",
+      "part": "dashboard",
+      "key": "The project filter applies to this section — the range and the models of the filter bar do not.",
+      "why": "1.14 §3 A4 rule 7: the Tokens section's first line while a project chip is pressed — the section shows fixed periods of every model whatever the range and the model chips say, yet the project chips narrow it, and it often stands above the filter bar — your words for range and models as the bar's row labels Range and Models, German Der Projektfilter gilt für diesen Abschnitt — Zeitraum und Modelle der Filterleiste nicht."
     }
   ]
 }

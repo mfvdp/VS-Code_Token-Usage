@@ -74,7 +74,13 @@ keys — twelve hex digits, never a name —, at most 50; a change of provider k
 folder, and a Claude Code and a Codex session started in it share its key), switching attribution
 off drops them, and a project folded into `other projects` loses its chip. The markdown view and the
 Quick Pick state the filter in one line (*project filter: p:8f31c0a4e2b1*); the exports follow no
-filter.
+filter. Beyond four chips the row is one `projects (N) ▾` button until you open it (`fewer ▴` folds it
+again); a chip you filter on stays visible, with `clear` beside it. The chips are buttons with a pressed
+state, in the order the row shows them: Tab reaches them, Space or Enter presses one, and the focus stays
+on it while the sections redraw. The `tokens` section, which the range and the model chips leave alone,
+follows the project chips and says so in its first line while one is pressed. A screen reader reads a
+pseudonym such as `p:8f31c0a4e2b1` character by character; set `tokenPace.showProjectNames` to
+`basename` to hear the folders' names instead.
 
 **Ranges.** Chips for `today`, `7d` and `30d` are on the bar; `yesterday`, `90d`, `week to date`,
 `month to date`, `last month`, `year` and `all` are one `more ▾` chip away (`fewer ▴` puts them

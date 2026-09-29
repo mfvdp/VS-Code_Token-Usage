@@ -3259,7 +3259,9 @@ test('the Prompts section\'s plumbing: a section of the config, the fold list, t
   assert.equal(DASHBOARD_SECTION_KEYS[DASHBOARD_SECTION_KEYS.length - 1], 'prompts')
   assert.deepEqual(makeConfig({ 'tokenPace.dashboard.sections': ['prompts', 'quota'] }).dashboard.sections, ['prompts', 'quota'])
   assert.equal(makeConfig().dashboard.sections.includes('prompts'), false)
-  assert.match(readFileSync(path.join(ROOT, 'src', 'dashboard.ts'), 'utf8'), /\n  prompts: \['prompts'\],\n/)
+  // 1.14 P6 (pinned and changed: the section's one field — §3 A5 rule 4): and the sections a project filter does not reach,
+  // under whose head the page draws its note while a project chip is pressed.
+  assert.match(readFileSync(path.join(ROOT, 'src', 'dashboard.ts'), 'utf8'), /\n  prompts: \['prompts', 'projectFilterIgnoredBy'\],\n/)
   assert.deepEqual(SECTION_SETTINGS.prompts, ['tokenPace.dashboard.sections'])
   const manifest = rawManifest as { contributes: { configuration: Array<{ properties?: Record<string, { default?: string[]; items?: { enum: string[]; enumDescriptions: string[] } }> }> } }
   const p = manifest.contributes.configuration.map((g) => g.properties?.['tokenPace.dashboard.sections']).find((x) => x !== undefined)

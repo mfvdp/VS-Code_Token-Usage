@@ -47,33 +47,37 @@ type SectionField = keyof ViewModel | `ui.${keyof ViewModel['ui']}`
  */
 export const SECTION_FIELDS: Readonly<Record<string, SectionField[]>> = {
   summary: ['digest'],
-  quota: ['quotas'],
+  quota: ['quotas', 'projectFilterIgnoredBy'],
   // The running list and the tree, and the pieces of view state that decide what of it is open:
   // the nodes the reader opened, the node whose details are shown and under which of its rows
   // (1.6 N2), how many of an open node's children the reader asked to see (1.6 D3), and whether
   // the 7-day block is open (1.6 L3). 1.7 F1: and the provider switch — while it excludes Claude
   // the section is not drawn, `claudeOnly` saying why — so a switch pushes its going and its
   // return as the fragments they are.
-  agents: ['agents', 'ui.agentsExpanded', 'ui.agentSelected', 'ui.agentSelectedIn', 'ui.agentsMore', 'ui.agentsWeekOpen', 'provider', 'claudeOnly'],
-  context: ['context', 'provider', 'claudeOnly'],
+  agents: ['agents', 'ui.agentsExpanded', 'ui.agentSelected', 'ui.agentSelectedIn', 'ui.agentsMore', 'ui.agentsWeekOpen', 'provider', 'claudeOnly',
+    'projectFilterIgnoredBy'],
+  context: ['context', 'provider', 'claudeOnly', 'projectFilterIgnoredBy'],
   kpis: ['kpis'],
   // The cache switch above the composition bars decides which parts are drawn, so the
   // section follows it — and nothing else the reader may do to the view state.
-  tokens: ['totals', 'composition', 'cacheEconomy', 'calendar', 'planFactor', 'ui.compositionCache'],
+  tokens: ['totals', 'composition', 'cacheEconomy', 'calendar', 'planFactor', 'ui.compositionCache', 'projectFilterIgnoredBy'],
   chart: ['chart'],
   models: ['models'],
   heatmap: ['heatmap'],
   hours: ['hours'],
   records: ['records'],
-  tools: ['tools'],
-  budget: ['budgets'],
-  history: ['retro'],
+  tools: ['tools', 'projectFilterIgnoredBy'],
+  budget: ['budgets', 'projectFilterIgnoredBy'],
+  history: ['retro', 'projectFilterIgnoredBy'],
   projects: ['projects'],
   sessions: ['sessions'],
-  dataQuality: ['dataQuality'],
+  dataQuality: ['dataQuality', 'projectFilterIgnoredBy'],
   // 1.10 A: the reader's prompt list — the intro, the target line, the flash, the entries (P3, P4); the page draws
-  // it since P5, and keeps its open fields across every push of it.
-  prompts: ['prompts'],
+  // it since P5, and keeps its open fields across every push of it. 1.14 A5 rule 4: every section the project filter
+  // does not reach — and the Tokens section, which it does reach from above the bar — draws a line about it while a
+  // project chip is pressed, so each is rebuilt when the list of those sections comes or goes (`projectFilterIgnoredBy`);
+  // the bar is rebuilt from its chips (`projectFilter`).
+  prompts: ['prompts', 'projectFilterIgnoredBy'],
   drill: ['drill'],
   // Chrome that is always present. `footer` carries the generated-at line, which changes on
   // every tick — keeping it in its own node is what stops a full re-render every minute.
@@ -81,7 +85,7 @@ export const SECTION_FIELDS: Readonly<Record<string, SectionField[]>> = {
   // switch and the language picker beside it —, so it is drawn from both.
   provider: ['provider', 'language'],
   notices: ['firstRun', 'preview'],
-  controls: ['range', 'ui', 'models'],
+  controls: ['range', 'ui', 'models', 'projectFilter'],
   footer: ['footnotes', 'pricing', 'generatedAt'],
 }
 
@@ -1711,6 +1715,8 @@ function webviewWords(): Record<string, string> {
     'Agents': t('Agents'),
     'All': t('All'),
     'All agents': t('All agents'),
+    // 1.14 A5 rule 4 (§7a Q23): the line under the head of each section the project filter does not reach.
+    'All projects — the project filter does not apply to this section.': t('All projects — the project filter does not apply to this section.'),
     'At most {0} prompts.': t('At most {0} prompts.'),
     'Avg turn time {0}': t('Avg turn time {0}'),
     'Avg turn time {0} · P90 {1}': t('Avg turn time {0} · P90 {1}'),
@@ -1847,6 +1853,9 @@ function webviewWords(): Record<string, string> {
     'Time': t('Time'),
     'Time of day': t('Time of day'),
     'Text': t('Text'),
+    // 1.14 §3 A4 rule 7: the Tokens section's first line while a project chip is pressed — it follows the chips.
+    'The project filter applies to this section — the range and the models of the filter bar do not.':
+      t('The project filter applies to this section — the range and the models of the filter bar do not.'),
     'The text is empty.': t('The text is empty.'),
     'The title is empty.': t('The title is empty.'),
     'This prompt was deleted in another window; your changes were not saved.':
@@ -1924,6 +1933,8 @@ function webviewWords(): Record<string, string> {
     'peak {0}:00 · {1} day(s)': t('peak {0}:00 · {1} day(s)'),
     'priced from a related model (family fallback)': t('priced from a related model (family fallback)'),
     'projected at the reset': t('projected at the reset'),
+    // 1.14 A5 rule 1: the Projects row's fold, as the Models row's.
+    'projects ({0}) ▾': t('projects ({0}) ▾'),
     'projected {0} by {1}': t('projected {0} by {1}'),
     'quota sparkline, 7 days': t('quota sparkline, 7 days'),
     'reasoning': t('reasoning'),

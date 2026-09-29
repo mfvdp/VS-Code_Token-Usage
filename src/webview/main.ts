@@ -40,6 +40,8 @@ let vm: Payload = null;
 let costLine = false;
 /** Model chips beyond the first four, shown on request. Local: a chip is not a setting. */
 let allModels = false;
+/** 1.14 A5 rule 1: project chips beyond the first four, shown on request — local, as the model chips' fold is. */
+let allProjects = false;
 /** The range presets beyond today / 7d / 30d, shown on request. Local for the same reason. */
 let allRanges = false;
 /** The two date fields, opened by the "custom…" chip. Also local — the range itself is not. */
@@ -255,6 +257,15 @@ function isolateFigures(scope: Payload): void {
     if (n.nodeType === 3) { if (on) texts.push(n); continue; }
     if (n.nodeType !== 1 || FIGURE_SKIP.indexOf(String(n.tagName).toUpperCase()) >= 0) continue;
     const d = typeof n.getAttribute === 'function' ? textDir(n.getAttribute('dir')) : null;
+    // 1.14 A5 rule 5: a project's name or pseudonym (projectName's span) is one unit whole — the grammar's `name` kind
+    // would leave a connector it starts or ends with outside ("_-app", "@scope", "build-"), and the page knows the
+    // label's extent: the span itself becomes the unit, by the DOM API, its text untouched.
+    if (on && !d && typeof n.className === 'string' && /(?:^| )pname(?: |$)/.test(n.className) && typeof n.setAttribute === 'function') {
+      const label = String(n.textContent || '');
+      n.setAttribute('dir', 'ltr');
+      n.className = label.length > FIGURE_WHOLE_MAX ? 'pname fig long' : 'pname fig';
+      continue;
+    }
     const next = d ? d === 'rtl' : on;
     const kids = n.childNodes || [];
     for (let i = kids.length - 1; i >= 0; i--) stack.push([kids[i], next]);
@@ -605,6 +616,8 @@ function orElse(value: Payload, fallback: string): string {
 
 /** Chips beyond this many are folded away; four is what fits a sidebar on one line. */
 const MODEL_CHIPS = 4;
+/** 1.14 A5 rule 1: the Projects row folds beyond as many chips as the Models row does. */
+const PROJECT_CHIPS = 4;
 /** The ranges that are always on the bar. The rest are one chip away. */
 const RANGE_CHIPS = ['today', '7d', '30d'];
 
@@ -982,7 +995,59 @@ function controls(): string {
     + dates
     + (names.length ? '<span class="meta">' + tr('Models') + '</span><div class="wrap span2">' + models
        + '</div>' : '')
+    + projectRow()
     + '</div>';
+}
+
+/**
+ * 1.14 A5 rule 1 (§0a.8): the filter bar's third row — the view model's project chips (`vm.projectFilter`: the range's
+ * projects under the provider switch and the model chips, by usage, then every pressed key without usage), drawn while
+ * attribution is on and there is a chip at all. The Models row's markup, class for class: its label in the grid's first
+ * column, the chips in a `.wrap.span2`, the fold beyond PROJECT_CHIPS behind "projects (N) ▾" first, "clear" while a
+ * chip is pressed, "fewer ▴" last while the fold is open; a pressed chip is never folded away — a chip the reader cannot
+ * see is a filter they cannot leave. A chip carries the project's key (`data-project`, what the host takes back — never
+ * a name) and the label the view model built for it.
+ */
+function projectRow(): string {
+  const chips: Payload[] = projectChips();
+  if (!chips.length) return '';
+  const pressed = chips.filter(c => c.pressed === true);
+  const many = chips.length > PROJECT_CHIPS;
+  const open = !many || allProjects;
+  const shown = chips.filter(c => open || c.pressed === true);
+  return '<span class="meta">' + tr('Projects') + '</span><div class="wrap span2">'
+    + (open ? '' : '<button data-act="moreProjects">' + tr('projects ({0}) ▾', chips.length) + '</button>')
+    + shown.map(c => '<button data-act="project" data-project="' + esc(c.key) + '" aria-pressed="'
+      + (c.pressed === true) + '">' + projectName(c.key, c.label) + '</button>').join('')
+    + (pressed.length ? '<button data-act="clearProjects">' + tr('clear') + '</button>' : '')
+    + (open && many ? '<button data-act="moreProjects">' + tr('fewer ▴') + '</button>' : '')
+    + '</div>';
+}
+
+/** 1.14 A5 rule 1: the chips the view model hands the bar — each with a string key and label — or none (attribution off). */
+function projectChips(): Payload[] {
+  const f = vm && vm.projectFilter;
+  if (!f || !Array.isArray(f.chips)) return [];
+  return f.chips.filter((c: Payload) => c && typeof c.key === 'string' && typeof c.label === 'string');
+}
+
+/**
+ * 1.14 A5 rule 1 (§0a.8): the project filter the page sends back with every filter message — the keys of the chips drawn
+ * pressed. Not `vm.ui.projects`: the stored list may hold a key the label table no longer has (a project folded or
+ * pruned), which the view model ignores and draws no chip for; sending it back would keep a filter nobody can see.
+ */
+function pressedProjects(): string[] {
+  return projectChips().filter(c => c.pressed === true).map(c => c.key);
+}
+
+/**
+ * 1.14 A5 rule 5: a project's label as the page draws it. A folder's name and a pseudonym (`p:8f31c0a4e2b1`) are data —
+ * one left-to-right unit in a right-to-left page, whatever connector they start or end with (`_-app`, `@scope`): a
+ * `<span class="pname">`, which isolateFigures makes that unit (by the DOM API, as every unit). `(no project)` and
+ * `other projects` — the keys '' and '*' — are words of the page's language, drawn as they are.
+ */
+function projectName(key: string, label: string): string {
+  return key === '' || key === '*' ? esc(label) : '<span class="pname">' + esc(label) + '</span>';
 }
 
 // -- sections ---------------------------------------------------------------
@@ -2045,17 +2110,34 @@ function sProjects(): string {
     return '<p class="empty">' + tr('Project attribution is off (tokenPace.attribution).') + '</p>';
   }
   if (!vm.projects.rows.length) return '<p class="empty">' + tr('No project data yet.') + '</p>';
+  // 1.14 A5 rule 2 (§3 A4 rule 2): the range's buckets by project — Project · Usage · Cost (showCost only) · Requests ·
+  // Cache hit · Share · Sessions · Last activity; the cost column the words and marks of the other cost columns (the
+  // lower bound's ⚠ with the totals' words, the family fallback's with the models table's), the price date and sources
+  // in the page's footnotes as for every cost column (footnotesFor — the one place the price date is stated).
   const w = columnWords();
-  const project = tr('Project'), sessions = tr('Sessions');
-  return '<div class="scroll"><table><thead><tr><th>' + project + '</th><th>' + w.usage + '</th><th>'
-    + w.requests + '</th>'
-    + '<th>' + w.cacheHit + '</th><th>' + w.share + '</th><th>' + sessions + '</th></tr></thead><tbody>'
-    + vm.projects.rows.map((p: Payload) => '<tr><td' + dh(project) + '>' + esc(p.project) + '</td>'
-      + '<td' + dh(w.usage) + '>' + esc(p.usage) + '</td><td' + dh(w.requests) + '>'
-      + esc(p.requests) + '</td>'
-      + '<td' + dh(w.cacheHit) + '>' + esc(p.cacheHit) + '</td><td' + dh(w.share) + '>'
-      + esc(p.share) + '</td><td' + dh(sessions) + '>' + esc(p.sessions) + '</td></tr>').join('')
-    + '</tbody></table></div>';
+  const cost = vm.showCost === true;
+  const project = tr('Project'), sessions = tr('Sessions'), last = tr('Last activity');
+  const note = typeof vm.projects.note === 'string' && vm.projects.note ? vm.projects.note : '';
+  const folded = vm.projects.folded && typeof vm.projects.folded.text === 'string' ? vm.projects.folded.text : '';
+  const head = [project, w.usage].concat(cost ? [w.cost] : []).concat([w.requests, w.cacheHit, w.share, sessions, last]);
+  const rows = vm.projects.rows.map((p: Payload) => '<tr><td' + dh(project) + '>' + projectName(String(p.key), String(p.project)) + '</td>'
+    + '<td' + dh(w.usage) + '>' + esc(p.usage) + '</td>'
+    + (cost ? '<td' + dh(w.cost) + '>' + esc(p.cost)
+      + (p.costLowerBound ? ' <span title="' + tr('some models have no price on file') + '">⚠</span>' : '')
+      + (p.costFamily ? ' <span title="' + tr('priced from a related model (family fallback)') + '">⚠</span>' : '')
+      + '</td>' : '')
+    + '<td' + dh(w.requests) + '>' + esc(p.requests) + '</td>'
+    + '<td' + dh(w.cacheHit) + '>' + esc(p.cacheHit) + '</td><td' + dh(w.share) + '>' + esc(p.share) + '</td>'
+    // §3 A9: the sessions' lower bound — "⚠ 12" — carries its words as a title and, below the table, as text.
+    + '<td' + dh(sessions) + '>' + (p.sessionsLowerBound && note
+      ? '<span title="' + esc(note) + '">' + esc(p.sessions) + '</span>' : esc(p.sessions)) + '</td>'
+    + '<td' + dh(last) + '>' + days(esc(p.lastActive)) + '</td></tr>').join('');
+  return '<div class="scroll"><table><thead><tr>' + head.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>'
+    + rows + '</tbody></table></div>'
+    // §3 A9: a title is not read by every reader — the lower bound's words stand under the table too, after its mark.
+    + (note && vm.projects.rows.some((p: Payload) => p.sessionsLowerBound) ? '<div class="meta">⚠ ' + esc(note) + '</div>' : '')
+    // §3 A3 rule 1: the list is short, never silently — the folded projects' count and the cap, in the dim tone.
+    + (folded ? '<div class="meta">' + esc(folded) + '</div>' : '');
 }
 
 function sSessions(): string {
@@ -4049,7 +4131,29 @@ function sectionHtml(key: string, render: () => string): string {
   return '<section data-sec="' + esc(key) + '"><details' + (collapsed(key) ? '' : ' open') + '>'
     + '<summary data-act="section" data-key="' + esc(key) + '"><h2>' + esc(titleOf(key))
     + '</h2>' + gear(key) + '</summary>'
-    + '<div data-body="' + esc(key) + '">' + render() + '</div></details></section>';
+    + '<div data-body="' + esc(key) + '">' + bodyHtml(key, render) + '</div></details></section>';
+}
+
+/** A section's body: its renderer's markup, under the project filter's note (filterNote) when it draws anything at all. */
+function bodyHtml(key: string, render: () => string): string {
+  const inner = render();
+  return inner ? filterNote(key) + inner : inner;
+}
+
+/**
+ * 1.14 A5 rule 4 (§7a Q23): while a project chip is pressed, the first line of the body of each section the project filter
+ * does not reach (`vm.projectFilterIgnoredBy` — the quota cards, the agents, the context, the tools, the budgets, the
+ * history, the data quality, the prompts): one line in the dim tone saying so, in the body — a folded section shows it
+ * when it is opened, a pushed fragment draws it anew. And §3 A4 rule 7: the Tokens section, which the range and the model
+ * chips do not filter and which often stands above the bar, follows the project chips — its first line says that. Nothing
+ * while no chip is pressed: a page without a project filter is the page it was.
+ */
+function filterNote(key: string): string {
+  const ignored: unknown[] = vm && Array.isArray(vm.projectFilterIgnoredBy) ? vm.projectFilterIgnoredBy : [];
+  if (!ignored.length) return '';
+  if (ignored.indexOf(key) >= 0) return '<p class="meta pnote">' + tr('All projects — the project filter does not apply to this section.') + '</p>';
+  if (key === 'tokens') return '<p class="meta pnote-on">' + tr('The project filter applies to this section — the range and the models of the filter bar do not.') + '</p>';
+  return '';
 }
 
 function renderAll(): void {
@@ -4123,14 +4227,17 @@ function renderSection(key: string): void {
   // row of the running list, or on an item of the tree, stays there; dropping the focus would
   // send them back to the top of the page with every push. 1.7 F1: the provider switch likewise —
   // the button just pressed keeps the focus across the push that answers it.
-  const focus = key === 'agents' || key === 'provider' ? keepFocus(body) : null;
+  // 1.14 A9: and the filter bar — a chip of the Projects or the Models row, a range chip or the bar's fold and clear
+  // buttons pressed by the keyboard keep the focus across the push that answers them (a control that is gone takes it
+  // nowhere, as everywhere).
+  const focus = key === 'agents' || key === 'provider' || key === 'controls' ? keepFocus(body) : null;
   // 1.10 A2 rule 9: the Prompts section keeps its open fields, the focus in them or on its controls, and its
   // live line's node (promptKeep, promptAfter).
   const prompts = key === 'prompts' ? promptKeep(body) : null;
   agentFocusInTree = !!(focus && focus.tree);
   promptWriting = true;
   try {
-    body.innerHTML = render();
+    body.innerHTML = bodyHtml(key, render);
   } finally {
     agentFocusInTree = false;
     promptWriting = false;
@@ -4214,15 +4321,31 @@ function keepFocus(body: Element): AgentFocus | null {
   if (!el.dataset) return null;
   // 1.6 L3: the 7-day block's disclosure names no node; it is found again by what it does. 1.7 F1:
   // a button of the provider switch names the provider it shows. 1.9 A3: the language picker's button
-  // by what it does, an item of its open list by the language it names.
+  // by what it does, an item of its open list by the language it names. 1.14 A9: a chip of the filter bar by the
+  // project, the model or the preset it names (a project's key may be '' — the "(no project)" chip), the bar's
+  // folds and clear buttons by what they do.
   const act = el.dataset.act, key = el.dataset.key || '', src = el.dataset.src || '';
   const id = act === 'lang' ? el.dataset.id || '' : '';
-  return act && (key || src || id || act === 'agentsWeek' || act === 'langOpen')
-    ? { act: act, key: key, list: el.dataset.list || '', src: src, id: id } : null;
+  const bar = barNameOf(el);
+  return act && (key || src || id || act === 'agentsWeek' || act === 'langOpen' || bar !== null || BAR_ACTS.indexOf(act) >= 0)
+    ? { act: act, key: key, list: el.dataset.list || '', src: src, id: id, bar: bar === null ? undefined : bar } : null;
+}
+
+/** 1.14 A9: the filter bar's buttons that name nothing — each is found again by what it does. */
+const BAR_ACTS = ['moreProjects', 'clearProjects', 'moreModels', 'clearModels', 'moreRanges', 'customDates', 'customRange', 'refresh'];
+
+/** 1.14 A9: what a chip of the filter bar names — its project's key, its model or its preset —, else null. */
+function barNameOf(el: Payload): string | null {
+  const d = el && el.dataset ? el.dataset : null;
+  if (!d) return null;
+  if (d.act === 'project' && typeof d.project === 'string') return 'p|' + d.project;
+  if (d.act === 'model' && typeof d.model === 'string') return 'm|' + d.model;
+  if (d.act === 'range' && typeof d.preset === 'string') return 'r|' + d.preset;
+  return null;
 }
 
 /** What keepFocus found: a control by what it does and whom it names, or an item of the tree. */
-interface AgentFocus { act: string; key: string; list: string; src?: string; id?: string; tree?: boolean; copy?: boolean }
+interface AgentFocus { act: string; key: string; list: string; src?: string; id?: string; bar?: string; tree?: boolean; copy?: boolean }
 
 /**
  * Puts the focus back on the control that does the same thing to the same node, in the same
@@ -4239,7 +4362,8 @@ function restoreFocus(body: Element, f: AgentFocus): boolean {
   for (let i = 0; i < all.length; i++) {
     const el = all[i];
     if (el.dataset.act === f.act && (el.dataset.key || '') === f.key && (el.dataset.list || '') === f.list
-      && (el.dataset.src || '') === (f.src || '') && (f.act !== 'lang' || (el.dataset.id || '') === (f.id || ''))) { el.focus(); return true; }
+      && (el.dataset.src || '') === (f.src || '') && (f.act !== 'lang' || (el.dataset.id || '') === (f.id || ''))
+      && barNameOf(el) === (f.bar === undefined ? null : f.bar)) { el.focus(); return true; }
   }
   return false;
 }
@@ -4731,10 +4855,22 @@ function act(el: HTMLElement): void {
     const list = vm.ui.models.slice();
     const i = list.indexOf(m);
     if (i >= 0) list.splice(i, 1); else list.push(m);
-    post({ type: 'setFilter', providers: vm.ui.providers, models: list });
+    // 1.14 §0a.8: every filter message carries the project chips too — the host reads a message without them as none.
+    post({ type: 'setFilter', providers: vm.ui.providers, models: list, projects: pressedProjects() });
   } else if (a === 'clearModels') {
-    post({ type: 'setFilter', providers: vm.ui.providers, models: [] });
+    post({ type: 'setFilter', providers: vm.ui.providers, models: [], projects: pressedProjects() });
   } else if (a === 'moreModels') { allModels = !allModels; renderSection('controls'); }
+  else if (a === 'project') {
+    // 1.14 A5 rule 1: the chip's key toggled in the pressed chips' keys; the model chips go along as they stand.
+    const k = el.dataset.project;
+    if (typeof k !== 'string') return;
+    const list = pressedProjects();
+    const i = list.indexOf(k);
+    if (i >= 0) list.splice(i, 1); else list.push(k);
+    post({ type: 'setFilter', providers: vm.ui.providers, models: vm.ui.models, projects: list });
+  } else if (a === 'clearProjects') {
+    post({ type: 'setFilter', providers: vm.ui.providers, models: vm.ui.models, projects: [] });
+  } else if (a === 'moreProjects') { allProjects = !allProjects; renderSection('controls'); }
   else if (a === 'moreRanges') { allRanges = !allRanges; renderSection('controls'); }
   else if (a === 'customDates') { showDates = !showDates; renderSection('controls'); }
   else if (a === 'section') post({ type: 'toggleSection', key: el.dataset.key });

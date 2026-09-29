@@ -1788,7 +1788,8 @@ test('a forced-colours theme paints every pressed chip in the highlight colours,
   // button of the provider switch (1.7 F1, pinned and changed: a provider chip of the filter bar),
   // the range, a model, the custom dates, the cache switch, the chart's split and cost line, the
   // heatmap's metric, the hours' zone — have no class, so the rule reaches each of them; the only
-  // others are the agent rows of the running list and the 7-day block, which it leaves out.
+  // others are the agent rows of the running list and the 7-day block, which it leaves out. 1.14 P6 (pinned and changed:
+  // nine chips — §3 A9): a project chip of the filter bar's Projects row is one of them, after the custom dates.
   const main = readFileSync(join(__dirname, '..', 'src', 'webview', 'main.ts'), 'utf8')
   const pressable = [...main.matchAll(/aria-pressed="'/g)].map((m) => {
     const head = main.slice(main.lastIndexOf('<button ', m.index), m.index)
@@ -1796,7 +1797,7 @@ test('a forced-colours theme paints every pressed chip in the highlight colours,
     // `ag-row`, and the script adds the colour of its state behind it — the first class is what the rule reads.
     return { act: /data-act="([A-Za-z]+)"/.exec(head)?.[1] ?? '?', cls: /class="([^"' ]*)/.exec(head)?.[1] ?? null }
   })
-  const acts = ['providerView', 'range', 'model', 'customDates', 'compositionCache', 'chartSplit', 'costLine', 'heatmapMetric', 'hourZone']
+  const acts = ['providerView', 'range', 'model', 'customDates', 'project', 'compositionCache', 'chartSplit', 'costLine', 'heatmapMetric', 'hourZone']
   assert.deepEqual(pressable.filter((b) => b.cls === null).map((b) => b.act), acts, JSON.stringify(pressable))
   assert.deepEqual(pressable.filter((b) => b.cls !== null), [{ act: 'agentSelect', cls: 'ag-row' }, { act: 'agentSelect', cls: 'ag-row' }])
   // Those keep the open row's 2 px outline in the highlight colour, as the tree's rows do.
@@ -7462,7 +7463,9 @@ test('under Codex the Agents and Context sections are pushed once — the fragme
   assert.deepEqual(back.agents, flushTree(10), 'the tree that came back is not the newest one')
   assert.deepEqual([back.provider, back.claudeOnly], ['all', null])
   assert.deepEqual(back.ui, agentUi(), 'the section came back without the view state it is drawn from')
-  assert.deepEqual(fragments(r, 'context').last.payload, { context: { used: 1_010 }, provider: 'all', claudeOnly: null })
+  // 1.14 P6 (pinned and changed: the three fields — §3 A5 rule 4): the context fragment carries the sections the project
+  // filter does not reach too (the note under its head); this fixture has none, so the field goes as undefined.
+  assert.deepEqual(fragments(r, 'context').last.payload, { context: { used: 1_010 }, provider: 'all', claudeOnly: null, projectFilterIgnoredBy: undefined })
   assert.deepEqual(r.live(), [])
   // Under All the section is live again: its next change goes, after its interval as ever.
   r.posted.length = 0
@@ -9472,8 +9475,16 @@ test('after a language switch the focus is back where it was — the element wit
   p.fire({ type: 'data', payload: page('en'), words: words('en') })
   assert.equal((p.active() as FocusEl).id, 'tp-from')
   assert.notEqual(p.active(), from, 'the focus stayed on the old element')
-  // On a control the new page cannot find again (a chip that names nothing): the picker's button — not <body>.
-  p.focus((e) => e.dataset.act === 'range' && e.dataset.preset === '7d')
+  // 1.14 P6 (pinned and changed: a range chip was the control the new page could not find — §3 A9): a chip of the filter
+  // bar is found again by what it names, its preset here (a project chip by its key, a model chip by its model).
+  const chip = p.focus((e) => e.dataset.act === 'range' && e.dataset.preset === '7d')
+  p.fire({ type: 'data', payload: page('en'), words: words('en') })
+  assert.equal((p.active() as FocusEl).dataset.act, 'range')
+  assert.equal((p.active() as FocusEl).dataset.preset, '7d')
+  assert.notEqual(p.active(), chip, 'the focus stayed on the old element')
+  // On a control the new page cannot find again (a chip that names nothing — the Activity section's metric): the
+  // picker's button — not <body>.
+  p.focus((e) => e.dataset.act === 'heatmapMetric' && e.dataset.metric === 'cost')
   p.fire({ type: 'data', payload: page('en'), words: words('en') })
   assert.ok(p.active() !== 'body' && (p.active() as FocusEl).classList.contains('lng-btn'), JSON.stringify(p.active()))
   // A whole push without words (the view shown again) moves nothing: that is not a switch.
@@ -12163,4 +12174,273 @@ test('1.14 B6 (R-RLC-113-lists, §7a Q18): the page joins its lists by its own w
   assert.equal(one('["a", "b", "c"]'), 'a، b، c')
   // No list of the page is joined with a literal ", " any more.
   assert.deepEqual(SOURCE.split('\n').filter((l) => /\.join\(', '\)/.test(l)), [])
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 P6 (§3 A5, A9): the Projects row of the filter bar, the Projects table, the notes of the project filter
+// ---------------------------------------------------------------------------
+
+/** 1.14 P6: project keys of the tests below — twelve hex digits each, as project.ts makes them; '' and '*' the two words. */
+const PK = ['0123456789ab', '1123456789ab', '2123456789ab', '3123456789ab', '4123456789ab', '5123456789ab']
+const projectChip = (i: number, pressed = false, label = 'proj-' + i): Record<string, unknown> => ({ key: PK[i], label, pressed })
+/** The Projects row as controls() draws it: from its label to the end of its chips' cell ('' when there is none). */
+const projectRowOf = (h: string): string => {
+  const at = h.indexOf('<span class="meta">Projects</span>')
+  return at < 0 ? '' : h.slice(at, h.indexOf('</div>', at) + 6)
+}
+
+test('1.14 A5 rule 1: the Projects row — after Models, the Models row\'s markup class for class, a chip per project the view model hands the bar (its key in data-project, its label, aria-pressed), "clear" while one is pressed; no row without chips or with attribution off', () => {
+  const three = render('controls()', { projectFilter: { chips: [projectChip(0), projectChip(1, true), { key: '', label: '(no project)', pressed: false }] } })
+  const row = projectRowOf(three)
+  assert.equal(row, '<span class="meta">Projects</span><div class="wrap span2">'
+    + '<button data-act="project" data-project="' + PK[0] + '" aria-pressed="false"><span class="pname">proj-0</span></button>'
+    + '<button data-act="project" data-project="' + PK[1] + '" aria-pressed="true"><span class="pname">proj-1</span></button>'
+    + '<button data-act="project" data-project="" aria-pressed="false">(no project)</button>'
+    + '<button data-act="clearProjects">clear</button></div>')
+  // After the Models row, inside the one bar.
+  const models = { rows: [modelRow()], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } }
+  const both = render('controls()', { models, projectFilter: { chips: [projectChip(0)] } })
+  assert.ok(both.indexOf('<span class="meta">Models</span>') < both.indexOf('<span class="meta">Projects</span>'), both)
+  assert.ok(both.endsWith('</button></div></div>'), both)
+  // The Models row carries no group role and no label of its own — neither does this one.
+  assert.equal(/role="group"|aria-label="Projects"/.test(row), false, row)
+  // Nothing is pressed: no way out to offer.
+  assert.equal(projectRowOf(render('controls()', { projectFilter: { chips: [projectChip(0), projectChip(1)] } })).includes('clearProjects'), false)
+  // No chip, no row; attribution off (null) or a view model of 1.13 (no field), no row.
+  for (const pf of [{ chips: [] }, null, undefined]) {
+    const h = render('controls()', { projectFilter: pf })
+    assert.equal(h.includes('Projects') || h.includes('data-act="project"'), false, JSON.stringify(pf) + ': ' + h)
+  }
+  // Escaped on the way in: a label and a key are the view model's, never markup.
+  const evil = render('controls()', { projectFilter: { chips: [{ key: '"><b>', label: '<b>x</b>', pressed: false }] } })
+  assert.equal(evil.includes('<b>'), false, evil)
+})
+
+test('1.14 A5 rule 1: beyond four chips the Projects row is one "projects (N) ▾" button until it is asked for, and a pressed chip is never folded away', () => {
+  const six = { chips: [0, 1, 2, 3, 4, 5].map((i) => projectChip(i)) }
+  const folded = projectRowOf(render('controls()', { projectFilter: six }))
+  assert.equal(folded, '<span class="meta">Projects</span><div class="wrap span2"><button data-act="moreProjects">projects (6) ▾</button></div>')
+  // The sixth pressed: it stays beside the fold, and the way out of the filter with it.
+  const pressed = { chips: [0, 1, 2, 3, 4, 5].map((i) => projectChip(i, i === 5)) }
+  const kept = projectRowOf(render('controls()', { projectFilter: pressed }))
+  assert.equal(kept, '<span class="meta">Projects</span><div class="wrap span2"><button data-act="moreProjects">projects (6) ▾</button>'
+    + '<button data-act="project" data-project="' + PK[5] + '" aria-pressed="true"><span class="pname">proj-5</span></button>'
+    + '<button data-act="clearProjects">clear</button></div>')
+  // Opened: every chip, the way out, the way back last.
+  ;(ctx as Record<string, unknown>).fixture = model({ projectFilter: pressed })
+  const opened = projectRowOf(String(nodeVm.runInContext('vm = fixture; (function () { allProjects = true;'
+    + ' var h = controls(); allProjects = false; return h; })()', ctx)))
+  for (const k of PK) assert.ok(opened.includes('data-project="' + k + '"'), k + ': ' + opened)
+  assert.equal(opened.split('data-act="project"').length - 1, 6, opened)
+  assert.ok(opened.endsWith('<button data-act="clearProjects">clear</button><button data-act="moreProjects">fewer ▴</button></div>'), opened)
+  // Four are no fold.
+  const four = projectRowOf(render('controls()', { projectFilter: { chips: [0, 1, 2, 3].map((i) => projectChip(i)) } }))
+  assert.equal(four.includes('moreProjects'), false, four)
+  assert.equal(four.split('data-act="project"').length - 1, 4, four)
+  // The fold is the page's own: it posts nothing and draws the bar again.
+  assert.ok(SOURCE.includes("else if (a === 'moreProjects') { allProjects = !allProjects; renderSection('controls'); }"))
+})
+
+test('1.14 A5 rule 1 (§0a.8): a project chip posts setFilter with the pressed chips\' keys, the toggled one added or taken out, the providers and the model chips as they stand; clear posts none; a model chip carries the project chips along; every message is one the host parses', () => {
+  const a = agentCtx()
+  const ui = { providers: ['claude', 'codex'], models: ['claude-opus-4-6'], metric: 'usage', collapsed: [], projects: [PK[1], 'ffffffffffff'] }
+  a.fire('window:message', { origin: '', data: { type: 'data', payload: model({ ui,
+    projectFilter: { chips: [projectChip(0), projectChip(1, true), { key: '', label: '(no project)', pressed: false }] } }) } })
+  const click = (dataset: Record<string, string>): unknown => {
+    a.posted.length = 0
+    const chip = { tagName: 'BUTTON', dataset }
+    a.fire('document:click', { target: { closest: () => chip }, stopPropagation: () => undefined, preventDefault: () => undefined })
+    return a.posted.slice()
+  }
+  // Not vm.ui.projects: its stale key (no chip) is not sent back.
+  const base = { type: 'setFilter', providers: ['claude', 'codex'], models: ['claude-opus-4-6'] }
+  assert.deepEqual(click({ act: 'project', project: PK[0] }), [{ ...base, projects: [PK[1], PK[0]] }])
+  assert.deepEqual(click({ act: 'project', project: PK[1] }), [{ ...base, projects: [] }])
+  assert.deepEqual(click({ act: 'project', project: '' }), [{ ...base, projects: [PK[1], ''] }])
+  assert.deepEqual(click({ act: 'clearProjects' }), [{ ...base, projects: [] }])
+  // A model chip and its clear keep the project filter: a message without it reads as none (the host's parser).
+  assert.deepEqual(click({ act: 'model', model: 'claude-sonnet-4-6' }),
+    [{ ...base, models: ['claude-opus-4-6', 'claude-sonnet-4-6'], projects: [PK[1]] }])
+  assert.deepEqual(click({ act: 'clearModels' }), [{ ...base, models: [], projects: [PK[1]] }])
+  for (const m of [{ ...base, projects: [PK[1], PK[0]] }, { ...base, projects: [PK[1], ''] }, { ...base, projects: [] }]) {
+    assert.deepEqual(parseWebviewMessage(m), m, JSON.stringify(m))
+  }
+  // The fold asks the host for nothing.
+  assert.deepEqual(click({ act: 'moreProjects' }), [])
+})
+
+test('1.14 A5 rule 2 (§3 A4 rule 2, A9): the Projects table — Project · Usage · API cost (with showCost only) · Requests · Hit · Share · Sessions · Last activity, each cell labelled for the stacked form; the cost\'s marks with their words; the sessions\' lower bound with its title and the same words under the table; the folded line; the off and empty sentences as before', () => {
+  const note = 'at least — session records older than 45 days are not kept'
+  const rows = [
+    { key: PK[0], project: 'B_ro-App', usage: '1.2M', cost: '$4.10', costLowerBound: true, costFamily: false, requests: '120', cacheHit: '91 %',
+      share: '62 %', sessions: '⚠ 12', sessionsLowerBound: true, lastActive: '2026-09-02 14:20' },
+    { key: PK[1], project: 'p:1123456789ab', usage: '40K', cost: '$0.20', costLowerBound: false, costFamily: true, requests: '8', cacheHit: '–',
+      share: '2 %', sessions: '1', sessionsLowerBound: false, lastActive: '09:05' },
+    { key: '', project: '(no project)', usage: '1K', cost: '–', costLowerBound: false, costFamily: false, requests: '1', cacheHit: '–',
+      share: '<1 %', sessions: '0', sessionsLowerBound: false, lastActive: '–' },
+  ]
+  const projects = { rows, enabled: true, note, folded: { count: 3, cap: 200, text: '3 projects folded into other projects (at most 200 are kept)' } }
+  const h = render('sProjects()', { projects })
+  const heads = [...h.matchAll(/<th>([^<]*)<\/th>/g)].map((m) => m[1])
+  assert.deepEqual(heads, ['Project', 'Usage', 'API cost', 'Req.', 'Hit', 'Share', 'Sessions', 'Last activity'])
+  // Every cell carries its column's name for the stacked form (dh()), the figure columns the table's rules (text-align: end).
+  for (const hd of heads) assert.equal(h.split('data-h="' + hd + '"').length - 1, 3, hd)
+  assert.ok(h.includes('<td data-h="Project" data-hl="Project: "><span class="pname">B_ro-App</span></td>'), h)
+  assert.ok(h.includes('<td data-h="Project" data-hl="Project: ">(no project)</td>'), h)
+  assert.ok(h.includes('<td data-h="API cost" data-hl="API cost: ">$4.10 <span title="some models have no price on file">⚠</span></td>'), h)
+  assert.ok(h.includes('<td data-h="API cost" data-hl="API cost: ">$0.20 <span title="priced from a related model (family fallback)">⚠</span></td>'), h)
+  assert.ok(h.includes('<td data-h="Sessions" data-hl="Sessions: "><span title="' + note + '">⚠ 12</span></td>'), h)
+  assert.ok(h.includes('<td data-h="Sessions" data-hl="Sessions: ">1</td>'), h)
+  assert.ok(h.includes('<td data-h="Last activity" data-hl="Last activity: "><span class="nobr">2026-09-02</span> 14:20</td>'), h)
+  // A title is not read by every reader: the same words under the table, after the mark; then the folded line.
+  assert.ok(h.endsWith('</tbody></table></div><div class="meta">⚠ ' + note + '</div>'
+    + '<div class="meta">3 projects folded into other projects (at most 200 are kept)</div>'), h)
+  // Without showCost no cost column, no cost mark; the rest as it was.
+  const off = render('sProjects()', { projects, showCost: false })
+  assert.deepEqual([...off.matchAll(/<th>([^<]*)<\/th>/g)].map((m) => m[1]), ['Project', 'Usage', 'Req.', 'Hit', 'Share', 'Sessions', 'Last activity'])
+  assert.equal(off.includes('API cost') || off.includes('no price on file') || off.includes('family fallback'), false, off)
+  // Custom rates: the cost column's words of every table.
+  assert.ok(render('sProjects()', { projects, pricing: { asOf: '2026-09-02', later: null, custom: true, showList: false } }).includes('<th>API cost (your rates)</th>'))
+  // No lower bound, no fold: nothing under the table.
+  const plain = render('sProjects()', { projects: { rows: rows.slice(1), enabled: true, note: null, folded: null } })
+  assert.ok(plain.endsWith('</tbody></table></div>'), plain)
+  // The two sentences of before.
+  assert.equal(render('sProjects()', { projects: { rows: [], enabled: false } }), '<p class="empty">Project attribution is off (tokenPace.attribution).</p>')
+  assert.equal(render('sProjects()', { projects: { rows: [], enabled: true, note: null, folded: null } }), '<p class="empty">No project data yet.</p>')
+})
+
+test('1.14 A5 rule 4 (§7a Q23, §3 A4 rule 7): while a project chip is pressed, exactly the sections of projectFilterIgnoredBy draw "All projects — …" under their head, the Tokens section says the filter reaches it; nothing without a pressed chip or in a section that draws nothing', () => {
+  const { DASHBOARD_SECTION_KEYS, PROJECT_FILTER_IGNORED } = require('../src/viewModel') as typeof import('../src/viewModel')
+  const ignored = [...PROJECT_FILTER_IGNORED]
+  const body = (key: string, over: Record<string, unknown>): string => {
+    ;(ctx as Record<string, unknown>).fixture = model(over)
+    return String(nodeVm.runInContext('vm = fixture; bodyHtml(' + JSON.stringify(key) + ', function () { return "<p>x</p>"; })', ctx))
+  }
+  const NOTE = '<p class="meta pnote">All projects — the project filter does not apply to this section.</p>'
+  const TOKENS = '<p class="meta pnote-on">The project filter applies to this section — the range and the models of the filter bar do not.</p>'
+  for (const key of DASHBOARD_SECTION_KEYS) {
+    const on = body(key, { projectFilterIgnoredBy: ignored })
+    const want = ignored.includes(key) ? NOTE + '<p>x</p>' : key === 'tokens' ? TOKENS + '<p>x</p>' : '<p>x</p>'
+    assert.equal(on, want, key)
+    // No chip pressed (the list empty), attribution off, or a view model of 1.13: the body is the renderer's alone.
+    for (const off of [[], undefined]) assert.equal(body(key, { projectFilterIgnoredBy: off }), '<p>x</p>', key)
+  }
+  // Exactly the eight: the note is drawn under the head of each, and nowhere else.
+  assert.equal(DASHBOARD_SECTION_KEYS.filter((k) => body(k, { projectFilterIgnoredBy: ignored }).includes('pnote"')).length, 8)
+  // A section that draws nothing stays empty — no note on its own.
+  ;(ctx as Record<string, unknown>).fixture = model({ projectFilterIgnoredBy: ignored })
+  assert.equal(String(nodeVm.runInContext('vm = fixture; bodyHtml("context", function () { return ""; })', ctx)), '')
+  // Every path that writes a section's body writes it through bodyHtml: the whole page, a section put back, a fragment.
+  assert.ok(SOURCE.includes("'<div data-body=\"' + esc(key) + '\">' + bodyHtml(key, render) + '</div></details></section>'"))
+  assert.ok(SOURCE.includes('body.innerHTML = bodyHtml(key, render);'))
+  assert.equal(/innerHTML = render\(\)/.test(SOURCE), false)
+  // And each such section is pushed again when the list comes or goes (SECTION_FIELDS), the bar when its chips change.
+  const { SECTION_FIELDS } = loadDashboard()
+  for (const key of [...ignored, 'tokens']) assert.ok((SECTION_FIELDS[key] as string[]).includes('projectFilterIgnoredBy'), key)
+  assert.ok((SECTION_FIELDS.controls as string[]).includes('projectFilter'))
+  // The page's words, each a key of the dashboard part.
+  for (const w of ['projects ({0}) ▾', 'All projects — the project filter does not apply to this section.',
+    'The project filter applies to this section — the range and the models of the filter bar do not.', 'Last activity']) {
+    assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w)
+  }
+})
+
+test('1.14 A5 rules 1–4 over a view model the host built (attribution project, names on): the bar\'s chips are its chips, the table its rows, the notes its sections — a JSON round trip, as the page gets it', () => {
+  const { projectKeyOf } = require('../src/project') as typeof import('../src/project')
+  const cfg = makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename',
+    'tokenPace.dashboard.sections': ['quota', 'tokens', 'models', 'projects', 'tools'] })
+  const alpha = projectKeyOf('salt', '-home-t-alpha')
+  const built = JSON.parse(JSON.stringify(buildViewModel(makeInput({ cfg, agg: buildAgg('project'), ui: { projects: [alpha] } }))))
+  const chips = built.projectFilter.chips as Array<{ key: string; label: string; pressed: boolean }>
+  assert.ok(chips.length >= 2 && chips.some((c) => c.key === alpha && c.pressed), JSON.stringify(chips))
+  ;(ctx as Record<string, unknown>).fixture = built
+  const bar = String(nodeVm.runInContext('vm = fixture; controls()', ctx))
+  const drawn = [...bar.matchAll(/data-project="([^"]*)" aria-pressed="(true|false)"><span class="pname">([^<]*)<\/span>/g)].map((m) => [m[1], m[2] === 'true', m[3]])
+  assert.deepEqual(drawn, chips.map((c) => [c.key, c.pressed, c.label]))
+  const table = String(nodeVm.runInContext('sProjects()', ctx))
+  assert.equal(table.split('<tr><td data-h="Project"').length - 1, built.projects.rows.length)
+  assert.equal(String(nodeVm.runInContext('bodyHtml("quota", sQuota)', ctx)).startsWith('<p class="meta pnote">'), true)
+  assert.equal(String(nodeVm.runInContext('bodyHtml("models", sModels)', ctx)).includes('pnote'), false)
+  // Attribution off: no row, no note, the off sentence.
+  const none = JSON.parse(JSON.stringify(buildViewModel(makeInput({ cfg: makeConfig({ 'tokenPace.dashboard.sections': ['quota', 'projects'] }), agg: buildAgg(), ui: { projects: [alpha] } }))))
+  ;(ctx as Record<string, unknown>).fixture = none
+  assert.equal(String(nodeVm.runInContext('vm = fixture; controls()', ctx)).includes('Projects'), false)
+  assert.equal(String(nodeVm.runInContext('bodyHtml("quota", sQuota)', ctx)).includes('pnote'), false)
+  assert.equal(String(nodeVm.runInContext('sProjects()', ctx)), '<p class="empty">Project attribution is off (tokenPace.attribution).</p>')
+})
+
+test('1.14 A5 rule 5: a project\'s name and its pseudonym are one left-to-right unit — the grammar\'s name kind takes p:8f31c0a4e2b1 and names with _ . : @ - whole, and the page\'s pname span is one unit whatever connector the name starts or ends with; (no project) and other projects are words', () => {
+  const units = (s: string): string[] => JSON.parse(String(nodeVm.runInContext(
+    'JSON.stringify(Array.from(' + JSON.stringify(s) + '.matchAll(FIGURE_RUN)).filter(function (m) { return m.groups.name === undefined || FIGURE_NAME_UNIT.test(m[0]); }).map(function (m) { return Object.keys(m.groups).filter(function (k) { return m.groups[k] !== undefined; })[0] + ":" + m[0]; }))', ctx)))
+  const cases: Array<[string, string[]]> = [
+    ['كلمة p:8f31c0a4e2b1 كلمة', ['name:p:8f31c0a4e2b1']],
+    ['كلمة B_ro-App كلمة', ['name:B_ro-App']],
+    ['(token-pace، shared-repo، my.app@v2:x، Mein_Projekt)', ['name:token-pace', 'name:shared-repo', 'name:my.app@v2:x', 'name:Mein_Projekt']],
+    ['كلمة p:0123456789ab: 4', ['name:p:0123456789ab', 'figure:4']],
+  ]
+  for (const [s, want] of cases) assert.deepEqual(units(s), want, s)
+  // A name the grammar would take only in part: the page's span makes the whole label the unit, by the DOM API.
+  const fig = (s: string, long = false): string => '<span class="pname fig' + (long ? ' long' : '') + '" dir="ltr">' + s + '</span>'
+  const names = ['_-app', '-build', 'build-', '@scope', 'p:8f31c0a4e2b1', 'a'.repeat(30) + '-x']
+  const html = names.map((n) => '<button data-act="project"><span class="pname">' + n + '</span></button>').join('')
+    + '<button data-act="project" data-project="">كلمة</button>'
+  const out = isolated(html)
+  assert.equal(out, names.map((n) => '<button data-act="project">' + fig(n, n.length > 24) + '</button>').join('')
+    + '<button data-act="project" data-project="">كلمة</button>')
+  // Again, nothing moves; left to right the page is left as it is; the text is never touched.
+  assert.equal(isolated(out), out)
+  assert.equal(isolated(html, 'ltr'), html)
+  // The two words have no span: a translation's words in the page's direction.
+  assert.equal(String(nodeVm.runInContext('projectName("", "(no project)") + "|" + projectName("*", "other projects") + "|" + projectName("' + PK[0] + '", "p:' + PK[0] + '")', ctx)),
+    '(no project)|other projects|<span class="pname">p:' + PK[0] + '</span>')
+})
+
+test('1.14 A9: a chip of the filter bar pressed by the keyboard keeps the focus across the push that answers it — the Projects row\'s by its key (the "(no project)" chip\'s \'\' among them), the Models row\'s by its model, the fold and clear buttons by what they do; a control that is gone takes it nowhere', () => {
+  interface El { dataset: Record<string, string>; focus: () => void }
+  let drawn: El[] = []
+  let active: El | null = null
+  const focused: string[] = []
+  const body = {
+    set innerHTML(h: string) {
+      drawn = [...h.matchAll(/<button ([^>]*)>/g)].map((m) => {
+        const dataset: Record<string, string> = {}
+        for (const a of m[1].matchAll(/data-([a-z]+)="([^"]*)"/g)) dataset[a[1]] = a[2]
+        const e: El = { dataset, focus: () => { active = e; focused.push(JSON.stringify(dataset)) } }
+        return e
+      })
+    },
+    get innerHTML(): string { return '' },
+    dataset: {}, style: {},
+    contains: (el: unknown) => drawn.includes(el as El),
+    querySelectorAll: (sel: string) => (sel === '[data-act]' ? drawn : []),
+  }
+  const doc: Record<string, unknown> = {
+    addEventListener: () => undefined, getElementById: () => null, querySelectorAll: () => [],
+    querySelector: (s: string) => (s === '[data-body="controls"]' ? body : null),
+    get activeElement() { return active },
+  }
+  const c = nodeVm.createContext({ acquireVsCodeApi: () => ({ postMessage: () => undefined }), document: doc, window: { addEventListener: () => undefined }, console })
+  nodeVm.runInContext(SCRIPT, c)
+  const models = { rows: [modelRow()], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } }
+  const draw = (pressed: number[]): void => {
+    ;(c as Record<string, unknown>).fixture = model({ models,
+      projectFilter: { chips: [projectChip(0, pressed.includes(0)), projectChip(1, pressed.includes(1)), { key: '', label: '(no project)', pressed: pressed.includes(2) }] } })
+    nodeVm.runInContext('vm = fixture; renderSection("controls");', c)
+  }
+  draw([])
+  const on = (pick: (e: El) => boolean): void => { active = drawn.find(pick) ?? null; assert.ok(active, 'no such control'); focused.length = 0 }
+  // Space on a chip: the host answers with the bar drawn anew, the chip pressed — the focus on the new chip.
+  on((e) => e.dataset.act === 'project' && e.dataset.project === PK[1])
+  draw([1])
+  assert.deepEqual(focused, [JSON.stringify({ act: 'project', project: PK[1] })])
+  on((e) => e.dataset.act === 'project' && e.dataset.project === '')
+  draw([1, 2])
+  assert.deepEqual(focused, [JSON.stringify({ act: 'project', project: '' })])
+  on((e) => e.dataset.act === 'model')
+  draw([1, 2])
+  assert.deepEqual(focused.map((f) => JSON.parse(f).act), ['model'])
+  // The clear button is gone once nothing is pressed: the focus goes nowhere, as for every control that is gone.
+  on((e) => e.dataset.act === 'clearProjects')
+  draw([])
+  assert.deepEqual(focused, [])
 })

@@ -64,7 +64,7 @@ export interface ExplainInput {
   formatTime: (ms: number) => string
   /**
    * 1.14 B1 (R1-F7-113): the clock of the reset a full window waits for, as the bar and the notifications write it —
-   * `resetClock`'s form: the weekday in front a day or more ahead ("Thu 06:00"), the clock alone today ("06:00"). A
+   * `resetClock`'s form: the weekday in front a day or more ahead ("Th 06:00"), the clock alone today ("06:00"). A
    * seven-day window's reset three days away is no clock of today.
    */
   resetClock: (ms: number) => string

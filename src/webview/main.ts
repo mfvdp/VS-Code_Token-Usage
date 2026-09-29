@@ -3630,7 +3630,12 @@ function promptAfter(body: Element | null, keep: PromptKeep): void {
   const text = promptFlashText();
   if (keep.flash && fresh && fresh !== keep.flash && fresh.parentNode) {
     fresh.parentNode.replaceChild(keep.flash, fresh);
-    if (keep.flash.textContent !== text) setText(keep.flash, text);
+    // 1.14 Review 1 F1: the kept node holds its words as the glue pass drew them (a no-break space after a label's
+    // colon — hu "terminál: 1 / 2", pl and ro "promptów: 50", "prompturi: 50"), so the raw text never equalled it and
+    // every push during the flash rewrote the live region, which a screen reader may announce again. The same words in
+    // either form rewrite nothing; setText glues the way the pass does.
+    const have = keep.flash.textContent;
+    if (have !== text && have !== glueLabelText(text)) setText(keep.flash, text);
   }
   const d = promptDraft;
   if (d) {

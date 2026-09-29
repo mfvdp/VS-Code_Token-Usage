@@ -1407,13 +1407,19 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
     },
   },
   T17: {
-    title: 'the wraps — a hard-wrapped value keeps the English\'s line count, each line at most 100 characters; a paragraph value and a manifest value with a line break inside a paragraph keep the English\'s line count (1.14 B3)',
+    title: 'the wraps — a hard-wrapped value keeps the English\'s line count, each line at most 100 characters; a paragraph value and a manifest value with a line break inside a paragraph keep the English\'s line count; a value whose English is one line stays one line (1.14 B3; Review 1 F3)',
     // A key on the pending list is exempt while it is listed: its English changed, or the ledger asks the language to
     // re-wrap it (1.14 P1's review entries), and its package writes it again.
+    // 1.14 Review 1 F3: a value whose English holds no line break holds none — a translation that hard-wraps a one-line
+    // value passed every rule before (T5 holds the paragraph breaks only); none does today.
     rule: (s, l) => {
       const out: string[] = []
       for (const [k, v] of entries(l.bundle)) {
-        if (!k.includes('\n') || pendingKey(l, k) !== null) continue
+        if (pendingKey(l, k) !== null) continue
+        if (!k.includes('\n')) {
+          if (v.includes('\n')) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} has ${v.split('\n').length} line(s), its key one — a value whose English is one line stays one line`)
+          continue
+        }
         const want = k.split('\n')
         const have = v.split('\n')
         const hard = want.every((x) => graphemes(x) <= HARD_WRAP_MAX)
@@ -1426,6 +1432,10 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
         })
       }
       for (const [k, en, v] of nlsEntries(s, l)) {
+        if (!en.includes('\n')) {
+          if (v.includes('\n')) out.push(`${l.id}: ${NLS(l)}: ${k} has ${v.split('\n').length} line(s), the English one — a value whose English is one line stays one line`)
+          continue
+        }
         if (!en.replace(/\n\n/g, '').includes('\n')) continue
         const [have, want] = [v, en].map((x) => x.split('\n').length)
         if (have !== want) out.push(`${l.id}: ${NLS(l)}: ${k} has ${have} line(s), the English ${want} — a line break inside a paragraph (a fenced example, a list of links) stays`)
@@ -3071,6 +3081,19 @@ test('T17 catches a hard-wrapped value with a line more, a line of 101 character
   })
   const want = src().english[links].split('\n').length
   caught('T17', ar, 'ar', arClean, `package.nls.ar.json: ${links} has ${want - 1} line(s), the English ${want}`)
+  // (d) 1.14 Review 1 F3: a value whose English is one line stays one line — a runtime key and a manifest key of Arabic,
+  // neither on its list, each given a line break; the files on disk hold none (the test below).
+  const arLang = loadLang(ROOT, 'ar')
+  const breakOne = (v: string): string => { const i = v.indexOf(' ', 20); assert.ok(i > 0 && !v.includes('\n'), v); return `${v.slice(0, i)}\n${v.slice(i + 1)}` }
+  const oneLine = keyWhere((k) => !k.includes('\n') && k.length > 60 && pendingKey(arLang, k) === null && (arLang.bundle?.[k] ?? '').indexOf(' ', 20) > 0)
+  const arOne = realFiles('ar')
+  editKey(arOne, 'ar', oneLine, breakOne)
+  caught('T17', arOne, 'ar', arClean, `${J(oneLine)} has 2 line(s), its key one — a value whose English is one line stays one line`)
+  const manifestOne = Object.entries(src().english).find(([k, v]) => !v.includes('\n') && v.length > 60 && pendingKey(arLang, k) === null && (arLang.nls?.[k] ?? '').indexOf(' ', 20) > 0)
+  assert.ok(manifestOne, 'no one-line manifest value off the list')
+  const arNls = realFiles('ar')
+  edit(arNls, 'package.nls.ar.json', (t) => { t[manifestOne![0]] = breakOne(t[manifestOne![0]]) })
+  caught('T17', arNls, 'ar', arClean, `package.nls.ar.json: ${manifestOne![0]} has 2 line(s), the English one — a value whose English is one line stays one line`)
 })
 
 test('T17 over the files on disk: every language, German among them, keeps the English\'s wraps — the German three re-wrapped (R3-N2-113), Arabic, Hebrew and Persian as 1.13 wrote them, and what a language of 1.9 or 1.11 wrapped otherwise on its list for review, held to the rule at the join; the keys counted (1.14 B3 rules 2, 3)', () => {
@@ -3751,7 +3774,7 @@ test('the brief\'s 1.14 sections: your pending list — the ledger\'s start, the
     '`projects ({0}) ▾`', '`models ({0}) ▾`',
     '**The list separator**', '`{0}, {1}`', 'Arabic and Persian `،`', 'Chinese and Japanese `、` or `,`', 'Never a direction mark',
     '**The clock stamps**', '[1.14: clock stamps](#114-clock-stamps)',
-    '**The reset in the explanation**', '`{0} % used — over the limit until the reset at {1}.`', '`{0} % used — exhausted until the reset at {1}.`', '`Thu 06:00`',
+    '**The reset in the explanation**', '`{0} % used — over the limit until the reset at {1}.`', '`{0} % used — exhausted until the reset at {1}.`', '`Th 06:00`',
     '**The bar\'s sentences**', '`config.timeProgressStyle.description`', '`walkthrough.getStarted.readTheBar.description`', 'by reaching the marker',
     'translate anew', 'stay open', 'Not a native speaker: the translations are an AI agent\'s.', 'node scripts/nls-sources.mjs <id>',
     'test ! -e l10n/pending/<id>.json',

@@ -10644,6 +10644,32 @@ test('the flash line is one live region for the page\'s life: a push changes its
   assert.equal(p.q('.pr-flash'), line, 'a whole render replaced the live region')
 })
 
+test('1.14 Review 1 F1: the kept live region holds its words as the glue pass drew them — a no-break space after a label\'s colon —, and a push with the same flash rewrites nothing in either form; a new flash changes the words (1.10 §3 A2 rule 1; 1.14 §3 B5)', () => {
+  const p = promptPage()
+  const line = p.q('.pr-flash') as FEl
+  const text = 'Sent to Claude Code, terminal: 1 / 2.'
+  const glued = 'Sent to Claude Code, terminal:\u00a01 / 2.'
+  assert.equal(nodeVm.runInContext('glueLabelText', p.c)(text), glued, 'the case: a label\'s join inside the flash')
+  p.push(promptsVm({ flash: { text, ok: true } }))
+  assert.equal(p.q('.pr-flash'), line)
+  assert.equal(line.textContent, text)
+  // The fake DOM has no text nodes for the pass to glue; in the browser the pass leaves the region with the glued words.
+  line.textContent = glued
+  const node = line.nodes[0]
+  p.push(promptsVm({ flash: { text, ok: true } }))
+  assert.equal(p.q('.pr-flash'), line, 'the live region was replaced')
+  assert.equal(line.nodes[0], node, 'the same flash rewrote the live region (before the fix: on every push, in hu, pl, ro and uk)')
+  assert.equal(line.textContent, glued)
+  // The raw words the same: nothing rewritten either.
+  line.textContent = text
+  const raw = line.nodes[0]
+  p.push(promptsVm({ flash: { text, ok: true } }))
+  assert.equal(line.nodes[0], raw, 'the same raw words rewrote the live region')
+  // A new flash changes the words.
+  p.push(promptsVm({ flash: { text: 'Sent to Claude Code, terminal: 2 / 2.', ok: true } }))
+  assert.equal(line.textContent, 'Sent to Claude Code, terminal: 2 / 2.')
+})
+
 test('a push that comes while a pointer is pressed waits for its click: the element pressed is the element clicked (1.10 §3 A2 rule 3)', () => {
   const p = promptPage()
   const send = p.send('s-stop')

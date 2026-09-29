@@ -152,8 +152,8 @@ that language's bar prints for the fixture the test and the brief document — i
 weekday and its 12-hour clock —, the English's included —, since 1.13, T16 for the direction: no bidi control
 in a value, no digit of another script, no Arabic presentation form, a placeholder only as `{n}` with ASCII digits —
 and, since 1.14, T17 for the wraps: a value whose English is hard-wrapped keeps its number of lines, each at most 100
-characters (`HARD_WRAP_MAX`, counted in grapheme clusters), and a paragraph value or a manifest value with a line break
-inside a paragraph keeps its number of lines.
+characters (`HARD_WRAP_MAX`, counted in grapheme clusters), a paragraph value or a manifest value with a line break
+inside a paragraph keeps its number of lines, and a value whose English is one line stays one line.
 Every rule also runs once against a synthetic
 language in a temporary directory — the German under another id, and the English with every word turned
 into 語 (since 1.11 also into शुक्र, under `hi`, and since 1.13 into كلمة with every `→` turned `←`, under `ar`) —

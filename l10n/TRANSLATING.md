@@ -524,7 +524,7 @@ key on the list, then `node scripts/merge-l10n.mjs`, `node scripts/nls-sources.m
    word before the slot, keep it or change it, and say which.
 5. **The reset in the explanation** (`review`): `{0} % used — over the limit until the reset at {1}.` and
    `{0} % used — exhausted until the reset at {1}.` — their slot `{1}` holds the reset's weekday a day or more ahead
-   (`Thu 06:00`) from 1.14 on, as the reset-clock slots of [1.13: your pending list](#113-your-pending-list) do: a label or
+   (`Th 06:00`) from 1.14 on, as the reset-clock slots of [1.13: your pending list](#113-your-pending-list) do: a label or
    brackets before it, never a clock-only preposition (German „bis zum Reset ({1})"). The explanation of a reset that has
    passed, `The stated reset ({0}) has passed …`, holds a clock stamp from 1.14 on — one of the keys of
    [1.14: clock stamps](#114-clock-stamps).
@@ -603,6 +603,7 @@ otherwise. **T17** holds it from 1.14 on, in every language, German included:
   as T13 counts);
 * a value whose English has a longer line — the Keychain paragraph, whose lines reach 236 — is a **paragraph**: exactly as
   many lines as the English, no length rule;
+* a value whose English is **one line** stays one line — no line break where the English has none (Review 1 of 1.14);
 * a manifest value whose English has a line break inside a paragraph — a fenced JSON example, the walkthrough's list of
   command links — keeps the English's number of lines.
 
@@ -704,8 +705,8 @@ each failure names the language, the file and the key:
 * **T17 · Wraps** (1.14) — a value whose English is hard-wrapped (a line break, every English line at most 100
   characters) has as many lines as the English, each at most 100 characters, counted in grapheme clusters; a paragraph
   value (an English line longer than that) and a manifest value with a line break inside a paragraph (a fenced example, a
-  list of links) have as many lines as the English. A key on your pending list is exempt until it is done
-  ([1.14: hard wraps are a rule now](#114-hard-wraps-are-a-rule-now)).
+  list of links) have as many lines as the English; a value whose English is one line stays one line. A key on your
+  pending list is exempt until it is done ([1.14: hard wraps are a rule now](#114-hard-wraps-are-a-rule-now)).
 
 A rule that is wrong about a string — English that is right to keep, say — is **reported with its
 key**, not worked around and not edited: the lead extends `SAME_IN_EVERY_LANGUAGE` when the languages

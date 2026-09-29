@@ -2672,11 +2672,18 @@ function agentLabel(n: Payload, kind: string): string {
   // The separators are parts of their own, which never give way, so a part cut short keeps its
   // dot and its space in front of the next one — but the model's, which goes with it.
   const dot = '<span class="ag-dot"> · </span>';
+  // 1.13 fix pass 2 (Review L C-F1): the model's and the project's dot go with them, inside their
+  // part, and the identifier after it stands in a span of its own (`ag-lid`) — the part's text is the
+  // same, " · opus-4-6"; a left-to-right page lays it out as before (the span no box of its own
+  // there, `display: contents`: its text is its part's). A right-to-left page lays that span out
+  // left to right, cut at its own end (src/dashboard.ts, the `[dir="rtl"]` identifier rules):
+  // "opus-…", never "…-6".
+  const lid = (html: string): string => ' · <span class="ag-lid">' + html + '</span>';
   let body: string;
   if ((kind === 'agent' || kind === 'pending') && parts.length >= 2) {
     const model = parts.slice(1, -1).join(' · ');
     body = part('ag-np ag-type', orDash(parts[0]))
-      + (model ? part('ag-np ag-model', ' · ' + orDash(model)) : '') + dot
+      + (model ? part('ag-np ag-model', lid(orDash(model))) : '') + dot
       + (kind === 'agent' ? part('ag-sid', orDash(parts[parts.length - 1])) : part('ag-np ag-end', orDash(parts[parts.length - 1])));
   } else if ((kind === 'session' || kind === 'workflow') && parts.length >= 2) {
     const id = parts.pop() as string;
@@ -2691,7 +2698,7 @@ function agentLabel(n: Payload, kind: string): string {
   }
   return '<span class="ag-label"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + body
     // The project's dot goes with it: it gives way first, and whole.
-    + (sub ? '<span class="ag-proj"> · ' + esc(sub) + '</span>' : '')
+    + (sub ? '<span class="ag-proj">' + lid(esc(sub)) + '</span>' : '')
     + '</span>';
 }
 
@@ -4413,7 +4420,12 @@ function fitAgentNames(): void {
   models.forEach(m => { if (m.classList) m.classList.remove('ag-gone'); });
   const off: HTMLElement[] = [];
   models.forEach(m => {
-    if (typeof m.getBoundingClientRect !== 'function' || !(m.scrollWidth > m.clientWidth + 0.5)) return;
+    // 1.13 fix pass 2 (Review L C-F1): right to left the model's id is cut in its own box (`ag-lid`, a
+    // box there only: left to right it is none, `display: contents`, of no width to measure) — the part
+    // itself then holds its dot and that box, and overflows no more.
+    const id = typeof m.querySelector === 'function' ? m.querySelector<HTMLElement>(':scope > .ag-lid') : null;
+    const cut = m.scrollWidth > m.clientWidth + 0.5 || (!!id && id.clientWidth > 0 && id.scrollWidth > id.clientWidth + 0.5);
+    if (typeof m.getBoundingClientRect !== 'function' || !cut) return;
     const size = (typeof getComputedStyle === 'function' ? parseFloat(getComputedStyle(m).fontSize) : NaN) || 13;
     // " · …": the dot and its two spaces, and the ellipsis — 1.9 of the font's size.
     if (m.getBoundingClientRect().width < size * AGENT_MODEL_ROOM_EM) off.push(m);

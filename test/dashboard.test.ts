@@ -3900,25 +3900,32 @@ const WEEK_TOGGLE = '<button class="ag-wkbtn" data-act="agentsWeek" aria-expande
 /** The separator between two parts of a name: a part of its own, which never gives way. */
 const DOT = '<span class="ag-dot"> · </span>'
 /**
+ * 1.13 fix pass 2 (Review L C-F1): a model's or a project's part — its dot, whole, then its identifier alone in a span of its
+ * own (`ag-lid`), which a right-to-left page lays out left to right and cuts at its end.
+ */
+const LID = (id: string): string => ' · <span class="ag-lid">' + id + '</span>'
+/**
  * An agent's first line as the page writes it (1.6 P7b), titled with the whole name: its type,
  * which never gives way, its model, which gives way first — its dot with it —, and its short id
  * in the dim tone, which never gives way either. A launch has its last word in the id's place,
- * whole, and not dimmed.
+ * whole, and not dimmed. 1.13 fix pass 2 (Review L C-F1; pinned and changed: the model's part was
+ * ' · ' + the model): the model's id in a span of its own after its dot (LID).
  */
 function albl(title: string, type: string, model: string, id: string, launch = false): string {
   return '<span class="ag-label" title="' + title + '"><span class="ag-np ag-type">' + type + '</span>'
-    + '<span class="ag-np ag-model"> · ' + model + '</span>' + DOT
+    + '<span class="ag-np ag-model">' + LID(model) + '</span>' + DOT
     + (launch ? '<span class="ag-np ag-end">' + id + '</span>' : '<span class="ag-sid">' + id + '</span>') + '</span>'
 }
 /**
  * A session's or a run's first line (1.6 P7b): its prefix word and the time it is named by — the
  * space in front of the time with it —, which stay whole, then its short id in the dim tone,
- * which gives way (`ag-give`) after a session's project and before the prefix word.
+ * which gives way (`ag-give`) after a session's project and before the prefix word. 1.13 fix pass
+ * 2 (Review L C-F1; pinned and changed): the project's name in a span of its own after its dot (LID).
  */
 function slbl(title: string, pre: string, when: string, id: string, proj = ''): string {
   return '<span class="ag-label" title="' + title + '"><span class="ag-np ag-pre">' + pre + '</span>'
     + '<span class="ag-np ag-when"> ' + when + '</span>' + DOT + '<span class="ag-sid ag-give">' + id + '</span>'
-    + (proj ? '<span class="ag-proj"> · ' + proj + '</span>' : '') + '</span>'
+    + (proj ? '<span class="ag-proj">' + LID(proj) + '</span>' : '') + '</span>'
 }
 /** A name of one part — a collector's words — on an ellipsis where it has no room. */
 function olbl(title: string, name: string): string {
@@ -4399,7 +4406,7 @@ test('an opened node shows its children closed in turn, each with its tally; a s
   // Opened, the session still names its project and shows its tally (1.6 N1) — before its span
   // (1.6 P7b) —: what failed or is still unknown among its agents is not something to count off the
   // rows once they show.
-  assert.ok(one.indexOf('<span class="ag-proj"> · repo</span></span>') >= 0, one)
+  assert.ok(one.indexOf('<span class="ag-proj">' + LID('repo') + '</span></span>') >= 0, one)
   assert.ok(one.indexOf(tallyThen(T_S1, S1_SPAN)) >= 0, one)
   assert.ok(one.indexOf(itemTag(AK.wf, { kind: 'workflow', level: 2, size: 2, pos: 1, expanded: false, label: 'Workflow run Tue 11:40 · cfe7718d, running, derived, 2 started, 1 done, about 1 running' })
     + '<div class="ag-line">' + foldOf(AK.wf)) >= 0, one)
@@ -6119,7 +6126,7 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     }
     if (n.kind === 'agent') {
       const [type, model] = n.label.split(' · ')
-      assert.ok(row.indexOf('<span class="ag-np ag-type">' + type + '</span><span class="ag-np ag-model"> · ' + model + '</span>') >= 0, row)
+      assert.ok(row.indexOf('<span class="ag-np ag-type">' + type + '</span><span class="ag-np ag-model">' + LID(model) + '</span>') >= 0, row)
     }
   }
   // 1.6 L1: every item of the tree the builder made — its level, its place among its siblings and
@@ -11302,6 +11309,19 @@ const DIR_RULES: ReadonlyArray<readonly [string, string]> = [
   ['[dir="rtl"]', '--tp-closed: "◂"'],
 ]
 
+/**
+ * 1.13 fix pass 2 (Review L C-F1): the one named exception beside DIR_RULES — the rules of a right-to-left page only that
+ * lay a tree label's Latin identifier out left to right in a box of its own, so the name cuts it at its end ("opus-…",
+ * never "…-6" — Review L's common part, finding 1). No side of the page: a text's own reading direction, which no logical
+ * property states; the left-to-right page has none of them (the identifier's span no box there — display: contents —, the
+ * parts' boxes as 1.12 drew them). In the stylesheet's order, after the name's own rules.
+ */
+const DIR_RULES_IDENT: ReadonlyArray<readonly [string, string]> = [
+  ['[dir="rtl"] .ag-label > :is(.ag-model, .ag-proj)', 'display: flex'],
+  ['[dir="rtl"] .ag-label > :is(.ag-model, .ag-proj) > .ag-lid', 'display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: ltr; unicode-bidi: isolate'],
+  ['[dir="rtl"] .ag-label > .ag-sid', 'direction: ltr; unicode-bidi: isolate'],
+]
+
 /** The stylesheet's rules, comments out: each selector (an @media rule's prefixed with its condition) and its declarations. */
 function styleRules(css: string): Array<{ sel: string; decls: Array<[string, string]> }> {
   const out: Array<{ sel: string; decls: Array<[string, string]> }> = []
@@ -11393,7 +11413,7 @@ function physicalFound(rules: Array<{ sel: string; decls: Array<[string, string]
   return found
 }
 
-test('1.13 A2 rule 2 (§7a Q2): the stylesheet is in logical properties — no physical side, offset, corner, alignment or float outside the charts\' own rules and the measured popover, each kept with its reason; the two [dir="rtl"] rules and no other', () => {
+test('1.13 A2 rule 2 (§7a Q2): the stylesheet is in logical properties — no physical side, offset, corner, alignment or float outside the charts\' own rules and the measured popover, each kept with its reason; the two [dir="rtl"] rules, the identifiers\' three (1.13 fix pass 2, Review L C-F1) and no other', () => {
   const rules = styleRules(STYLE)
   assert.ok(rules.length > 300, String(rules.length))
   // Every physical declaration of the page, by selector and property: only the kept ones (1.13 P4: the pair, Review 1 F4).
@@ -11413,9 +11433,10 @@ test('1.13 A2 rule 2 (§7a Q2): the stylesheet is in logical properties — no p
     assert.ok(body.includes(now), `${sel}: ${now} — ${body}`)
     for (const d of before.split('; ')) assert.equal(body.split('; ').includes(d), false, `${sel}: ${d} — ${body}`)
   }
-  // The two rules CSS has no logical form for, each once — and nothing else of the stylesheet names a direction.
+  // The two rules CSS has no logical form for, each once — and nothing else of the stylesheet names a direction. 1.13 fix
+  // pass 2 (pinned and changed: DIR_RULES alone): but the one named exception, the identifiers' three (DIR_RULES_IDENT).
   const dirRules = rules.filter((r) => /\[dir|:dir\(/.test(r.sel))
-  assert.deepEqual(dirRules.map((r) => [r.sel, r.decls.map(([p, v]) => `${p}: ${v}`).join('; ')]), DIR_RULES.map(([s, d]) => [s, d]))
+  assert.deepEqual(dirRules.map((r) => [r.sel, r.decls.map(([p, v]) => `${p}: ${v}`).join('; ')]), [...DIR_RULES, ...DIR_RULES_IDENT].map(([s, d]) => [s, d]))
   // The closed disclosure's two glyphs: ▸ left to right, ◂ right to left.
   assert.deepEqual(rules.filter((r) => r.decls.some(([p]) => p === '--tp-closed')).map((r) => [r.sel, r.decls]),
     [[':root', [['--tp-closed', '"▸"']]], ['[dir="rtl"]', [['--tp-closed', '"◂"']]]])
@@ -11880,4 +11901,125 @@ test('1.13 A3 rule 3, A2 rule 8 (3.0(f)): the pseudo-RTL page rendered whole int
   assert.equal(PAGE_BIDI_CONTROLS.test(rtl.html), false)
   // Taken off again, the units leave the twin's markup: the DOM a screen reader reads is one order in both directions.
   assert.equal(unFig(rtl.html).split(' dir="rtl"').join('').replace(/(<span class="meta cap">[^<]*<span class="nobr">[^<]*<\/span>) ← /, '$1 → '), ltr.html)
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 1.13 fix pass 2 after Review L (common part, finding 1 — C-F1): a tree label's Latin identifier keeps its start right to
+// left. A part of a name that gives way (1.6 P7b) is cut on an ellipsis at its inline end — right to left its left —, so at
+// 260 px a model id, a project or a short id lost its beginning there: "…-6" for opus-4-6, "…a" for alpha, "…d" for a run's
+// cfe7718d. The identifier stands alone in a span of its own after its part's dot (a model's, a project's: `ag-lid`; a
+// short id's part holds its id alone already), and the right-to-left page's rules lay it out left to right in a box of its
+// own (DIR_RULES_IDENT), cut at its end; the harness measures the characters seen (research/webview-check, block
+// "1.13 P7", README "Updated for 1.13 fix pass 2").
+// ---------------------------------------------------------------------------------------------------------------------
+
+test('1.13 fix pass 2 (Review L C-F1): a tree label\'s identifier stands alone in a span of its own after its dot — a model\'s and a project\'s (ag-lid), a short id\'s part itself —, the dot a text node of its part, outside it; one script writes the one markup for English, German and a right-to-left page, and left to right it is 1.12\'s but for that span', () => {
+  // One script for every page but its words (L10N, LOCALE) — the direction comes from the root —, so the English and the
+  // German page write the tree's labels alike, and a right-to-left page too.
+  const codeOf = (h: string): string => between(h, /<script nonce="[A-Za-z0-9]+">/, '</script>')
+    .replace(/^const L10N = .*$/m, '').replace(/^let LOCALE = .*$/m, '')
+  assert.equal(codeOf(germanPage()), codeOf(PAGE))
+  assert.equal(codeOf(rtlPage('rtl')), codeOf(PAGE))
+  assert.notEqual(codeOf(PAGE), SCRIPT)
+  const drawn = (d: 'ltr' | 'rtl'): string => {
+    const a = agentCtx()
+    if (d === 'rtl') nodeVm.runInContext("DIR = 'rtl'", a.c)
+    assert.equal(nodeVm.runInContext('DIR', a.c), d)
+    return treePart(agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.s1, AK.wf] }) }))
+  }
+  const ltr = drawn('ltr'), rtl = drawn('rtl')
+  // The same markup either way: a label names no direction of its own (the stylesheet's [dir="rtl"] rules lay it out).
+  assert.equal(rtl, ltr)
+  // Into a document, right to left (isolateFigures makes its units there): each model's and project's part is its dot,
+  // whole, as a text node of its own, then the identifier's span alone; a short id's part its id alone.
+  const m = miniCtx('rtl')
+  m.root.innerHTML = rtl
+  ;(m.c as Record<string, unknown>).scope = m.root
+  nodeVm.runInContext('isolateFigures(scope)', m.c)
+  const parts = miniAll(m.root).filter((e) => e.className === 'ag-label')
+    .flatMap((l) => l.childNodes.filter((x): x is MEl => x.nodeType === 1))
+  const of = (c: string): MEl[] => parts.filter((p) => new RegExp('(?:^| )ag-' + c + '(?: |$)').test(p.className))
+  const models = of('model'), projs = of('proj'), sids = of('sid')
+  assert.ok(models.length >= 3 && projs.length >= 1 && sids.length >= 3, JSON.stringify([models.length, projs.length, sids.length]))
+  const ids: string[] = []
+  for (const p of [...models, ...projs]) {
+    assert.equal(p.childNodes.length, 2, p.className)
+    const [dot, id] = p.childNodes
+    assert.equal(dot.nodeType, 3)
+    assert.equal((dot as MText).data, ' · ')
+    assert.equal((id as MEl).className, 'ag-lid')
+    ids.push(id.textContent)
+  }
+  for (const p of sids) ids.push(p.textContent)
+  assert.ok(ids.includes('repo') && ids.includes('cfe7718d') && ids.some((x) => /^opus-/.test(x)), JSON.stringify(ids))
+  assert.ok(ids.every((x) => x !== '' && x === x.trim() && !x.includes('·')), JSON.stringify(ids))
+  // Left to right the identifier's span is no box of its own (display: contents — the next test): taken off, the markup is
+  // 1.12's — " · " and the identifier in one text of its part. That span is the whole difference.
+  const n = ltr.split('<span class="ag-lid">').length - 1
+  assert.equal(n, models.length + projs.length)
+  const was = ltr.replace(/<span class="ag-lid">([^<]*)<\/span>/g, '$1')
+  assert.equal(/ag-lid/.test(was), false)
+  assert.ok(was.includes('<span class="ag-proj"> · repo</span>'), was)
+  assert.ok(/<span class="ag-np ag-model"> · opus-[^<]+<\/span><span class="ag-dot"> · <\/span><span class="ag-sid">/.test(was), was)
+  assert.equal(was.replace(/<[^>]+>/g, ''), ltr.replace(/<[^>]+>/g, ''))
+})
+
+test('1.13 fix pass 2 (Review L C-F1): the identifiers\' rules are the right-to-left page\'s — the model\'s and the project\'s part a row of its own (its dot, then the identifier giving way), the identifier laid out left to right in a box of its own, cut at its end, and the short id\'s part left to right; left to right the identifier\'s span is no box (display: contents) and the name keeps 1.12\'s rules', () => {
+  const rules = styleRules(STYLE)
+  // Exactly the three, in the stylesheet, after the name's own rules.
+  for (const [sel, body] of DIR_RULES_IDENT) {
+    const r = rules.filter((x) => x.sel === sel)
+    assert.equal(r.length, 1, sel)
+    assert.equal(r[0].decls.map(([p, v]) => `${p}: ${v}`).join('; '), body)
+  }
+  assert.ok(STYLE.indexOf('[dir="rtl"] .ag-label > :is(.ag-model, .ag-proj) { display: flex; }') > STYLE.indexOf('.ag-label > .ag-gone {'))
+  // Left to right the identifier's span is no box of its own — its text its part's, the name's boxes 1.12's, nothing of
+  // it to cut or to paint past an edge —: the one rule of that page that names it (the details panel's copyable ids are
+  // .ag-id, another span). Every rule that sets a direction on a name's part is a right-to-left one.
+  assert.deepEqual(rules.filter((r) => /\.ag-lid\b/.test(r.sel) && !r.sel.startsWith('[dir="rtl"] ')).map((r) => [r.sel, r.decls]),
+    [['.ag-label > :is(.ag-model, .ag-proj) > .ag-lid', [['display', 'contents']]]])
+  assert.ok(STYLE.indexOf('.ag-label > :is(.ag-model, .ag-proj) > .ag-lid { display: contents; }') < STYLE.indexOf('[dir="rtl"] .ag-label > :is(.ag-model, .ag-proj) > .ag-lid {'))
+  assert.deepEqual(rules.filter((r) => /\.ag-label/.test(r.sel) && !r.sel.startsWith('[dir="rtl"] ')
+    && r.decls.some(([p]) => p === 'direction' || p === 'unicode-bidi')).map((r) => r.sel), [])
+  // 1.12's rules for the name, unchanged: the parts' giving way, their order and their least widths.
+  assert.match(STYLE, /\n\.ag-label > span \{ flex: none; overflow: hidden; white-space: pre; text-overflow: ellipsis; \}\n/)
+  assert.match(STYLE, /\n\.ag-label > \.ag-proj \{ flex-shrink: 1000000000000; min-width: 0; color: var\(--dim\); \}\n/)
+  assert.match(STYLE, /\n\.ag-label > \.ag-model \{ flex-shrink: 1000000; min-width: 0; \}\n/)
+  assert.match(STYLE, /\n\.ag-label > \.ag-give \{ flex-shrink: 1000000; min-width: 1\.5em; \}\n/)
+  assert.match(STYLE, /\n\.ag-label > \.ag-sid \{ color: var\(--dim\); \}\n/)
+  // The short id's rule sets no least width: a run's short id keeps .ag-give's 1.5em right to left as left to right.
+  assert.equal(rules.find((r) => r.sel === '[dir="rtl"] .ag-label > .ag-sid')!.decls.some(([p]) => p === 'min-width'), false)
+})
+
+test('1.13 fix pass 2 (Review L C-F1): right to left a model\'s id is cut in its own box — fitAgentNames reads the cut there, where the part holds its dot and that box and overflows no more: off the name whole with less room than its dot and the ellipsis, left alone with room; left to right the span is no box, of no width, and the part is read as before', () => {
+  const a = agentCtx()
+  const doc = (a.c as Record<string, unknown>).document as Record<string, unknown>
+  const el = (width: number, clientWidth: number, scrollWidth: number) => ({ width, clientWidth, scrollWidth })
+  const model = (part: { width: number; clientWidth: number; scrollWidth: number }, lid: { width: number; clientWidth: number; scrollWidth: number } | null) => {
+    const cls = new Set<string>()
+    const m = {
+      ...part, cls,
+      getBoundingClientRect: () => ({ width: m.width }),
+      querySelector: (q: string) => (q === ':scope > .ag-lid' ? lid : null),
+      classList: { contains: (c: string) => cls.has(c), add: (c: string) => { cls.add(c) }, remove: (c: string) => { cls.delete(c) } },
+    }
+    return m
+  }
+  // Right to left: the part fits (its dot and the id's box), its id's box is cut. 13 px: the room is 24.7 px.
+  const rtlSliver = model(el(20, 20, 20), el(8.4, 8, 50))
+  const rtlTight = model(el(36.8, 36, 36), el(25.2, 25, 50))
+  const rtlWhole = model(el(62.9, 62, 62), el(51.3, 51, 51))
+  // Left to right: the span no box (display: contents) — clientWidth and scrollWidth 0 —, the part cut as in 1.12.
+  const ltrSliver = model(el(7.1, 7, 63), el(0, 0, 0))
+  const ltrTight = model(el(24.8, 24, 63), el(0, 0, 0))
+  const ltrWhole = model(el(62.9, 62, 62), el(0, 0, 0))
+  const all = [rtlSliver, rtlTight, rtlWhole, ltrSliver, ltrTight, ltrWhole]
+  doc.querySelectorAll = (q: string) => (q === '.ag-label > .ag-model' ? all : [])
+  nodeVm.runInContext('fitAgentNames()', a.c)
+  assert.deepEqual(all.map((m) => m.cls.has('ag-gone')), [true, false, false, true, false, false])
+  // With room again, it comes back.
+  Object.assign(rtlSliver, { width: 40, clientWidth: 40, scrollWidth: 40 })
+  nodeVm.runInContext('fitAgentNames()', a.c)
+  assert.equal(rtlSliver.cls.has('ag-gone'), false)
+  assert.match(SOURCE, /const cut = m\.scrollWidth > m\.clientWidth \+ 0\.5 \|\| \(!!id && id\.clientWidth > 0 && id\.scrollWidth > id\.clientWidth \+ 0\.5\);/)
 })

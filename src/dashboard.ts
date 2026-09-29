@@ -1269,6 +1269,18 @@ ul { margin: 6px 0; padding-inline-start: 18px; }
 .ag-label > .ag-type, .ag-label > .ag-pre, .ag-label > .ag-np:only-child { flex-shrink: 1; min-width: 1.5em; }
 .ag-label > .ag-sid { color: var(--dim); }
 .ag-label > .ag-gone { position: absolute; inset-inline-start: 0; top: 0; width: 1px; height: 1px; clip-path: inset(50%); }
+/* 1.13 fix pass 2 (Review L C-F1) — right to left only: a tree label's Latin identifier keeps its start. A part of the
+   name is cut at its inline end, which right to left is its left, so a model id, a project or a short id laid out in
+   it lost its beginning ("…-6" for opus-4-6). Its identifier — the short id's part itself, the model's and the project's
+   span after their dot (ag-lid) — is laid out left to right in a box of its own, cut at its own end: "opus-…". The
+   model's and the project's part is a row of its own there: its dot first, whole, at the inline start, then the
+   identifier, which gives way; the part keeps its place in the mirrored name and its flex-shrink. A left-to-right page
+   has none of these rules, and its identifier's span is no box of its own (display: contents): its text is its part's,
+   the name's boxes 1.12's — it renders as before. */
+.ag-label > :is(.ag-model, .ag-proj) > .ag-lid { display: contents; }
+[dir="rtl"] .ag-label > :is(.ag-model, .ag-proj) { display: flex; }
+[dir="rtl"] .ag-label > :is(.ag-model, .ag-proj) > .ag-lid { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: ltr; unicode-bidi: isolate; }
+[dir="rtl"] .ag-label > .ag-sid { direction: ltr; unicode-bidi: isolate; }
 /* Launched, but its transcript not seen yet: the name is the launch's hint, not the agent's. */
 .ag-k-pending > .ag-line .ag-label { font-style: italic; }
 /* Usage, duration and the live clock, the silence and the tally — a session's, a run's and a

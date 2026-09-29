@@ -52,6 +52,14 @@ with a throwaway certificate `openssl` makes in a temporary directory, skipped w
 is not on the `PATH` — and close them. No test reaches the network: the fetch and the sockets are injected, and a
 static test holds `test/` free of a real service's host.
 
+Since 1.13 `src/bidi.ts` is the only module that writes a direction mark (RLI, LRI, PDI, RLM), always as an escape —
+a test finds no literal bidi control in any file of `src/`, the rule VS Code 1.62 applied to its own sources —, and
+every message, Quick Pick, InputBox and progress notification goes through `src/hostUi.ts`, which marks its texts in
+a right-to-left language and hands back the caller's own label: a static test finds those VS Code API names nowhere
+else in `src/`. The isolate test renders every text of every right-to-left bundle through the marks and holds them
+balanced, idempotent and lossless, and a leak test holds the diagnostics, the exports, the markdown document, the view
+model, the notifications' JSON fields and every accessible name free of them.
+
 A handful of questions a fake host cannot answer run in a real editor: `npm run test:e2e` downloads
 VS Code stable into `.vscode-test/`, starts it with this extension in development mode, every other
 extension disabled, a user-data directory of its own and a fresh `HOME` — so the smoke test never
@@ -64,7 +72,10 @@ the extension's exported API, `promptSendCheck(id)`, what a send would decide wi
 Codex terminal open — `noTerminal`, nothing typed. That seam answers a code, never a text, and only
 while the extension host runs in test mode; in a normal window it answers `notListed` before reading
 anything. Since 1.12 it finds the three notification commands registered and asks `notifyCheck()` — `noChannel`
-with no channel set up, no request made —, gated on the test mode the same way. The settings check is why it exists
+with no channel set up, no request made —, gated on the test mode the same way. Since 1.13 a ninth check sets
+`tokenPace.language` to `ar` and finds every status bar entry with a word opening a right-to-left isolate right after its
+icons and closing it, balanced — the first entry given an icon by an empty `tokenPace.claudeQuotaSources` in the
+throwaway profile —, and back under `auto` the very English texts without a mark. The settings check is why it exists
 at all: from 1.0 to 1.2 every settings change quietly
 waited for a window reload, and ~800 unit tests against a fake host could not see it.
 
@@ -108,6 +119,11 @@ eighth: its pending list, [below](#changing-the-english-the-re-key-ledger-110)):
   once the translation is done. `node scripts/nls-sources.mjs --check` names every language and key
   whose English changed since. A runtime string needs no record: its key is its English, so a changed
   sentence is a new key that every language lacks.
+
+Since 1.13 an entry may carry three more fields, and exactly Arabic, Hebrew and Persian do — a test holds it:
+`dir: 'rtl'` (`languageDir` gives the page's direction and the direction of the marks on VS Code's surfaces; an entry
+without it is left to right), `digits: 'latn'` and `calendar: 'gregory'` (`intlTag` adds `-u-ca-gregory-nu-latn` to the
+`Intl` tag, so that the three print the digits 0–9 and Gregorian dates under any ICU, chosen or under `auto`).
 
 A language's own gates — the ones a translation runs before it is merged; the whole suite runs once
 all of them are in:
@@ -212,11 +228,14 @@ English changes, each with its German, until the English was frozen; the twenty-
 their lists in four packages of six, and at the join `PENDING_ALLOWED` went back to false and
 `node scripts/nls-sources.mjs --check --strict` became the gate again. 1.13's ledger started at the 1.12.0 release
 (`node scripts/l10n-rekey.mjs --start a09a405`: 1303 `t()` keys, 331 manifest keys) with a list at cursor 0 for each of
-the twenty-four, and `PENDING_ALLOWED` is true again until 1.13's join. The three languages 1.13 adds — Arabic, Hebrew and
-Persian — are never on it: they have no file before their packages write them whole from the frozen English, and
-`--start` passes over a language without files. Three tests read the live ledger's figures until then — the kept-names
-guard's seventeen notification texts, the 1.12.0 notes' base and count, the languages page's count — and hold literals
-of history since (`NOTIFY_TEXT_KEYS_1_12`, 121 entries on base `d39c2df`).
+the twenty-four, and `PENDING_ALLOWED` was true again until 1.13's join. It holds 11 entries — the three new language
+names and native names, the settings' count of translated languages, and four settings' and one message's wording —,
+which the twenty-four worked through in one package; at the join `PENDING_ALLOWED` went back to false, with no list
+left. The three languages 1.13 adds — Arabic, Hebrew and Persian — are never on it: they have no file before their
+packages write them whole from the frozen English, and `--start` passes over a language without files. Four tests read
+the live ledger's figures until then — the kept-names guard's seventeen notification texts, the 1.12.0 notes' base
+and count, the languages page's count and this page's own — and hold literals of history since
+(`NOTIFY_TEXT_KEYS_1_12`, 121 entries on base `d39c2df`).
 
 While lists exist (`PENDING_ALLOWED` in `test/l10n.languages.test.ts` is true), the frame reads them: T1
 and T2 let a key listed `translate` be absent, a manifest key on a list stays out of the rules that
@@ -291,7 +310,11 @@ today, `Thu 14:20` beyond) — where a translation needs a form that reads with 
 preposition such as German *um*: a scan of every `t()` and `tr()` call follows `resetClock` and `formatReset`'s absolute
 and `both` forms through variables, local functions, fields and wrapper calls into the arguments, asks for exactly the
 listed keys (the one excepted key with its reason, `RESET_CLOCK_EXCEPTED`) and pins the two functions' calls
-(`RESET_CLOCK_SOURCES`); the brief names every key.
+(`RESET_CLOCK_SOURCES`); the brief names every key. `FIELD_IDS_OF_A_KEY` is empty since 1.13: the e-mail setup check
+writes its field ids as code (`` `host` ``, `` `user` ``, `` `from` ``, `` `to` ``), which T9 takes out as it takes every code
+span, and T5 holds each backtick span in every value — the declaration and its guard stay, the guard's cases on a
+synthetic key. At the join the frame needed no new exception: no list of names, no language name and no T16 exception
+was added for the three.
 
 ## The price table
 

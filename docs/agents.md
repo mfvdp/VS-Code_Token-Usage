@@ -383,6 +383,10 @@ item:
 | `Enter` / `Space` | opens the node's details under its row, or closes them again; on a `50 more` line, shows the next fifty; on the group of earlier sessions, which has no details, opens or closes the group |
 | `Escape` | closes the details (see [Details](#details)) |
 
+In Arabic, Hebrew and Persian the tree is mirrored — it indents toward the left — and the two arrows follow the
+layout: `←` opens a closed node or moves to its first child, `→` closes an open one or moves to the node above, the
+arrow pointing where the children stand ([Right to left](languages.md#right-to-left)).
+
 **Moving selects nothing**: the arrows only move the focus, the details open with `Enter` or
 `Space` — or a click. A key with `Ctrl`, `Alt`, `Shift` or `Meta` is left to VS Code. The item the
 focus is on has a ring round its line in the theme's focus colour; a click on a row focuses its

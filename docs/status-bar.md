@@ -69,8 +69,13 @@ Part of the [Token Pace documentation](../README.md#documentation).
   own empty glyph (`□`, `○`), `pie` has no empty part, so there only `none` changes anything.
 * **Time marker.** `timeProgressStyle`: `marker` (the `┃` sits where the window's own clock
   stands — needs a width of at least 6), `bar` (a second track underneath), `none`. This is
-  what makes pace readable **without colour**: fill left of the marker is reserve, fill right
-  of it is ahead of pace.
+  what makes pace readable **without colour**: fill that has not reached the marker is reserve,
+  fill beyond it is ahead of pace — left of the marker and right of it, since the bar fills from
+  the left. In Arabic, Hebrew and Persian the bar draws from the right, fill first, beside the
+  entry's label, and the marker is placed from the right too: fill before it is reserve, fill
+  beyond it — to its left — is ahead of pace. The settings say it by the marker in those three
+  languages; an English settings page next to a bar in Arabic, Hebrew or Persian says left and
+  right, which there read the other way round.
 * **Indicator.** `tokenPace.indicator` decides whether the verdict is signalled by `color`,
   `glyph` (`▲` / `▲▲`), `both` (default) or `none`. Colour alone is invisible to red-green
   colour blind readers and disappears in themes that tint the whole status bar.
@@ -181,7 +186,11 @@ above: one row per session. The compact tooltip leaves all of them out.
 
 In Arabic, Hebrew and Persian every entry's text, name and tooltip carry invisible direction marks, so that its words
 read from the right while its figures and names stay left to right, and its icon stays at the entry's left edge
-([Languages](languages.md#right-to-left)); the words a screen reader says carry none.
+([Languages](languages.md#right-to-left)); the words a screen reader says carry none. The bar's glyphs, which are
+neither letters nor figures, take the entry's direction: they draw from the right, fill first, as the dashboard's
+quota bars fill from the right. In the settings page a lone bar example between right-to-left words — “██▁┃▁▁▁▁” —
+draws from the right as well, while an example that begins with a Latin label, “CC 5h ██▁▁▁▁▁▁ 25% · …”, stays
+left to right: a description can carry no direction mark to make the two agree.
 
 Only this extension's own argument-less commands are ever linked from the tooltip, and a link
 that would do nothing in the current state — *Fetch now* while consent is denied, in

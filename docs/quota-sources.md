@@ -222,7 +222,9 @@ over the stored history. The lease is an advisory file in `globalStorage` holdin
 and an expiry. The expiry is its heartbeat: the leading window renews the lease every thirty seconds
 for ninety seconds ahead, and every other window checks it every thirty seconds and takes it over
 once its expiry has passed or its window's process is gone. A window that crashed gives the lease up
-at once; one that hangs, within ninety seconds. The governing rule is **in doubt, poll yourself**:
+at once — another window takes it at its next check, within thirty seconds —; one that hangs holds it
+until ninety seconds after its last renewal, and another window takes it at its next check after that,
+within thirty seconds more. The governing rule is **in doubt, poll yourself**:
 an unreadable or stale lease looks acquirable, because a window that wrongly believes it leads costs
 one extra request, while a window that wrongly believes it follows shows stale figures forever. A
 follower says so in the tooltip and still fetches on an explicit *Fetch Quota Now*.

@@ -2820,11 +2820,14 @@ function ships(id: string): boolean {
  * 1.13 P2: how many languages of the registry, from its start, a page's list names — the largest count, at least the
  * twenty-six of 1.12, whose rendering `render` finds in the text; each of them one the build ships. A page lists the
  * registry from its start (P8 adds the three of 1.13 once they ship); a language package cannot touch the pages.
+ * 1.13 P8 (pinned and changed: "at least the twenty-six of 1.12"): every language of the registry ships since the join,
+ * and a page's list names all twenty-nine, strictly.
  */
 function listedFromStart(text: string, render: (ids: readonly string[]) => string): number {
   let n = 0
   for (let k = LANGUAGES_1_12.length; k <= LANGUAGES.length; k++) if (text.includes(render(LANGUAGE_IDS.slice(0, k)))) n = k
   assert.ok(n >= LANGUAGES_1_12.length, `the list does not name the twenty-six of 1.12 from the registry's start: ${render(LANGUAGE_IDS.slice(0, LANGUAGES_1_12.length))}`)
+  assert.equal(n, LANGUAGES.length, `the list does not name every language of the registry: ${render(LANGUAGE_IDS)}`)
   const unshipped = LANGUAGE_IDS.slice(0, n).filter((id) => !ships(id))
   assert.deepEqual(unshipped, [], `the list names a language the picker does not offer: ${unshipped.join(', ')}`)
   return n
@@ -2854,6 +2857,11 @@ test('docs/languages.md: one row per registry entry — its id, its native name,
   const since = (i: number): string => (i === 0 ? '1.0.0' : i === 1 ? '1.3.0' : i < 14 ? '1.9.0' : i < 26 ? '**new in 1.11.0**' : '**new in 1.13.0**')
   const want = underLocale(undefined, () => LANGUAGES.map((e, i) => `| \`${e.id}\` | ${e.native} | ${languageName(e.id)} | ${FLAG_COUNTRY[e.flag]} (\`${e.flag}\`) | ${since(i)} |`))
   assert.ok(rows.length >= LANGUAGES_1_12.length && rows.length <= LANGUAGES.length, `${rows.length} rows for ${LANGUAGES.length} languages`)
+  // 1.13 P8 (pinned and changed: "the twenty-six of 1.12 at least"): every language ships since the join — one row per
+  // entry of the registry, twenty-nine, the three of 1.13 marked as new.
+  assert.equal(rows.length, LANGUAGES.length)
+  assert.equal(LANGUAGES.length, 29)
+  assert.equal(rows.filter((r) => r.endsWith('| **new in 1.13.0** |')).length, 3)
   assert.deepEqual(rows, want.slice(0, rows.length))
   assert.deepEqual(LANGUAGES.slice(0, rows.length).filter((e) => !ships(e.id)).map((e) => e.id), [], 'the table names a language the picker does not offer')
   assert.equal(rows.filter((r) => r.endsWith('| **new in 1.11.0** |')).length, 12)
@@ -3009,7 +3017,8 @@ test('docs/development.md says how a language is made and checked: the registry,
   for (const path of ['l10n/bundle.l10n.de.json', 'package.nls.de.json', 'docs/languages.md']) assert.equal(shipped(path), true, `${path} would not be packaged`)
   // The README's index row, in the order the pages are read.
   // 1.11 P9 (pinned and changed: "the fourteen languages"): twenty-six.
-  assert.ok(README.includes('| [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the twenty-six languages and their flags, the notation that stays the same, and how the translations were made |'))
+  // 1.13 P8 (pinned and changed: "the twenty-six languages and their flags,"): twenty-nine, and right to left.
+  assert.ok(README.includes('| [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the twenty-nine languages and their flags, right to left, the notation that stays the same, and how the translations were made |'))
   assert.ok(doc.languages.includes('see [Building and testing](development.md#translating)'))
 })
 
@@ -3222,8 +3231,9 @@ test('the quality statement stands in its four places and in the picker, says wh
     assert.ok(text.includes(statement) && /not (reviewed )?by native speakers/.test(text), `${name} does not carry the quality statement`)
     for (const never of [/professional/i, /native[- ]quality/i, /proofread/i, /certified/i, /fluent/i]) assert.equal(never.test(text), false, `${name} says ${never}`)
   }
-  // 1.11 P9 (pinned and changed: "The twelve beyond"): twenty-four.
-  assert.ok(flatText(README).includes('The twenty-four beyond English and German were translated by AI agents and checked by tests, not by native speakers.'))
+  // 1.11 P9 (pinned and changed: "The twelve beyond"): twenty-four. 1.13 P8 (pinned and changed: "The twenty-four
+  // beyond"): twenty-seven.
+  assert.ok(flatText(README).includes('The twenty-seven beyond English and German were translated by AI agents and checked by tests, not by native speakers.'))
   // The picker's line is the view model's, and the German says the same, as §3 A4 has it.
   const quality = 'The languages beyond English and German were translated by AI agents and checked by tests, not by native speakers.'
   assert.ok(readDoc('src/viewModel.ts').includes(`t('${quality}')`))
@@ -3241,8 +3251,8 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
     assert.equal(f.includes('German or English'), false, `${name} still says "German or English"`)
   }
   assert.equal(/^\* \*\*English and German\.\*\*/m.test(README), false, 'README.md still heads its languages bullet "English and German."')
-  // 1.11 P9 (pinned and changed: "Fourteen languages"): twenty-six.
-  assert.ok(README.includes('* **Twenty-six languages.**') && flatText(README).includes('→ [Languages](docs/languages.md)'))
+  // 1.11 P9 (pinned and changed: "Fourteen languages"): twenty-six. 1.13 P8 (pinned and changed: "Twenty-six"): twenty-nine.
+  assert.ok(README.includes('* **Twenty-nine languages.**') && flatText(README).includes('→ [Languages](docs/languages.md)'))
   assert.ok(README.includes('| [Dashboard](docs/dashboard.md) | The provider switch and the language picker,'))
   assert.ok(README.includes('| [Commands and keybindings](docs/commands.md) | The commands, the one chord, the interface language — a setting and a picker, not a command —, the walkthrough |'))
   // The README's privacy paragraph names the one write outside the storage 1.9 adds.
@@ -3254,7 +3264,8 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
     'In the menu `↓` and `↑` move, `Home` and `End` go to the first and the last line, `Enter` or `Space` chooses, `Escape` closes it and puts the focus back on the flag, and `Tab` leaves it without a choice.',
     'the page keeps its scroll position, the focus goes back to the flag, and the choice is written to `tokenPace.language` in your user settings',
     'The same row ends with the language picker\'s flag', 'and on the language picker\'s flag after a choice',
-    'a language for the picker (`auto` or one of the twenty-six ids — the one setting the page can have written, `tokenPace.language`, in your user settings)',
+    // 1.13 P8 (pinned and changed: "one of the twenty-six ids"): twenty-nine.
+    'a language for the picker (`auto` or one of the twenty-nine ids — the one setting the page can have written, `tokenPace.language`, in your user settings)',
     'never a path and never another setting',
   ]) assert.ok(dash.includes(claim), `docs/dashboard.md does not say: ${claim}`)
   // commands.md: no command; the setting and the picker; the manifest part kept.
@@ -3270,8 +3281,10 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
   const warning = 'Token Pace: the language could not be written to your user settings.'
   // 1.11 P2 (pinned and changed: "the fifteen values", fifteen in the enum): the enum has auto and the twenty-six ids of
   // the registry now; the row's count is P9's to write (§3 A6).
-  for (const claim of ['which VS Code reports only while its language pack is installed', 'The settings UI offers the twenty-seven values as a list, each language by its own name',
-    'The twenty-four languages beyond English and German were translated by AI agents and checked by tests, not by native speakers.',
+  // 1.13 P8 (pinned and changed: "the twenty-seven values", "The twenty-four languages beyond"): the settings UI lists
+  // every value of the enum — auto and the twenty-nine ids —, and twenty-seven languages are translated.
+  for (const claim of ['which VS Code reports only while its language pack is installed', 'The settings UI offers the thirty values as a list, each language by its own name',
+    'The twenty-seven languages beyond English and German were translated by AI agents and checked by tests, not by native speakers.',
     'that is the one write Token Pace makes to your user settings for it: only on a choice, only this key, *Automatic* removing the key again, the language already chosen writing nothing',
     `the warning *${warning}* says so and nothing changes`, 'Application scope: always your user settings, never a workspace\'s']) {
     assert.ok(row.includes(claim), `docs/settings.md's language row does not say: ${claim}`)
@@ -3366,7 +3379,8 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
   assert.ok(readDoc('test-e2e/suite/index.ts').includes("check('a language change reaches the status bar without a reload'"))
   assert.ok(flatText(doc.export).includes('the language line (1.9), `setting auto · shown de · VS Code de`'))
   // The walkthrough's dashboard page names the flag at the other end of the switch's row.
-  assert.ok(flatText(readDoc('media/walkthrough/dashboard.md')).includes('At the other end of that row a flag picks the language of Token Pace\'s own texts — twenty-six of them, or *Automatic* for VS Code\'s display language (`tokenPace.language`)'))
+  // 1.13 P8 (pinned and changed: "twenty-six of them"): twenty-nine.
+  assert.ok(flatText(readDoc('media/walkthrough/dashboard.md')).includes('At the other end of that row a flag picks the language of Token Pace\'s own texts — twenty-nine of them, or *Automatic* for VS Code\'s display language (`tokenPace.language`)'))
 })
 
 test('Review 2\'s sentences stand where a reader looks: the terminal\'s own session is never left behind, and what no check can see (1.9 P20, Review 2 (a), (b))', () => {
@@ -3718,8 +3732,9 @@ test('the picture of the Prompts section is in the repository, embedded in the R
  */
 test('the pages carry the sentences of the documentation package, held to the code (1.10 P21)', () => {
   const prompts = flatText(doc.prompts)
-  // 1.11 P9 (pinned and changed: "the other twelve languages"): twenty-four translate the shipped prompts.
-  for (const claim of ['and likewise in each of the other twenty-four languages; the German status prompt keeps the author\'s own wording, the twenty-four translate the English',
+  // 1.11 P9 (pinned and changed: "the other twelve languages"): twenty-four translate the shipped prompts. 1.13 P8
+  // (pinned and changed: "the other twenty-four languages"): twenty-seven.
+  for (const claim of ['and likewise in each of the other twenty-seven languages; the German status prompt keeps the author\'s own wording, the twenty-seven translate the English',
     'the characters counted as the field counts them (an emoji counts two)', 'one whose command it saw end while VS Code still names the shell so']) {
     assert.ok(prompts.includes(claim), `docs/prompts.md does not say: ${claim}`)
   }
@@ -3996,16 +4011,20 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
   const languages = flatText(doc.languages)
   const bundle = (id: string): Record<string, string> => JSON.parse(readDoc(`l10n/bundle.l10n.${id}.json`)) as Record<string, string>
   for (const claim of [
-    // The twenty-six, the picker's length, the type-ahead as the page's own rule.
-    'come in twenty-six languages: English and German, and since 1.9.0 twelve more', 'and since 1.11.0 twelve more again — Nederlands, Українська, Svenska, Norsk, Dansk, Suomi, हिन्दी, Bahasa Indonesia, Tiếng Việt, Ελληνικά, Magyar and Română',
-    'in the order of the table below — twenty-seven lines', 'A list taller than the window scrolls inside its box, the two lines under it staying in view',
+    // The twenty-six, the picker's length, the type-ahead as the page's own rule. 1.13 P8 (pinned and changed: "come in
+    // twenty-six languages", "and since 1.11.0 twelve more again — … Română", "twenty-seven lines", the type-ahead's two
+    // stops): twenty-nine, the twelve of 1.11 followed by the three of 1.13, thirty lines, and `h` reaching Hebrew third.
+    'come in twenty-nine languages: English and German, and since 1.9.0 twelve more', 'since 1.11.0 twelve more again — Nederlands, Українська, Svenska, Norsk, Dansk, Suomi, हिन्दी, Bahasa Indonesia, Tiếng Việt, Ελληνικά, Magyar and Română —, and since 1.13.0 three written from right to left — Arabic (العربية), Hebrew (עברית) and Persian (فارسی)',
+    'in the order of the table below — thirty lines', 'A list taller than the window scrolls inside its box, the two lines under it staying in view',
     'Typing a letter — without Ctrl, Alt or ⌘ — moves the focus to the next line after the focused one whose own name or name in your language begins with it, round the list',
-    'on an English page `h` reaches *हिन्दी* (Hindi), then *Magyar* (Hungarian); a letter no name begins with moves nothing, and typing chooses nothing either — Enter or Space does',
+    'on an English page `h` reaches *हिन्दी* (Hindi), then *Magyar* (Hungarian), then *עברית* (Hebrew); a letter no name begins with moves nothing, and typing chooses nothing either — Enter or Space does',
     // The pack fact (§3 A6, §7a Q20; Review L F2 and R3: hu HAS a pack, of 2020) and Bokmål (§7a Q12).
     'VS Code has a language pack for Hungarian; for the other eleven — Dutch, Ukrainian, Swedish, Norwegian, Danish, Finnish, Hindi, Indonesian, Vietnamese, Greek and Romanian — it has none, so `auto` shows English there and the settings stay in VS Code\'s language',
     'VS Code\'s Hungarian language pack was last updated for VS Code 1.48 (2020)', 'Norwegian is Bokmål — the id is `nb`, the list says *Norsk* —', 'Token Pace maps neither `no` nor `nn` onto it',
     // The table's paragraph, the flags of the new languages, the fonts (§7a Q20).
-    'are new in 1.11.0. Norwegian (`nb`) is Bokmål.', 'Hindi carries India\'s, Greek Greece\'s, Ukrainian Ukraine\'s and Norwegian Norway\'s',
+    // 1.13 P8 (pinned and changed: "are new in 1.11.0. Norwegian …", "… and Norwegian Norway's"): the three of 1.13 after them.
+    'are new in 1.11.0, and the three written from right to left — Arabic (العربية), Hebrew (עברית) and Persian (فارسی) — are new in 1.13.0. Norwegian (`nb`) is Bokmål.',
+    'Hindi carries India\'s, Greek Greece\'s, Ukrainian Ukraine\'s and Norwegian Norway\'s; Arabic, a language of many countries, carries Egypt\'s, Hebrew Israel\'s and Persian, spoken beyond Iran too, Iran\'s',
     '**Fonts.** Token Pace ships no font', 'A system without a font for one of these scripts shows boxes in their place; the words are right, the font is missing. The flag switches back at once, or set `tokenPace.language`',
     // Numbers: the clocks and the grouping the locales print (checked below).
     'Hindi groups by lakh (`12,34,567`) and keeps the decimal point', 'Danish, Finnish and Indonesian write `06.00` with a full stop, Hungarian puts the 12-hour mark in front (`de. 06:00`)',
@@ -4022,7 +4041,8 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
     'Of the twelve of 1.11 three say it in their own word — Finnish *kehote*, Greek *προτροπή*, Vietnamese *lời nhắc* —; the other nine keep the loanword',
     'the twelve languages of 1.11 write the label as VS Code shows it in every language — `Enter`, `Ctrl+Enter`, `⌘+Enter` —, with the language\'s word for "key" around it where a sentence needs one',
   ]) assert.ok(languages.includes(claim), `docs/languages.md does not say: ${claim}`)
-  assert.ok(doc.languages.includes('\n## The twenty-six languages\n'))
+  // 1.13 P8 (pinned and changed: "## The twenty-six languages"): twenty-nine.
+  assert.ok(doc.languages.includes('\n## The twenty-nine languages\n'))
   // The facts behind them: the registry, the page's type-ahead rule, the locales, the bundles' words.
   // 1.13 P2 (pinned and changed: every entry after the fourteen): the twelve of 1.11, the three of 1.13 after them.
   assert.deepEqual(LANGUAGES_1_12.slice(14).map((e) => e.id), ['nl', 'uk', 'sv', 'nb', 'da', 'fi', 'hi', 'id', 'vi', 'el', 'hu', 'ro'])
@@ -4047,8 +4067,11 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
   // privacy.md: §0a.1 (the file count from the registry), §0a.2 (Review 2's sentence), §0a.5 (the export's fields).
   const privacy = flatText(doc.privacy)
   // 1.13 P2 (pinned and changed: the live registry): the twenty-five files of 1.11's and 1.12's pages; P8 counts 1.13's.
+  // 1.13 P8 (pinned and changed: "one of the twenty-five translation files"): every language but English ships a file —
+  // twenty-eight since the join.
   assert.equal(LANGUAGES_1_12.length - 1, 25)
-  for (const claim of ['one of the twenty-five translation files it ships, with the translations of its own texts and nothing of yours',
+  assert.equal(LANGUAGES.filter((e) => e.id !== 'en' && ships(e.id)).length, 28)
+  for (const claim of ['one of the twenty-eight translation files it ships, with the translations of its own texts and nothing of yours',
     'the Records\' longest and largest sessions are named by a weekday, a time and the first eight characters of the session id — never a project or a path; a test puts a project name into the index\'s key and an agent\'s file and finds it in no record, no Quick Pick item, no markdown document and no export',
     '**What an export adds in 1.11.** Per bucket the list amount, the day of the price rule it was priced by and whether no rule covered its day (`listCostUsd`, `priceFrom`, `priceApproximate`), the list total, and in the JSON the price rows checked after the table\'s day and the pages the table was read from (`pricing.checked_later`, `pricing.sources`)',
     'never a path, a URL with a path, or a session or project name the export did not already carry']) {
@@ -4083,24 +4106,37 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
   const readme = flatText(README)
   // 1.13 P2 (pinned and changed: every native name of the registry): the registry's from its start, the twenty-six of
   // 1.12 at least, each a language the build ships (listedFromStart) — P8 names the three of 1.13.
-  const nativeOf = (id: string): string => LANGUAGES.find((e) => e.id === id)?.native ?? id
+  // 1.13 P8 (pinned and changed: each native name alone): a name written right to left carries its English name in
+  // brackets — two right-to-left names with only ", " between them would be drawn in swapped order in a left-to-right
+  // paragraph (the comma between two right-to-left words takes their direction), and the English word between them
+  // keeps each in its place.
+  const nativeOf = (id: string): string => {
+    const e = LANGUAGES.find((l) => l.id === id)
+    return e === undefined ? id : e.dir === 'rtl' ? `${e.native} (${underLocale(undefined, () => languageName(e.id))})` : e.native
+  }
   listedFromStart(readme, (ids) => `— to ${ids.slice(0, -1).map(nativeOf).join(', ')} or ${nativeOf(ids[ids.length - 1])}, or to VS Code's display language`)
-  for (const claim of ['* **Twenty-six languages.**', 'The twenty-four beyond English and German were translated by AI agents and checked by tests, not by native speakers',
+  // 1.13 P8 (pinned and changed: "Twenty-six languages", "The twenty-four beyond", the index row's "twenty-six", the
+  // picture's "down to Română · Romanian — twenty-seven lines"): twenty-nine, twenty-seven, thirty lines.
+  for (const claim of ['* **Twenty-nine languages.**', 'The twenty-seven beyond English and German were translated by AI agents and checked by tests, not by native speakers',
     'the fixed-period token totals and, off by default, the Records — since 1.11 the most expensive days, the longest and largest Claude Code sessions and the hours with the most cache written. → [Dashboard](docs/dashboard.md)',
-    'the twenty-six languages and their flags, the notation that stays the same, and how the translations were made |',
+    'the twenty-nine languages and their flags, right to left, the notation that stays the same, and how the translations were made |',
     'The dated price table and the pages it was read from, your own rates and the list price beside them, the family fallback, and what the figure is not |',
-    'down to Română · Romanian — twenty-seven lines, each with its flag']) {
+    'down to Română · Romanian, then Arabic, Hebrew and Persian, each by its own name written from right to left — thirty lines, each with its flag']) {
     assert.ok(readme.includes(claim), `README.md does not say: ${claim}`)
   }
   // The store picture of the picker shows the whole list (§4 P9): 840 px wide, tall enough for twenty-seven lines.
+  // 1.13 P8 (pinned and changed: "≥ 1500 px, twenty-seven lines"): thirty lines, three of 48 px more — 1704 px.
   const png = readFileSync(join(ROOT, 'media/screenshot-languages.png'))
   assert.equal(png.readUInt32BE(16), 840)
-  assert.ok(png.readUInt32BE(20) >= 1500, `media/screenshot-languages.png is ${png.readUInt32BE(20)} px tall — the list of twenty-seven lines needs more`)
+  assert.ok(png.readUInt32BE(20) >= 1700, `media/screenshot-languages.png is ${png.readUInt32BE(20)} px tall — the list of thirty lines needs more`)
   // commands.md, troubleshooting.md, the walkthrough, prompts.md — and every language translates the shipped prompt's title.
-  assert.ok(flatText(doc.commands).includes('`auto`, the default, or one of twenty-six languages') && flatText(doc.commands).includes('German, the twelve languages of 1.9 and the twelve of 1.11 ([Languages](languages.md))'))
-  assert.ok(doc.troubleshooting.includes('[the table](languages.md#the-twenty-six-languages)'))
-  assert.ok(flatText(readDoc('media/walkthrough/dashboard.md')).includes('twenty-six of them, or *Automatic*'))
-  assert.ok(flatText(doc.prompts).includes('and likewise in each of the other twenty-four languages; the German status prompt keeps the author\'s own wording, the twenty-four translate the English'))
+  // 1.13 P8 (pinned and changed: "twenty-six languages", "the twelve of 1.11 (…)", the table's anchor, the walkthrough's
+  // "twenty-six of them"): twenty-nine, the three of 1.13, #the-twenty-nine-languages.
+  assert.ok(flatText(doc.commands).includes('`auto`, the default, or one of twenty-nine languages') && flatText(doc.commands).includes('German, the twelve languages of 1.9, the twelve of 1.11 and the three of 1.13 ([Languages](languages.md))'))
+  assert.ok(doc.troubleshooting.includes('[the table](languages.md#the-twenty-nine-languages)'))
+  assert.ok(flatText(readDoc('media/walkthrough/dashboard.md')).includes('twenty-nine of them, or *Automatic*'))
+  // 1.13 P8 (pinned and changed: "twenty-four"): twenty-seven.
+  assert.ok(flatText(doc.prompts).includes('and likewise in each of the other twenty-seven languages; the German status prompt keeps the author\'s own wording, the twenty-seven translate the English'))
   // 1.13 P2 (pinned and changed: every language of the registry): every language the build ships — the three of 1.13
   // have no bundle until group N writes each whole.
   for (const id of LANGUAGES.slice(1).map((e) => e.id).filter(ships)) assert.equal(typeof bundle(id)['Status table'], 'string', `${id} does not translate the shipped prompt's title`)
@@ -4109,8 +4145,10 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
   assert.ok(brief.includes('`{0}：` in Chinese (Japanese writes the ASCII colon `{0}:`, as its sentences do), `（）` around a figure in Chinese and Japanese'))
   assert.equal(brief.includes('`{0}：` in Chinese and Japanese'), false)
   // dashboard.md and settings.md: the count words and the type-ahead.
-  assert.ok(flatText(doc.dashboard).includes('then the twenty-six languages, each with its flag') && flatText(doc.dashboard).includes('A letter moves the focus to the next language whose own name or name in your language begins with it, round the list, and chooses nothing'))
-  assert.ok(doc.settings.includes('The settings UI offers the twenty-seven values as a list') && doc.settings.includes('The twenty-four languages beyond English and German were translated by AI agents'))
+  // 1.13 P8 (pinned and changed: "the twenty-six languages", "the twenty-seven values", "The twenty-four languages"):
+  // twenty-nine, thirty, twenty-seven.
+  assert.ok(flatText(doc.dashboard).includes('then the twenty-nine languages, each with its flag') && flatText(doc.dashboard).includes('A letter moves the focus to the next language whose own name or name in your language begins with it, round the list, and chooses nothing'))
+  assert.ok(doc.settings.includes('The settings UI offers the thirty values as a list') && doc.settings.includes('The twenty-seven languages beyond English and German were translated by AI agents'))
   // 1.13 P2 (pinned and changed: the literal 27): the enum is auto and the registry's ids — thirty since 1.13 P2, which
   // added Arabic, Hebrew and Persian; settings.md's "twenty-seven values" above is 1.12's count until P8 rewrites it
   // (named in P2's report — the settings UI lists every value of the enum, whether its bundle ships or not).
@@ -4305,11 +4343,14 @@ test('the 1.12.0 release notes: the newest entry, its date set at publish, every
   const { AGENT_TABLES_REVISION } = require('../src/agg') as typeof import('../src/agg')
   const { NETWORK_SITES, DEFAULT_ALLOW } = require('../scripts/check-privacy.mjs') as { NETWORK_SITES: Array<{ file: string }>; DEFAULT_ALLOW: string[] }
   const log = readDoc('CHANGELOG.md')
-  const first = log.indexOf('\n## ')
+  // 1.13 P8 (pinned and changed: the newest entry): 1.13.0 stands above it since 1.13 — the 1.12.0 entry is read by its
+  // heading, and the entry above it is 1.13.0's.
+  const first = log.indexOf('\n## 1.12.0 ')
   const second = log.indexOf('\n## ', first + 4)
   const entry = log.slice(first, second)
+  assert.ok(log.slice(0, first).includes('\n## 1.13.0 — <date set at publish>\n'), 'the 1.13.0 entry does not stand above the 1.12.0 entry, undated')
   // The release cadence: the date is set on the release branch at publish, never before; 1.11.0 and 1.10.0 untouched.
-  assert.match(entry, /^\n## 1\.12\.0 — <date set at publish>\n\n\*\*/, 'the newest CHANGELOG entry is not 1.12.0 with its date left for the publish, or does not open with its summary')
+  assert.match(entry, /^\n## 1\.12\.0 — <date set at publish>\n\n\*\*/, 'the CHANGELOG\'s 1.12.0 entry is not there with its date left for the publish, or does not open with its summary')
   assert.ok(log.slice(second).startsWith('\n## 1.11.0 — <date set at publish>\n'), 'the 1.11.0 entry does not follow, undated')
   assert.ok(log.includes('\n## 1.10.0 — <date set at publish>\n'), 'the 1.10.0 entry is gone or dated')
   const flat = flatText(entry)
@@ -4479,7 +4520,8 @@ test('the pages carry the sentences of the 1.12 documentation package, held to t
     `Not yet tried live by the author: the generic webhook, ${services.join(', ')}, Telegram, ntfy and e-mail over SMTP.`,
     'built from the service\'s documentation, not tried by the author',
     // The services' UI paths as their pages gave them, and which one was not checked (P9-D1).
-    'Discord\'s help page could not be read that day, so its path is not checked — none of them was followed in the services\' apps by the author',
+    // 1.13 P8 (pinned and changed: "could not be read that day, so": L7 (c), the page re-tried — 403 again).
+    'Discord\'s help page could not be read that day, nor on 2026-09-29, so its path is not checked — none of them was followed in the services\' apps by the author',
     '*Activate Incoming Webhooks*, then *Add New Webhook to Workspace*', '*When a Teams webhook request is received*',
     '*Product menu → Integrations → Incoming Webhook*, *Add Incoming Webhook*', '*Manage → Workspace → Integrations*, *New*, the *Incoming* tab',
     '`@name` for a public Telegram channel',
@@ -4614,7 +4656,9 @@ test('the pages carry the sentences of the 1.12 documentation package, held to t
     'a section `## Notifications` with one line per channel', '(no setting holds a key or a secret to begin with)',
     'The notification settings\' fields that name a host or an address — `host`, `user`, `from`, `to`, `chatId` and `server` — read `set` or `not set` (1.12).',
     'the consent decisions (the keep-warm consent and, since 1.12, the macOS Keychain\'s among them)', 'the notification channels (1.12, with the number of channels set up',
-    'whether VS Code deletes an extension\'s secrets when it is uninstalled is not traced: remove your channels first']) {
+    // 1.13 P8 (pinned and changed: "whether VS Code deletes an extension's secrets when it is uninstalled is not traced"):
+    // L7 (b), read in VS Code 1.139.1's own code — no step of an uninstall deletes a secret.
+    'which VS Code does not clear when an extension is uninstalled (a secret goes only when the extension deletes it — VS Code 1.139.1\'s code, read on 2026-09-29): remove your channels first']) {
     assert.ok(exp.includes(claim), `docs/export.md does not say: ${claim}`)
   }
   assert.ok(readDoc('src/diagnostics.ts').includes("const NOTIFY_ADDRESS_FIELDS: readonly string[] = ['host', 'user', 'from', 'to', 'chatId', 'server']"))
@@ -4698,29 +4742,335 @@ test('the German pass: every interface text the 1.12 pages quote has the German 
   }
 })
 
-test('the five store pictures are the pages as 1.12 draws them — compared with fresh shots, none re-shot, each at its size (1.12 P11)', () => {
+test('the five store pictures are the pages as 1.13 draws them — the picker re-shot with its thirty lines, the other four compared with fresh shots and kept, each at its size (1.12 P11; 1.13 P8)', () => {
   // P11 shot the harness's pages of the fix pass after Review L again (zoomshot, 420 px, 2×) and compared them pixel by
   // pixel with these: 0 differing pixels in all five, so none was replaced. The sizes are the crops the README embeds.
+  // 1.13 P8 (pinned and changed: the picker 840 × 1560): re-shot from the join's page with the list uncapped — thirty
+  // lines, 840 × 1704, its first 1300 rows identical to 1.12's picture; the tokens, prompt-cache and prompts pictures
+  // 0 differing pixels against fresh shots, the dashboard's 556 (sub-pixel antialiasing at the tree's model names,
+  // whose identifier has its own span since 1.13 — nothing a reader sees), so all four stay.
   for (const [file, w, h] of [['screenshot-dashboard.png', 840, 3200], ['screenshot-tokens.png', 840, 1660], ['screenshot-prompt-cache.png', 840, 912],
-    ['screenshot-prompts.png', 840, 800], ['screenshot-languages.png', 840, 1560]] as const) {
+    ['screenshot-prompts.png', 840, 800], ['screenshot-languages.png', 840, 1704]] as const) {
     const png = readFileSync(join(ROOT, 'media', file))
     assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [w, h], `media/${file}`)
     assert.ok(README.includes(`](media/${file})`), `the README does not embed media/${file}`)
   }
 })
 
-test('the lease\'s heartbeat as quota-sources.md explains it — thirty seconds, ninety ahead, a crashed window at once, a hung one within ninety seconds —, from lease.ts\'s own constants; the Keychain\'s first read in a VS Code window (1.13 B7 rule 4, §0a.4; B1)', () => {
+test('the lease\'s heartbeat as quota-sources.md explains it — thirty seconds, ninety ahead, a crashed window at once, a hung one ninety seconds after its last renewal, each taken at the next check —, from lease.ts\'s own constants; the Keychain\'s first read in a VS Code window (1.13 B7 rule 4, §0a.4; B1)', () => {
   const { LEASE_RENEW_MS, LEASE_TTL_MS } = require('../src/lease') as typeof import('../src/lease')
   assert.deepEqual([LEASE_RENEW_MS, LEASE_TTL_MS], [30_000, 90_000], 'the lease\'s interval or TTL moved: say so in quota-sources.md')
   const q = flatText(doc.quotaSources)
   for (const claim of [
     'The lease is an advisory file in `globalStorage` holding a pid, a random id and an expiry. The expiry is its heartbeat: the leading window renews the lease every thirty seconds for ninety seconds ahead, and every other window checks it every thirty seconds and takes it over once its expiry has passed or its window\'s process is gone.',
-    // §0a.4's sentence, word for word.
-    'A window that crashed gives the lease up at once; one that hangs, within ninety seconds.',
+    // §0a.4's sentence. 1.13 P8 (pinned and changed: "…; one that hangs, within ninety seconds." — Review 2 F7): the
+    // takeover as the constants make it — freed at once or LEASE_TTL_MS after the last renewal, taken at the next check,
+    // within one LEASE_RENEW_MS.
+    'A window that crashed gives the lease up at once — another window takes it at its next check, within thirty seconds —; one that hangs holds it until ninety seconds after its last renewal, and another window takes it at its next check after that, within thirty seconds more.',
     // 1.12's sentence on the orphan app-server stays (§7a Q20: Token Pace kills no process by a pid it read).
     'Only an extension host killed outright runs no exit handler: the child\'s input then closes, which a stdio server answers by ending — whether `codex app-server` does was not tested.',
     // B1 (L1) in the docs: the Keychain's first read is per VS Code window.
     'the first Keychain read in a VS Code window happens only at a fetch you started',
   ]) assert.ok(q.includes(claim), `docs/quota-sources.md does not say: ${claim}`)
   assert.ok(flatText(doc.settings).includes('and in a VS Code window first only when you fetch by hand'), 'docs/settings.md\'s Keychain row does not say "a VS Code window"')
+})
+
+// ---------------------------------------------------------------------------
+// 1.13 P8 (§4 P8, §3 A7, B6, B8, B9): the release notes, the pages' right-to-left sentences, the German pass
+// ---------------------------------------------------------------------------
+
+/** 1.13 P8: the three languages of 1.13 — read from the registry, never a list of this file's own. */
+const RTL_1_13 = LANGUAGES.filter((e) => e.dir === 'rtl')
+
+test('the 1.13.0 release notes: the newest entry, its date set at publish, Added, Changed, Fixed and Internal in order, the three languages and the direction as the code has them, the leftovers, the versions, the ledger read from the file, nothing unverified (1.13 P8)', () => {
+  const { languageDir, intlTag } = require('../src/languages') as typeof import('../src/languages')
+  const { LEASE_RENEW_MS, LEASE_TTL_MS } = require('../src/lease') as typeof import('../src/lease')
+  const log = readDoc('CHANGELOG.md')
+  const first = log.indexOf('\n## ')
+  const second = log.indexOf('\n## ', first + 4)
+  const entry = log.slice(first, second)
+  // The release cadence: the date is set at publish; 1.12.0 and 1.11.0 below it, undated.
+  assert.match(entry, /^\n## 1\.13\.0 — <date set at publish>\n\n\*\*/, 'the newest CHANGELOG entry is not 1.13.0 with its date left for the publish, or does not open with its summary')
+  assert.ok(log.slice(second).startsWith('\n## 1.12.0 — <date set at publish>\n'), 'the 1.12.0 entry does not follow, undated')
+  assert.ok(log.includes('\n## 1.11.0 — <date set at publish>\n'), 'the 1.11.0 entry is gone or dated')
+  const flat = flatText(entry)
+  const heads = ['### Added', '### Changed', '### Fixed', '### Internal']
+  const order = heads.map((h) => flat.indexOf(h))
+  assert.ok(order.every((i) => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'the 1.13.0 entry\'s sections are missing or out of order')
+  assert.equal(flat.includes('### Privacy'), false, 'the 1.13.0 entry has a Privacy section: 1.13 reads and writes nothing new (§0a)')
+  const section = (h: string): string => { const at = heads.indexOf(h); return flat.slice(order[at], at + 1 < heads.length ? order[at + 1] : undefined) }
+
+  // Added: the three from the registry — their native names by code point, their English names, their flags, their
+  // direction —, the count, the picker's length, the translators, the digits and the calendar as intlTag pins them.
+  assert.deepEqual(RTL_1_13.map((e) => [e.id, [...e.native].map((c) => c.codePointAt(0)?.toString(16)), e.flag]), [
+    ['ar', ['627', '644', '639', '631', '628', '64a', '629'], 'eg'],
+    ['he', ['5e2', '5d1', '5e8', '5d9', '5ea'], 'il'],
+    ['fa', ['641', '627', '631', '633', '6cc'], 'ir'],
+  ])
+  assert.deepEqual(LANGUAGES.filter((e) => languageDir(e.id) === 'rtl').map((e) => e.id), ['ar', 'he', 'fa'])
+  assert.deepEqual([LANGUAGES.length, properties['tokenPace.language'].enum?.length], [29, 30])
+  const added = section('### Added')
+  const named = underLocale(undefined, () => RTL_1_13.map((e) => `${languageName(e.id)} (${e.native})`))
+  assert.ok(added.includes(`**Three languages written from right to left.** ${named[0]}, ${named[1]} and ${named[2]} — twenty-nine languages, thirty lines in the list with *Automatic*`))
+  assert.deepEqual(RTL_1_13.map((e) => FLAG_COUNTRY[e.flag]), ['Egypt', 'Israel', 'Iran'])
+  for (const claim of [
+    'The flags are Egypt\'s for Arabic, Israel\'s for Hebrew and Iran\'s for Persian, simplified drawings, never mirrored',
+    'Microsoft has no language pack for any of the three — a community pack for Arabic exists, not tried by the author —',
+    '**These translations were made by AI agents (Claude Fable 5.1 for Arabic, Claude Opus 5.5 for Hebrew and Persian) from the English text, with the German as a second reference',
+    'no direction mark and no digit of another script in a translation', 'not by native speakers**',
+    '**The dashboard mirrored.**', '`←` opening a node and `→` closing it', 'the quota bars, which fill from the right',
+    'The charts are not mirrored, as design guidance for right-to-left layouts has it, so time runs from left to right in them: the daily bars, the sparklines, the year strip, the hour strip and the weekday grid',
+    'one left-to-right unit with its marks where they belong — `~25%`, `⚠ 3.2M` —, and a range the page writes reads from the right, with `←`',
+    '**The digits 0–9 and the Gregorian calendar** in all three languages, chosen or under `auto`',
+  ]) assert.ok(added.includes(claim), `the 1.13.0 entry does not say: ${claim}`)
+  assert.deepEqual(RTL_1_13.map((e) => intlTag(e.locale, e.id)), ['ar-u-ca-gregory-nu-latn', 'he-u-ca-gregory-nu-latn', 'fa-u-ca-gregory-nu-latn'])
+  assert.equal(intlTag('ar-EG', 'ar'), 'ar-EG-u-ca-gregory-nu-latn')
+  assert.equal(new Intl.DateTimeFormat('fa').resolvedOptions().calendar, 'persian', 'Persian\'s own calendar is no longer the Solar Hijri one: say so in the notes')
+  assert.ok(/[۰-۹]/.test(new Intl.NumberFormat('fa').format(1234567.25)), 'Persian\'s own digits are no longer Persian: say so in the notes')
+  assert.equal(new Intl.NumberFormat(intlTag('fa', 'fa')).format(1234567.25), '1,234,567.25')
+
+  // Changed: the marks on VS Code's surfaces, the notification's mark, and L1–L5 as the manifest and the bundles have them.
+  const changed = section('### Changed')
+  const bidi = readDoc('src/bidi.ts')
+  for (const c of ["export const LRI = '\\u2066'", "export const RLI = '\\u2067'", "export const PDI = '\\u2069'", "export const RLM = '\\u200F'",
+    'export const BIDI_CONTROLS = /[\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]/u']) {
+    assert.ok(bidi.includes(c), `src/bidi.ts no longer declares ${c}: say so in the notes`)
+  }
+  for (const claim of [
+    '**Token Pace\'s texts on VS Code\'s surfaces carry invisible direction marks in a right-to-left language.**',
+    'the status bar, its tooltips, the Quick Pick, messages, dialogs, the InputBox and progress notifications',
+    'A text copied from there may carry those invisible marks.',
+    'a Quick Pick\'s line, a message and a dialog\'s button have no accessible name of their own, and VS Code gives a screen reader the text they show, marks included',
+    '**A notification\'s title and text begin with a right-to-left mark** in Arabic, Hebrew and Persian',
+    '**The Keychain setting** says that the first read in *a VS Code window* happens only when you fetch by hand',
+    '**The Telegram setting** begins *Sending through a Telegram bot* and speaks of "the @name of a public Telegram channel"',
+    '*Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.*',
+    '**The app-server setting** says that *the app-server* ends when VS Code closes',
+    '**The German reset times** read „Reset: Do 14:20" instead of „Reset um Do 14:20"', '(„· Reset: Mo 06:00")',
+  ]) assert.ok(changed.includes(claim), `the 1.13.0 entry does not say: ${claim}`)
+  assert.ok(nlsEn['config.credentials.keychain.description'].includes('The first read in a VS Code window happens only when you fetch by hand'))
+  assert.ok(nlsEn['config.notifications.telegram.description'].startsWith('Sending through a Telegram bot.') && nlsEn['config.notifications.telegram.description'].includes('the @name of a public Telegram channel'))
+  assert.equal(typeof GERMAN['Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.'], 'string', 'the e-mail hint is not a text of the code')
+  assert.ok(nlsEn['config.codexAppServer.mode.description'].includes('; the app-server ends when VS Code closes'))
+  // The German clock as the code prints it: a Thursday two days ahead is "Do 14:20" — two letters, no full stop.
+  const { resetClock } = require('../src/time') as typeof import('../src/time')
+  const tcfg: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
+  const clock = underLocale('de', () => resetClock(Date.UTC(2026, 9, 1, 14, 20), Date.UTC(2026, 8, 29, 9, 0), tcfg))
+  assert.equal(clock, 'Do 14:20')
+  assert.equal(GERMAN['resets at {0}'].replace('{0}', clock), 'Reset: Do 14:20')
+  assert.ok(Object.values(nlsDe).some((v) => v.includes('· Reset: Mo 06:00')), 'the German settings no longer quote „· Reset: Mo 06:00"')
+
+  // Fixed: the countdown glued, as the page's rule has it.
+  const fixed = section('### Fixed')
+  assert.ok(fixed.includes('**The prompt cache\'s countdown** — `4 m 10 s`, `1 h 2 m` — could break between its parts in a narrow sidebar; it is one run now'))
+  assert.deepEqual([countdownText(250_000), countdownText(3_720_000)], ['4 m 10 s', '1 h 2 m'])
+  assert.ok(readDoc('src/webview/main.ts').includes(String.raw`const DURATION_GLUE_RE = /(\d\u00a0(?:d|h|min|m)) (?=\d+\u00a0(?:h|min|m|s)(?!\p{L}))/gu;`))
+
+  // Internal: the versions, the files, the ledger's count read from l10n/rekey.json, the frame, the lease, the door.
+  const internal = section('### Internal')
+  assert.deepEqual([STATE_VERSION, AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION], [8, 10, 4])
+  assert.ok(internal.includes(`\`STATE_VERSION\` ${STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and \`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION} are unchanged`))
+  const bundles = readdirSync(join(ROOT, 'l10n')).filter((f) => /^bundle\.l10n\.[a-z-]+\.json$/.test(f))
+  assert.equal(bundles.length, 28)
+  assert.ok(internal.includes('The three languages are three more of Token Pace\'s own translation files, twenty-eight in all'))
+  const ledger = JSON.parse(readDoc('l10n/rekey.json')) as { base: string; entries: unknown[] }
+  assert.equal(ledger.base, 'a09a405')
+  assert.ok(internal.includes(`1.13's holds ${ledger.entries.length} entries since the 1.12.0 release (\`l10n/rekey.json\`, its count read by a test)`), `the 1.13.0 entry does not count the ledger's ${ledger.entries.length} entries`)
+  assert.equal(existsSync(join(ROOT, 'l10n/pending')), false, 'a pending list is on disk: the join is not done')
+  const frame = readDoc('test/l10n.languages.test.ts')
+  assert.ok(frame.includes('export const FIELD_IDS_OF_A_KEY: ReadonlyArray<readonly [string, ReadonlyArray<string>, string]> = []'), 'FIELD_IDS_OF_A_KEY is not empty: the notes say it is retired')
+  assert.ok(frame.includes('export const RESET_CLOCK_KEYS'))
+  assert.deepEqual([LEASE_RENEW_MS, LEASE_TTL_MS, LEASE_TTL_MS / LEASE_RENEW_MS], [30_000, 90_000, 3])
+  for (const claim of ['T16 refuses a direction mark, a digit of another script, an Arabic presentation form and a turned placeholder in any translation',
+    'the arrow rule lets a right-to-left language turn `→` into `←`', '`RESET_CLOCK_KEYS` lists the texts whose placeholder may hold a clock with its weekday',
+    '`FIELD_IDS_OF_A_KEY` is retired', '`LEASE_RENEW_MS` (30 seconds) and `LEASE_TTL_MS` (three renewals, 90 seconds)',
+    '**One door to VS Code\'s messages.**', 'the smoke test in a real window checks the Arabic status bar\'s marks']) {
+    assert.ok(internal.includes(claim), `the 1.13.0 entry does not say: ${claim}`)
+  }
+  assert.ok(readDoc('test-e2e/suite/index.ts').includes("await settings().update('language', 'ar', vscode.ConfigurationTarget.Global)"))
+
+  // Claims the notes must not make: nothing beyond an AI agent's reading, no live test, no path, file, review or date.
+  for (const never of [/professional/i, /native[- ]quality/i, /proofread/i, /certified/i, /fluent/i, /review/i, /tried with Codex/i, /(?<!un)tested on macOS/i,
+    /tried (live )?(with|on|against) (Slack|Discord|Telegram|ntfy|Mattermost|Rocket\.Chat|Microsoft Teams)/i]) {
+    assert.equal(never.test(entry), false, `the 1.13.0 entry says ${never}`)
+  }
+  for (const never of [/\/home\//, /plan-1\.\d+/, /\.claude\/projects/, /VSCE_PAT|OVSX_PAT/, /research\//, /[A-Za-z]:\\/, /\/tmp\//, /package\.json/, /worktree/i, /Review [123L]\b/, /\d{4}-\d{2}-\d{2}/]) {
+    assert.equal(never.test(entry), false, `the 1.13.0 entry mentions ${never}`)
+  }
+})
+
+test('the pages carry the sentences of the 1.13 documentation package, held to the code — right to left on the page and on VS Code\'s surfaces, the digits and the calendar, the settings, the counts, L7 — and the old claims are gone (1.13 P8)', () => {
+  const { languageDir } = require('../src/languages') as typeof import('../src/languages')
+  const bundle = (id: string): Record<string, string> => JSON.parse(readDoc(`l10n/bundle.l10n.${id}.json`)) as Record<string, string>
+  const nls = (id: string): Record<string, string> => JSON.parse(readDoc(`package.nls.${id}.json`)) as Record<string, string>
+  const main = readDoc('src/webview/main.ts')
+  const languages = flatText(doc.languages)
+  const rtl = languages.slice(languages.indexOf('## Right to left'), languages.indexOf('## How the translations were made'))
+  assert.ok(rtl.length > 0, 'docs/languages.md has no "Right to left" section before "How the translations were made"')
+
+  // The page mirrored, by the code that mirrors it: the root's dir, the tree's keys, the page's arrow, the kept boxes.
+  assert.deepEqual(LANGUAGES.filter((e) => languageDir(e.id) === 'rtl').map((e) => e.id), ['ar', 'he', 'fa'])
+  assert.ok(main.includes("const k = DIR !== 'rtl' ? key : key === 'ArrowLeft' ? 'ArrowRight' : key === 'ArrowRight' ? 'ArrowLeft' : key;"), 'the tree\'s arrows no longer follow the layout: say so in the docs')
+  assert.ok(main.includes("return DIR === 'rtl' ? ' ← ' : ' → ';"))
+  for (const box of ['<div class="plot" dir="ltr">', '<div class="heat" dir="ltr">', '<div class="hours" dir="ltr">', '<div class="hgrid" dir="ltr">', '<div class="sparkbox" dir="ltr">']) {
+    assert.ok(main.includes(box), `the page no longer keeps ${box} left to right: say so in the docs`)
+  }
+  assert.equal(sourceConstant('src/webview/main.ts', 'FIGURE_WHOLE_MAX'), 24)
+  for (const claim of [
+    '**The dashboard is mirrored.** Chosen, the page is laid out from the right — `dir="rtl"` on the page, set again at a switch without a reload',
+    'a table\'s first column stands at the right and its figure columns at the left edge',
+    'the flag stands at the row\'s left end with its list under it, each language\'s own name in its own direction',
+    '`←` opens a closed node or moves to its first child while `→` closes it or moves up',
+    'the quota bars fill from the right, the elapsed-time mark placed from the right too',
+    'What a screen reader reads is unchanged: the mirror is the stylesheet\'s',
+    '**What stays left to right, and why.** The charts are not mirrored — Material Design\'s guidance for right-to-left layouts lists charts and graphs among the things not mirrored —, so time runs from left to right in them, as in English',
+    'the daily bars with the cost line and their axis, the sparklines, the year strip, which opens at its newest weeks at the right as in English, the hour strip and the weekday × block grid',
+    'is one left-to-right unit on its line, its mark at its left as in English, and does not break inside at a narrow width (a unit longer than 24 characters, such as an agent\'s id or a long path, may)',
+    'the name keeps its start and loses its end, as in English',
+    'the range in words at the end of the filter bar, a budget\'s period — reads from the right: `2026-08-05 ← 2026-09-03`',
+    // VS Code's surfaces (P5's draft, completed): the one unit, the copied marks, the accessible names (Review 2 F5).
+    'so that `~18 h 46 min`, `claude-haiku-3-5` and `12.50 US$` read left to right, each as one unit',
+    '**A text copied from the status bar or a message may carry invisible direction marks** — one pair around the text, one around each figure or name in it.',
+    'A Quick Pick\'s line, a message and a dialog\'s button have no accessible name of their own: VS Code gives a screen reader the text they show, marks included',
+    // The markdown document (Review 2 F8), the hand-picked range's name (Review 2 F2).
+    '**The markdown document is plain.**', 'in all three languages a range written with `→` after right-to-left words shows its arrow pointing back at its first day, and in Arabic and Persian an ISO day after Arabic-script words displays as `05-08-2026` for `2026-08-05`; Hebrew keeps the day as written',
+    'so does a hand-picked range\'s own name — `2026-08-05 → 2026-09-03`, the range\'s data in every language',
+    // The settings (Review L R1–R3): the lone bar, the Latin-labelled example, the tooltip's columns, the English page.
+    'a lone bar such as “██▁┃▁▁▁▁” draws from the right like the bar itself, while a longer one that begins with a Latin label, “CC 5h ██▁▁▁▁▁▁ 25% · …”, stays left to right',
+    'In an English VS Code with Token Pace in Arabic, Hebrew or Persian the settings are English and say left and right, while the status bar\'s bar draws from the right.',
+    // The digits and the calendar (§7a Q6), the week (§7a Q34).
+    '**The digits 0–9 and the Gregorian calendar.**', 'the tag it formats with carries `-u-ca-gregory-nu-latn`, chosen or under `auto`',
+    'The first day of the week stays `tokenPace.startOfWeek`\'s, Monday by default, in every language: where your week starts on Saturday or Sunday, set `saturday` or `sunday`.',
+  ]) assert.ok(rtl.includes(claim), `docs/languages.md's "Right to left" does not say: ${claim}`)
+  assert.ok(main.includes('<div class="compbar">'))
+  // The examples the settings section names are the manifests' own.
+  assert.ok(nlsEn['config.timeProgressStyle.enum.marker'].includes('“██▁┃▁▁▁▁”') && nlsEn['config.density.enum.full'].includes('“CC 5h ██▁▁▁▁▁▁ 25% · '))
+  assert.ok(nls('ar')['config.tooltip.enum.compact'].includes('«النافذة | المستخدم | ') && rtl.includes('Arabic `النافذة | المستخدم | …`'))
+  assert.deepEqual(properties['tokenPace.startOfWeek'].enum?.slice(5), ['saturday', 'sunday'])
+  // The digits and the calendar, as Intl has them and as the pin makes them.
+  assert.ok(rtl.includes('Left to itself, `Intl` writes Persian with Persian digits (`۱٬۲۳۴٬۵۶۷٫۲۵`) and dates in the Solar Hijri calendar — 26 September 2026 is `۴ مهر` —'))
+  assert.equal(new Intl.DateTimeFormat('fa').resolvedOptions().calendar, 'persian')
+  assert.ok(rtl.includes('all three write `1,234,567.25`, and Persian writes 26 September 2026 `شنبه 26 سپتامبر`'))
+  const { intlTag } = require('../src/languages') as typeof import('../src/languages')
+  for (const e of RTL_1_13) assert.equal(new Intl.NumberFormat(intlTag(e.locale, e.id)).format(1234567.25), '1,234,567.25', `${e.id}'s pinned figure`)
+  assert.equal(new Intl.DateTimeFormat(intlTag('fa', 'fa'), { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(Date.UTC(2026, 8, 26, 12)), 'شنبه 26 سپتامبر')
+
+  // Numbers, dates and times: the 12-hour clocks the manifests quote, the two weekday forms from the bundles and Intl.
+  for (const [id, h12] of [['ar', '«06:00 ص»'], ['he', '„06:00 AM”'], ['fa', '«06:00 ق.ظ.»']] as const) {
+    assert.ok(nls(id)['config.resetHourCycle.enum.h12'].endsWith(h12), `package.nls.${id}.json's 12-hour example is not ${h12}`)
+  }
+  assert.ok(languages.includes('Arabic and Persian write it after the time in their own script (Arabic `06:00 ص`, Persian `06:00 ق.ظ.`) and Hebrew the Latin `06:00 AM`'))
+  const name = RTL_1_13.map((e) => `${underLocale(undefined, () => languageName(e.id))} \`${bundle(e.id)['Session {0}'].replace('{0}', `${bundle(e.id)['Tue']} 14:20`)}\``)
+  // The reset clock as the code prints it under each language's pinned tag: a Monday two days ahead.
+  const { resetClock } = require('../src/time') as typeof import('../src/time')
+  const tcfg: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
+  const monday = RTL_1_13.map((e) => `${underLocale(undefined, () => languageName(e.id))} \`${underLocale(intlTag(e.locale, e.id), () => resetClock(Date.UTC(2026, 8, 28, 6, 0), Date.UTC(2026, 8, 26, 12, 0), tcfg))}\``)
+  assert.ok(languages.includes(`(on a Tuesday ${name[0]}, ${name[1]}, ${name[2]})`), `docs/languages.md does not name the sessions as the bundles do: ${name.join(', ')}`)
+  assert.ok(languages.includes(`(on a Monday ${monday[0]}, ${monday[1]}, ${monday[2]})`), `docs/languages.md does not name the reset clock as Intl does: ${monday.join(', ')}`)
+  // The flags, the fonts, the percent, `auto` and the community pack, the table's paragraph.
+  for (const claim of ['A flag is a picture of a real thing and is never mirrored, not even on a right-to-left page.',
+    'the eagle on Egypt\'s flag and the emblem on Iran\'s are one silhouette each',
+    'and Arabic, Hebrew and Persian — the Arabic and the Hebrew script — with the fonts of your system',
+    'nor do Arabic, Hebrew and Persian, which write `%`, never `٪`',
+    'For the three of 1.13.0 Microsoft has no pack at all. For Arabic a community pack exists on the Marketplace, `Arabic-language.vscode-ar` — not Microsoft\'s, and not tried with Token Pace by the author —',
+    'For Hebrew and Persian no pack exists, so `auto` shows English there and the settings stay in VS Code\'s language: choose the language with the flag, or set `tokenPace.language` to `he` or `fa`.',
+    'the flag moves onto a line of its own under the switch, at its end (the right end left to right, the left end in Arabic, Hebrew and Persian)',
+  ]) assert.ok(languages.includes(claim), `docs/languages.md does not say: ${claim}`)
+  for (const id of ['ar', 'fa', 'he']) {
+    assert.equal(Object.values(bundle(id)).some((v) => v.includes('٪')) || Object.values(nls(id)).some((v) => v.includes('٪')), false, `${id} writes ٪`)
+  }
+  // How the translations were made (A7, B9): the 1.13 paragraph, the quotation marks from the bundles, the open questions.
+  const ledger = JSON.parse(readDoc('l10n/rekey.json')) as { entries: unknown[] }
+  for (const claim of [
+    '**In 1.13** Arabic, Hebrew and Persian were each translated whole by an AI agent — Claude Fable 5.1 for Arabic, Claude Opus 5.5 for Hebrew and for Persian — from the English text as it stood when 1.13\'s English was frozen',
+    'A reading pass by three further AI agents (Claude Opus 5.5) followed, one per language, none of them a native speaker',
+    'Arabic and Persian quote with «…», Hebrew with „…”',
+    `worked through 1.13's ledger of English changes (${ledger.entries.length} entries)`,
+    '1.13 answers none of them and leaves its own, again for native speakers', 'In Arabic:', 'In Hebrew:', 'In Persian:', 'In all three:', 'And in the twenty-four:',
+    'Arabic writes Modern Standard Arabic', 'Persian the polite *شما* with plural verbs',
+    'Of the three of 1.13 Arabic says it in its own word (*الموجّه*), Hebrew and Persian keep the loanword.',
+  ]) assert.ok(languages.includes(claim), `docs/languages.md does not say: ${claim}`)
+  assert.deepEqual([bundle('ar')['Prompts'].includes('الموجّه'), bundle('he')['Prompts'].startsWith('פרומפט'), bundle('fa')['Prompts'].startsWith('پرامپت')], [true, true, true])
+  assert.ok(Object.values(bundle('ar')).some((v) => v.includes('«')) && Object.values(bundle('fa')).some((v) => v.includes('«')) && Object.values(bundle('he')).some((v) => v.includes('„')))
+
+  // status-bar.md: the bar by reaching the marker (Review L R1–R3), the glyphs' direction, the settings' examples.
+  const bar = flatText(doc.statusBar)
+  for (const claim of ['fill that has not reached the marker is reserve, fill beyond it is ahead of pace — left of the marker and right of it, since the bar fills from the left',
+    'In Arabic, Hebrew and Persian the bar draws from the right, fill first, beside the entry\'s label',
+    'an English settings page next to a bar in Arabic, Hebrew or Persian says left and right, which there read the other way round',
+    'The bar\'s glyphs, which are neither letters nor figures, take the entry\'s direction: they draw from the right, fill first',
+    'a description can carry no direction mark to make the two agree']) {
+    assert.ok(bar.includes(claim), `docs/status-bar.md does not say: ${claim}`)
+  }
+  assert.equal(bar.includes('fill left of the marker is reserve, fill right of it is ahead of pace'), false, 'status-bar.md still reads the bar by left and right alone')
+  // agents.md, dashboard.md, notifications.md, settings.md, development.md.
+  assert.ok(flatText(doc.agents).includes('In Arabic, Hebrew and Persian the tree is mirrored — it indents toward the left — and the two arrows follow the layout: `←` opens a closed node or moves to its first child, `→` closes an open one or moves to the node above'))
+  const dash = flatText(doc.dashboard)
+  for (const claim of ['the refresh button sits at its end as an icon — the right end, the left end in Arabic, Hebrew and Persian',
+    'In Arabic, Hebrew and Persian the page is mirrored at once: it reads from the right', 'the notation that stays the same in every language, right to left —']) {
+    assert.ok(dash.includes(claim), `docs/dashboard.md does not say: ${claim}`)
+  }
+  const note = flatText(doc.notifications)
+  const smtp = 'Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.'
+  assert.ok(readDoc('src/notifyHost.ts').includes(`t('${smtp}')`))
+  for (const claim of [`for e-mail *${smtp}*, the field names written as code (1.13)`,
+    'In Arabic, Hebrew and Persian the title and each line of the text begin with an invisible right-to-left mark (U+200F)',
+    // L7 (a) and (b), read in VS Code 1.139.1's workbench bundle (§3 B8): the in-memory fallback, the message, the weaker
+    // encryption and its argv.json key; no deletion on uninstall.
+    'Without one, VS Code keeps the secrets in that window\'s memory only, not on disk',
+    '*An OS keyring couldn\'t be identified for storing the encryption related data in your current desktop environment.*',
+    'that message comes as a dialog with *Use weaker encryption*, which writes `"password-store": "basic"` into VS Code\'s `argv.json`',
+    'VS Code does not delete an extension\'s secrets when the extension is uninstalled — in VS Code 1.139.1\'s code, read on 2026-09-29, a secret is deleted only when the extension that stored it deletes it —']) {
+    assert.ok(note.includes(claim), `docs/notifications.md does not say: ${claim}`)
+  }
+  const { RLM } = require('../src/bidi') as typeof import('../src/bidi')
+  assert.equal(RLM, '‏')
+  const row = doc.settings.split('\n').find((l) => l.startsWith('| `language` |')) ?? ''
+  assert.ok(row.includes(`one of ${LANGUAGE_IDS.map((id) => `\`${id}\``).join(', ')}. The settings UI offers the thirty values as a list`))
+  assert.equal(properties['tokenPace.language'].enum?.length, 30)
+  const dev = flatText(doc.development)
+  for (const claim of ['Since 1.13 an entry may carry three more fields, and exactly Arabic, Hebrew and Persian do — a test holds it:',
+    'Since 1.13 a ninth check sets `tokenPace.language` to `ar`',
+    `It holds ${ledger.entries.length} entries — the three new language names and native names`,
+    'Four tests read the live ledger\'s figures until then', '`FIELD_IDS_OF_A_KEY` is empty since 1.13',
+    'Since 1.13 `src/bidi.ts` is the only module that writes a direction mark (RLI, LRI, PDI, RLM), always as an escape']) {
+    assert.ok(dev.includes(claim), `docs/development.md does not say: ${claim}`)
+  }
+  assert.equal(readDoc('src/languages.ts').split("dir: 'rtl', digits: 'latn', calendar: 'gregory' }").length - 1, 3)
+  // The hard-wrap rule is no test (Review L's common part, finding 2 — 1.14): no page says a test holds it.
+  assert.equal(/hard[- ]wrap[^.]*\btest\b|\btest\b[^.]*hard[- ]wrap/i.test(dev), false, 'docs/development.md says a test holds the hard-wrap rule')
+  // The README: the bullet, the three with their English names, the index row, the picture.
+  const readme = flatText(README)
+  for (const claim of ['Magyar, Română, العربية (Arabic), עברית (Hebrew) or فارسی (Persian), or to VS Code\'s display language; in the three written from right to left the dashboard is mirrored.',
+    '— thirty lines, each with its flag, its own name and its name in English;']) {
+    assert.ok(readme.includes(claim), `README.md does not say: ${claim}`)
+  }
+  assert.ok(README.split('\n').length <= 200, 'README.md is longer than 200 lines')
+
+  // The old claims stand nowhere a reader looks.
+  const log = readDoc('CHANGELOG.md')
+  const entry = log.slice(log.indexOf('\n## 1.13.0'), log.indexOf('\n## 1.12.0'))
+  const pages: Array<[string, string]> = [['CHANGELOG.md 1.13.0', entry], ['README.md', README], ['docs/status-bar-states.md', STATES],
+    ...Object.entries(doc).map(([k, v]): [string, string] => [`docs/${k}`, v]),
+    ...readdirSync(join(ROOT, 'media/walkthrough')).map((f): [string, string] => [`media/walkthrough/${f}`, readDoc(`media/walkthrough/${f}`)])]
+  for (const [pageName, text] of pages) {
+    for (const stale of ['twenty-six languages', 'The twenty-six languages', 'twenty-six ids', 'twenty-seven lines', 'twenty-seven values', 'at its right end',
+      'read as they do in English', 'Reset um', 'it may still break between its parts', 'twenty-five translation files it ships', 'takes the arrow the line reads in',
+      'which fallback VS Code applies without one is not traced', 'whether VS Code deletes an extension\'s secrets when it is uninstalled is not traced',
+      'Three tests read the live ledger', 'one that hangs, within ninety seconds', 'the-twenty-six-languages', 'fill left of the marker is reserve']) {
+      // The notes quote the old German reset time as what it was („Reset um Do 14:20"); no page does.
+      if (stale === 'Reset um' && pageName === 'CHANGELOG.md 1.13.0') continue
+      assert.equal(flatText(text).includes(stale), false, `${pageName} still says: ${stale}`)
+    }
+  }
+})
+
+test('the German pass: every interface text the 1.13 pages and notes quote has the German counterpart the glossary names (1.13 P8, §6)', () => {
+  // The three language names (Duden), the count in the settings' description, L1, L2, L3 and the label form of L5.
+  assert.deepEqual(['Arabic', 'Hebrew', 'Persian'].map((en) => GERMAN[en]), ['Arabisch', 'Hebräisch', 'Persisch'])
+  assert.ok(nlsDe['config.language.description'].includes('siebenundzwanzig'))
+  assert.ok(nlsDe['config.credentials.keychain.description'].includes('Das erste Lesen in einem VS-Code-Fenster geschieht erst, wenn Sie von Hand abrufen'))
+  assert.ok(nlsDe['config.notifications.telegram.description'].startsWith('Senden über einen Telegram-Bot.') && nlsDe['config.notifications.telegram.description'].includes('der @Name eines öffentlichen Telegram-Kanals'))
+  assert.equal(GERMAN['Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.'], 'Legen Sie zuerst `host`, `user`, `from` und `to` in tokenPace.notifications.email fest.')
+  assert.deepEqual([GERMAN['resets at {0}'], GERMAN['resets at {0} (in {1})'], GERMAN['reset at {0}']], ['Reset: {0}', 'Reset: {0} (in {1})', 'Reset: {0}'])
 })

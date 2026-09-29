@@ -22,7 +22,7 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m     CC Fable 7d █┃▁▁
 
 ![The Claude quota card with its prompt-cache block after the windows: one session measured by the status line, its one-hour cache cooling in 4 m 10 s, and what a cold start would re-write against a cache read; one session cold since ~11:40, estimated from its transcript and marked with ~](media/screenshot-prompt-cache.png)
 
-![The language picker open at the top of the dashboard: Automatic — as VS Code (English) first, then English checked, Deutsch · German, Français · French and the other languages down to Română · Romanian — twenty-seven lines, each with its flag, its own name and its name in English; under the list the line on what switches at once and the line on who translated the languages](media/screenshot-languages.png)
+![The language picker open at the top of the dashboard: Automatic — as VS Code (English) first, then English checked, Deutsch · German, Français · French and the other languages down to Română · Romanian, then Arabic, Hebrew and Persian, each by its own name written from right to left — thirty lines, each with its flag, its own name and its name in English; under the list the line on what switches at once and the line on who translated the languages](media/screenshot-languages.png)
 
 ![The Prompts section of the dashboard: the line on how it works and that unsent text goes with a prompt, the line naming where a prompt would go — Sends to Claude Code in terminal 2 of 3 — ready —, then the prompts, Status table, a keep-warm loop, Stop after this task and one of the reader's own, each with its send button, and New prompt](media/screenshot-prompts.png)
 
@@ -97,10 +97,10 @@ trademarks of their respective owners and are used here only to name the tools w
 * **Nothing invented.** A missing figure is `–`, never `0 %`; a window without a stated length
   gets no pace rather than an invented denominator; estimates carry `~` and lower bounds `⚠`.
   → [Numbers, words and pace](docs/numbers.md)
-* **Twenty-six languages.** A flag at the top of the dashboard switches the status bar, the dashboard, the Quick Pick,
+* **Twenty-nine languages.** A flag at the top of the dashboard switches the status bar, the dashboard, the Quick Pick,
   the report and every dialog at once — to English, Deutsch, Français, Español, Português (Brasil), Italiano, 日本語, 한국어,
   简体中文, 繁體中文, Русский, Türkçe, Polski, Čeština, Nederlands, Українська, Svenska, Norsk, Dansk, Suomi, हिन्दी, Bahasa Indonesia,
-  Tiếng Việt, Ελληνικά, Magyar or Română, or to VS Code's display language. The twenty-four beyond English and German were translated by AI agents and checked by tests, not by native speakers. → [Languages](docs/languages.md)
+  Tiếng Việt, Ελληνικά, Magyar, Română, العربية (Arabic), עברית (Hebrew) or فارسی (Persian), or to VS Code's display language; in the three written from right to left the dashboard is mirrored. The twenty-seven beyond English and German were translated by AI agents and checked by tests, not by native speakers. → [Languages](docs/languages.md)
 
 ## Install
 
@@ -178,7 +178,7 @@ full account is in [Privacy](docs/privacy.md).
 | [Windows, WSL and remote development](docs/windows-wsl-remote.md) | `extensionKind`, relocated directories, the Claude Code version on Windows, where the status-line bridge's script lives, restricted and virtual workspaces |
 | [Settings](docs/settings.md) | Every `tokenPace.*` key with its default and what it does |
 | [Commands and keybindings](docs/commands.md) | The commands, the one chord, the interface language — a setting and a picker, not a command —, the walkthrough |
-| [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the twenty-six languages and their flags, the notation that stays the same, and how the translations were made |
+| [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the twenty-nine languages and their flags, right to left, the notation that stays the same, and how the translations were made |
 | [Building and testing](docs/development.md) | Build, tests, the smoke test in a real window, and what CI runs |
 | [Releasing](docs/release.md) | The tag-push recipe, the two store secrets, publisher verification |
 

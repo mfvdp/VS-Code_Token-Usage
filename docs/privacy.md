@@ -14,7 +14,7 @@ mirror `statusline-mirror.json` inside its `globalStorage` (below) and the agent
 `agent-hook.jsonl` beside it —
 whenever that file exists: only the hook script you install writes it, and a line older than 30
 minutes no longer counts —, its own translation file for the language you chose
-(`l10n/bundle.l10n.<language>.json` inside the extension's folder — one of the twenty-five translation files it
+(`l10n/bundle.l10n.<language>.json` inside the extension's folder — one of the twenty-eight translation files it
 ships, with the translations of its own texts and nothing of yours; read at activation and when `tokenPace.language`
 changes, its name built only from the list of shipped languages, never from the setting's text; English
 reads none), Claude Code's `settings.json`, its `settings.local.json`

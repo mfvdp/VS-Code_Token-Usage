@@ -34,7 +34,11 @@ already for the host this setup allows, its box says *Leave empty to keep the st
 the host you allowed it for: when *Set Up* allows another one — a webhook address on another host, another ntfy
 server, or another SMTP server or port — it offers none of the old secrets to keep, a secret the channel cannot do
 without has to be typed again, one it can do without (the webhook's secret header, the ntfy token) is deleted on
-*Allow* when you leave its box empty, and a preset never keeps the generic webhook's header value.
+*Allow* when you leave its box empty, and a preset never keeps the generic webhook's header value. A channel whose
+settings are not filled in yet stops *Set Up* with a message saying what is missing and *Open Settings* at that key —
+for e-mail *Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.*, the field names written as
+code (1.13), since the settings UI names that setting's rows by them; VS Code's message shows the backticks as they
+are.
 
 | Entry | Channel id | What you need | Where it comes from |
 |---|---|---|---|
@@ -49,7 +53,8 @@ without has to be typed again, one it can do without (the webhook's secret heade
 | E-mail (SMTP) | `email` | An SMTP server, an account, a sender and one recipient | `host`, `port`, `security`, `user`, `from` and `to` in `tokenPace.notifications.email` first; many providers want an app password rather than your account's password |
 
 The paths in the last column are the ones the services' documentation gave on 2026-09-28 (Slack, Microsoft's Teams
-connector page, Mattermost, Rocket.Chat); Discord's help page could not be read that day, so its path is not checked —
+connector page, Mattermost, Rocket.Chat); Discord's help page could not be read that day, nor on 2026-09-29, so its
+path is not checked —
 none of them was followed in the services' apps by the author.
 
 The five services' presets are the webhook channel with another body: the address is the same kind of secret, and
@@ -180,15 +185,22 @@ header's value, the Telegram bot's token, the ntfy topic and its access token, t
 Code's secret storage on this machine: per machine, never in `settings.json` and never synced with Settings Sync. None
 of the eight settings holds one; `tokenPace.notifications.webhook`'s `secretHeader` is the header's name, not its
 value. On Linux VS Code's secret storage needs a keyring it can use (GNOME Keyring, KWallet or another Secret
-Service); which fallback VS Code applies without one is not traced here — VS Code's [Settings Sync
-documentation](https://code.visualstudio.com/docs/configure/settings-sync) covers it under *Troubleshoot
-credential-store issues*. A secret is read at the moment of a send and dropped with it, and stands only in the one
+Service). Without one, VS Code keeps the secrets in that window's memory only, not on disk — another window does not
+have them, and they are gone when the window closes or reloads, so the channel has to be set up again — and says so
+the first time a secret is stored: *An OS keyring couldn't be identified for storing the encryption related data in
+your current desktop environment.* Where the only store left is Electron's basic text one, that message comes as a
+dialog with *Use weaker encryption*, which writes `"password-store": "basic"` into VS Code's `argv.json` and from then
+on keeps the secrets on disk, encrypted without a keyring. That is what VS Code 1.139.1's own code does, read on
+2026-09-29; VS Code's [Settings Sync documentation](https://code.visualstudio.com/docs/configure/settings-sync) covers it
+under *Troubleshoot credential-store issues*. A secret is read at the moment of a send and dropped with it, and stands only in the one
 request that needs it — the Telegram token in the path of Telegram's address, the webhook's secret and the ntfy token
 in a header, the SMTP password in the `AUTH` exchange after TLS stands. It never reaches a log line, a message, *Copy
 Diagnostics*, an export or the extension's storage.
 
 **Remove your channels before you uninstall Token Pace** (*Remove a Notification Channel…*, or *Clear Stored Data…*'s
-item *Notification channels*): whether VS Code deletes an extension's secrets when it is uninstalled is not traced.
+item *Notification channels*): VS Code does not delete an extension's secrets when the extension is uninstalled — in
+VS Code 1.139.1's code, read on 2026-09-29, a secret is deleted only when the extension that stored it deletes it —,
+so they would stay in VS Code's secret storage on this machine.
 
 ## Connections
 

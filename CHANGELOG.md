@@ -3,6 +3,106 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.13.0 — <date set at publish>
+
+**Arabic, Hebrew and Persian, with the dashboard mirrored for them.** Three languages written from right to left join
+the flag at the top of the dashboard — Arabic (العربية), Hebrew (עברית) and Persian (فارسی) —, twenty-nine in all,
+translated by AI agents from the English text and checked by tests, not by native speakers. Chosen, the dashboard
+reads from the right: its sections, tables, range chips, language list, agent tree and details are mirrored and the
+quota bars fill from the right, while the charts keep time running from left to right and every figure keeps its marks
+where they belong. All three write the digits 0–9 and count days by the Gregorian calendar, so a figure reads the same
+in the status bar, on the dashboard and in an export. VS Code's own surfaces stay left to right — VS Code has no
+right-to-left layout —, so Token Pace marks its texts in the status bar, its tooltips, the Quick Pick, messages and
+dialogs to read in their own order there. Beside it the 1.12 leftovers: the words of the Keychain, Telegram, e-mail
+and app-server settings, the German reset times, and the prompt cache's countdown torn in a narrow sidebar.
+
+### Added
+
+* **Three languages written from right to left.** Arabic (العربية), Hebrew (עברית) and Persian (فارسی) — twenty-nine
+  languages, thirty lines in the list with *Automatic*. Each switches the status bar and its tooltips, the dashboard,
+  the Quick Pick, the markdown document, every dialog and every notification at once, as the flag or
+  `tokenPace.language` chooses it; the settings and the command titles follow VS Code's display language, and
+  Microsoft has no language pack for any of the three — a community pack for Arabic exists, not tried by the author —,
+  so without a pack `auto` shows English and the flag picks them, the settings staying in VS Code's language. The
+  Arabic and the Hebrew script are drawn with your system's fonts; Token Pace ships none. The flags are Egypt's for
+  Arabic, Israel's for Hebrew and Iran's for Persian, simplified drawings, never mirrored — a flag is not a language,
+  and the name stands beside it. **These translations were made by AI agents (Claude Fable 5.1 for Arabic, Claude
+  Opus 5.5 for Hebrew and Persian) from the English text, with the German as a second reference, checked by tests for
+  completeness, placeholders, marks, the settings' status-bar examples, freshness and the direction — no direction
+  mark and no digit of another script in a translation — and read once more by further AI agents, not by native
+  speakers**; their register was chosen from common usage, not verified against a style guide, and a wrong or clumsy
+  word is a bug to report. The twenty-four other languages name the three and carry every text 1.13 changed, through
+  the ledger of English changes, by an AI agent as well.
+* **The dashboard mirrored.** In Arabic, Hebrew and Persian the page is laid out from the right — turned at a switch,
+  without a reload —: the sections and their texts, the tables with their figure columns at the left edge, the range
+  chips and the provider switch, the language list, the agent tree — indenting toward the left, `←` opening a node and
+  `→` closing it — with its details, and the quota bars, which fill from the right. The charts are not mirrored, as
+  design guidance for right-to-left layouts has it, so time runs from left to right in them: the daily bars, the
+  sparklines, the year strip, the hour strip and the weekday grid. Every figure, amount, day, clock time and model or project name is one
+  left-to-right unit with its marks where they belong — `~25%`, `⚠ 3.2M` —, and a range the page writes reads from the
+  right, with `←`. What a screen reader reads is unchanged: the mirror is the stylesheet's, and the page names its
+  language for the screen reader's voice.
+* **The digits 0–9 and the Gregorian calendar** in all three languages, chosen or under `auto`: left to itself,
+  Persian would print Persian digits and Solar Hijri dates, and Arabic under an Egyptian or Saudi display language
+  Arabic-Indic digits. A figure reads the same beside Token Pace's marks, in the status bar, on the dashboard and in an
+  export, and *week to date* and *month to date* carry the days they count. The first day of the week stays
+  `tokenPace.startOfWeek`'s, in every language.
+
+### Changed
+
+* **Token Pace's texts on VS Code's surfaces carry invisible direction marks in a right-to-left language.** VS Code lays
+  out the status bar, its tooltips, the Quick Pick, messages, dialogs, the InputBox and progress notifications from left
+  to right in every language; in Arabic, Hebrew and Persian each text Token Pace puts there is marked as a right-to-left
+  paragraph of its own and each figure and name in it as a left-to-right unit, so that a sentence beginning with
+  *Claude* still reads from the right and `~18 h 46 min` stays whole; an entry's icon stays at its left edge, and the
+  bar's glyphs draw from the right. A text copied from there may carry those invisible marks. None goes into a status
+  bar entry's or the dashboard's accessible names, the markdown document, the log, the diagnostics report or an export;
+  a Quick Pick's line, a message and a dialog's button have no accessible name of their own, and VS Code gives a screen
+  reader the text they show, marks included.
+* **A notification's title and text begin with a right-to-left mark** in Arabic, Hebrew and Persian, so that a chat or
+  push client that takes a message's direction from its first letter lays out a sentence beginning with *Claude Code*
+  from the right; the JSON's other fields carry none.
+* **The Keychain setting** says that the first read in *a VS Code window* happens only when you fetch by hand — "a
+  window" read as a quota window.
+* **The Telegram setting** begins *Sending through a Telegram bot* and speaks of "the @name of a public Telegram
+  channel": "channel" no longer names Telegram's channel and the notification channel at once.
+* **The e-mail setup's hint** writes the setting's field names as code: *Set `host`, `user`, `from` and `to` in
+  tokenPace.notifications.email first.*
+* **The app-server setting** says that *the app-server* ends when VS Code closes, where "it" could be read as the mode.
+* **The German reset times** read „Reset: Do 14:20" instead of „Reset um Do 14:20" in the status bar, the Quick Pick
+  and the notifications — a clock that may carry a weekday takes the label form —, and the settings' German examples
+  follow („· Reset: Mo 06:00").
+
+### Fixed
+
+* **The prompt cache's countdown** — `4 m 10 s`, `1 h 2 m` — could break between its parts in a narrow sidebar; it is
+  one run now, as `~18 h 46 min` is since 1.12.
+
+### Internal
+
+* **Snapshot and export.** `STATE_VERSION` 8, `AGENT_TABLES_REVISION` 10 and `EXPORT_SCHEMA_VERSION` 4 are unchanged —
+  the first start of 1.13.0 rebuilds nothing, and every export field means what it did; the exports stay English, with
+  the digits 0–9 in every language.
+* **Nothing new is read or written.** The three languages are three more of Token Pace's own translation files,
+  twenty-eight in all, inside the extension's folder; a language's direction is a constant of the language list, and
+  the marks are added where a text is shown, never stored.
+* **The re-key ledger.** 1.13's holds 11 entries since the 1.12.0 release (`l10n/rekey.json`, its count read by a
+  test), which the twenty-four languages worked through in one package, while the three new languages are whole
+  translations from the frozen English and never a pending list.
+* **The frame learned right to left before a word was written.** T16 refuses a direction mark, a digit of another
+  script, an Arabic presentation form and a turned placeholder in any translation; the arrow rule lets a right-to-left
+  language turn `→` into `←`; a fourth synthetic language — every word `كلمة`, under `ar` — runs every rule;
+  `RESET_CLOCK_KEYS` lists the texts whose placeholder may hold a clock with its weekday, where a translation needs a
+  label rather than a clock-only preposition; `FIELD_IDS_OF_A_KEY` is retired, the e-mail check's ids written as code.
+* **The lease's watchdog, named.** `LEASE_RENEW_MS` (30 seconds) and `LEASE_TTL_MS` (three renewals, 90 seconds) name
+  what the lease always did, and tests take it over from a window whose process is gone at the next check, and from a
+  silent one after 90 seconds, not before.
+* **One door to VS Code's messages.** Every message, Quick Pick, InputBox and progress notification goes through one
+  module, and a static test finds those calls nowhere else; the one module that writes a direction mark writes it as an
+  escape, and a test finds no literal one in the sources.
+* **The dashboard harness** probes every language written from right to left, and the smoke test in a real window
+  checks the Arabic status bar's marks.
+
 ## 1.12.0 — <date set at publish>
 
 **Notifications to your phone, a chat or your mail, a Codex app-server that stays connected, and the macOS Keychain

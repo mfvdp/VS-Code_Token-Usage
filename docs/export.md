@@ -181,6 +181,7 @@ extension's `globalStorage` directory, best effort, and only when the path ends 
 `agent-hook.js` and the status-line bridge's `statusline-bridge.js` —, so a hook still entered in
 Claude Code's settings, or a status line still connected, would then start a script that is gone:
 remove the hook's entries and run *Token Pace: Disconnect Claude Status Line* first. A notification channel's
-secrets are not in that directory but in VS Code's secret storage, and whether VS Code deletes an extension's
-secrets when it is uninstalled is not traced: remove your channels first (*Remove a Notification Channel…*, or
+secrets are not in that directory but in VS Code's secret storage, which VS Code does not clear when an extension is
+uninstalled (a secret goes only when the extension deletes it — VS Code 1.139.1's code, read on 2026-09-29): remove
+your channels first (*Remove a Notification Channel…*, or
 *Clear Stored Data…*'s *Notification channels*).

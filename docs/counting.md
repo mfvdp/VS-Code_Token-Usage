@@ -93,18 +93,23 @@ many (`⚠ lower bound — 2 of 41 replies unfinished`). Measured on this machin
 third of the agents have such a reply — nearly always one cut off at the tool call it made, not
 the agent's last: only 22 of 925 agent transcripts end on an unfinished reply.
 
-**Upgrading.** The persisted snapshot is schema version 8; version 5, 6 and 7 are still read. It
+**Upgrading.** The persisted snapshot is schema version 9 since 1.14.0; version 5, 6, 7 and 8 are still read. Version 9
+lets a figure carry a [project](sessions.md#how-a-project-is-found) — with `tokenPace.attribution` on, two projects
+active in one hour are two buckets of that hour, whose sum is the one bucket of `none` —, and 1.13 would fold two
+projects' figures of an hour into one, so it does not read a version 9 snapshot and reads the transcripts instead. A
+snapshot of version 8 or earlier is read forward under `none` as it stands; under `project` or `session` the
+transcripts are read once more, because its figures carry no project. It
 also states the revision of the agent tables it holds — 10 in 1.9.0, 9 in 1.8.0, 8 in 1.6.0 and 1.7.0 —, and a snapshot with an older
 one, or none, has the agent tables rebuilt once on the first start after the update. 1.8.0 raised it
 to 9 for the [prompt-cache estimate](prompt-cache.md#how-the-estimate-is-made): the rebuild gives every
 main session read in the last seven days its newest request that used the prompt cache — its time,
 the kind of cache it wrote, its size and its model —, so that a session that is quiet at the update has
-its estimate at once and not only with its next reply; it counts nothing, and the schema version stays 8.
+its estimate at once and not only with its next reply; it counts nothing, and the schema version stayed 8.
 1.9.0 raised it to 10 for the [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in)'s check of
 the other sessions of a folder: the rebuild gives every main session read in the last seven days the
 time of its newest `user` line — its `timestamp`, nothing else of the line —, so that a session left
 behind before the update stops holding the line back at once, not only when its transcript leaves the
-seven days; it counts nothing either, and the schema version stays 8.
+seven days; it counts nothing either, and the schema version stayed 8.
 Version 7 — everything before the workflow runs of the agent tables —, version 6 — everything
 before the agent tables — and version 5 — everything before the tool table — are read forward
 rather than thrown away, so no upgrade forces a cold re-read: a table the older version did not

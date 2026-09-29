@@ -559,7 +559,8 @@ test('activation reads the synthetic transcripts, fills the status bar and relea
     cursors: Record<string, unknown>
   }
   assert.equal(snap.version, STATE_VERSION)
-  assert.equal(snap.version, 8)
+  // 1.14 P4 (pinned and changed: 8 → 9, the project key on a bucket — §3 A2).
+  assert.equal(snap.version, 9)
   // Two Claude models plus one Codex model, all in the same hour.
   assert.equal(snap.buckets.length, 3)
   assert.equal(Object.keys(snap.cursors).length, 2)
@@ -5417,4 +5418,202 @@ test('1.12 B: the macOS Keychain in the host — a 1.x grant reads nothing of it
     else process.env.CLAUDE_CODE_OAUTH_TOKEN = saved.token
     g.fetch = realFetch
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 P4 (§0a.1–§0a.5, §0a.9, §3 A2 rule 4, §3 A7): the salt's moments, the switches, the migration's line, the leak test.
+// ---------------------------------------------------------------------------
+
+const SYN_SLUG = '-home-u-synthetic-secret-dir-synthetic-project-123'
+const SYN_CWD = '/home/u/synthetic-secret-dir/synthetic-project-123'
+/** What no output may hold under hash — and, but for the folder's name under basename, under basename. */
+const SYN_SECRETS = ['synthetic-secret-dir', 'synthetic-project-123', SYN_SLUG, 'synthetic-worktree-456', 'synthetic instruction text', 'synthetic-repo']
+const PROJECT_SECTIONS = { 'tokenPace.dashboard.sections': ['summary', 'tokens', 'agents', 'projects', 'sessions'] }
+
+/**
+ * §0a.1–§0a.3's fixture on top of the usual one: a Claude session in the synthetic folder, its subagent that worked in
+ * a worktree, and a Codex rollout started in the same folder whose session_meta carries neighbouring keys that must
+ * never survive — synthetic content only.
+ */
+function addSyntheticProject(fx: Fixture): void {
+  const dir = path.join(fx.claudeRoot, SYN_SLUG)
+  fs.mkdirSync(path.join(dir, 'sess-syn-0001', 'subagents'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'sess-syn-0001.jsonl'), `${claudeLine({
+    id: 'msg_syn_p1', ts: T, cwd: SYN_CWD, sessionId: 'sess-syn-0001', usage: { input: 70, output: 7 }, final: true,
+  })}\n`)
+  fs.writeFileSync(path.join(dir, 'sess-syn-0001', 'subagents', 'agent-a5a5a5.jsonl'), `${claudeLine({
+    id: 'msg_syn_p2', ts: T, agentId: 'a5a5a5', sessionId: 'sess-syn-0001', usage: { input: 30, output: 3 }, final: true,
+    cwd: '/home/u/synthetic-project-123/.claude/worktrees/synthetic-worktree-456',
+  })}\n`)
+  const day = new Date(T)
+  const p2 = (n: number): string => String(n).padStart(2, '0')
+  const codexDay = path.join(fx.codexDir, 'sessions', String(day.getUTCFullYear()), p2(day.getUTCMonth() + 1), p2(day.getUTCDate()))
+  fs.mkdirSync(codexDay, { recursive: true })
+  fs.writeFileSync(path.join(codexDay, 'rollout-2026-01-01T00-00-00-thread-syn-0002.jsonl'), [
+    JSON.stringify({ timestamp: iso(T), type: 'session_meta', payload: {
+      id: 'thread-syn-0002', originator: 'codex_cli_rs', cli_version: '0.0.0', cwd: SYN_CWD,
+      instructions: 'synthetic instruction text', git: { repository_url: 'https://example.invalid/synthetic-repo' },
+    } }),
+    codexTurnContext(T, 'gpt-5.4-synthetic'),
+    codexTaskStarted(T),
+    codexTokenCount({ ts: T, total: { input: 50, cached: 10, output: 5, total: 55 } }),
+  ].join('\n') + '\n')
+}
+
+/** The snapshot's values without its path-keyed tables — the read positions and agent tables of 1.0 (§0a.1). */
+function stateValues(text: string): string {
+  const s = JSON.parse(text) as Record<string, unknown>
+  for (const k of ['cursors', 'agents', 'launches', 'mains', 'runs', 'runLaunches']) delete s[k]
+  s.sessions = Object.values((s.sessions ?? {}) as Record<string, unknown>)
+  for (const p of Object.values((s.pending ?? {}) as Record<string, Record<string, unknown>>)) delete p.session
+  return JSON.stringify(s)
+}
+
+test('1.14 §0a.5, §3 A2 rule 5: an activation under none neither reads nor makes the salt; the snapshot carries no project', async () => {
+  const fx = makeFixture()
+  addSyntheticProject(fx)
+  const kept = new Map<string, unknown>()
+  await activateHost(fx, REPO, { globalState: kept })
+  await waitOwnColdStart(state)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  assert.equal(kept.has('tokenPace.projectSalt'), false)
+  const text = fs.readFileSync(fx.stateFile, 'utf8')
+  const snap = JSON.parse(text) as Snapshot
+  assert.equal(snap.version, 9)
+  assert.equal(snap.attribution, 'none')
+  assert.equal('projects' in snap, false)
+  assert.equal(text.includes('"project"'), false)
+  assert.equal(Object.keys(snap.sessions).length, 0)
+})
+
+test('1.14 leak test (§0a.1–§0a.5, §0a.9): under hash no output holds the folder, its name, the worktree, the meta\'s other keys or the salt; basename names it only where it is shown', async () => {
+  const fx = makeFixture()
+  addSyntheticProject(fx)
+  const kept = new Map<string, unknown>()
+  const host = await activateHost(fx, REPO, { globalState: kept, settings: { 'tokenPace.attribution': 'project', ...PROJECT_SECTIONS } })
+  await waitOwnColdStart(state)
+  // §0a.5: switched on, the salt is made — 16 random bytes as hex — and kept in the global state.
+  const salt = String(host.ctx.globalState.get('tokenPace.projectSalt'))
+  assert.match(salt, /^[0-9a-f]{32}$/)
+  const page = openDashboard()
+  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+  const outputs = async (): Promise<Array<[string, string]>> => {
+    await state.execute('tokenPace.showUsageMarkdown')
+    await state.execute('tokenPace.showUsageQuickPick')
+    await state.execute('tokenPace.copySummary')
+    const summary = state.clipboard[state.clipboard.length - 1]
+    await state.execute('tokenPace.copyDiagnostics')
+    const diagnostics = state.clipboard[state.clipboard.length - 1]
+    const uri = (HOST.api as { Uri: { file(p: string): unknown } }).Uri.file
+    const before = state.writes.length
+    state.answers.push(uri(path.join(fx.data, 'out', 'usage.csv')), undefined)
+    await state.execute('tokenPace.exportCsv')
+    state.answers.push(uri(path.join(fx.data, 'out', 'usage.json')), undefined)
+    await state.execute('tokenPace.exportJson')
+    assert.ok(state.writes.length >= before + 2, 'the exports wrote nothing')
+    return [
+      ['page', JSON.stringify(page.sent.slice(-3))],
+      ['markdown', lastMarkdown()],
+      ['quick pick', JSON.stringify(state.quickPickControls.map((c) => c.items))],
+      ['status bar', JSON.stringify(state.items.map((i) => [i.text, i.tooltip]))],
+      ['summary', summary],
+      ['diagnostics', diagnostics],
+      ['exports', JSON.stringify(state.writes.slice(before))],
+      ['log', state.logText()],
+    ]
+  }
+  const hashed = await outputs()
+  // The Projects table is there, by its pseudonym: the key of the folder's directory, one project for both programs.
+  assert.match(hashed[0][1], /p:[0-9a-f]{12}/)
+  for (const [what, text] of hashed) {
+    for (const secret of [...SYN_SECRETS, salt]) assert.equal(text.includes(secret), false, `hash: the ${what} holds ${secret}`)
+  }
+
+  // basename: the one re-read the names need, and the name shows where a project is shown — never in the log, the
+  // diagnostics or the bar; the path, the worktree and the meta's neighbours nowhere.
+  const cold = coldStartLines(state)
+  state.set('tokenPace.showProjectNames', 'basename')
+  state.fireConfigChange(['tokenPace.showProjectNames'])
+  await waitColdStartLine(state, cold, 'the re-read for the names')
+  assert.match(state.logText(), /Project names switched to "basename" — re-reading the transcripts\./)
+  await waitFor('the name on the page', () => JSON.stringify(page.sent.slice(-1)).includes('synthetic-project-123'))
+  const named = await outputs()
+  for (const [what, text] of named) {
+    const shown = ['page', 'markdown', 'quick pick', 'exports'].includes(what)
+    for (const secret of [...SYN_SECRETS, salt]) {
+      if (secret === 'synthetic-project-123' && shown) continue
+      assert.equal(text.includes(secret), false, `basename: the ${what} holds ${secret}`)
+    }
+  }
+  assert.ok(named[1][1].includes('synthetic-project-123'), 'the markdown does not name the folder')
+
+  // basename → hash: the names go at once, nothing is read again.
+  const coldBefore = coldStartLines(state)
+  state.set('tokenPace.showProjectNames', 'hash')
+  state.fireConfigChange(['tokenPace.showProjectNames'])
+  await waitFor('the pseudonym back on the page', () => !JSON.stringify(page.sent.slice(-1)).includes('synthetic-project-123'))
+  assert.match(state.logText(), /Project names switched to "hash" — the names are dropped; nothing is re-read\./)
+  assert.equal(coldStartLines(state), coldBefore)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  const text = fs.readFileSync(fx.stateFile, 'utf8')
+  for (const secret of [...SYN_SECRETS, salt]) assert.equal(stateValues(text).includes(secret), false, `the snapshot's values hold ${secret}`)
+  assert.equal(text.includes(salt), false, 'the salt is in the snapshot')
+  const snap = JSON.parse(text) as Snapshot
+  // One key for the folder's Claude session, its worktree agent and its Codex rollout.
+  const synKeys = new Set(Object.entries(snap.sessions).filter(([file]) => file.includes(SYN_SLUG) || file.includes('thread-syn-0002')).map(([, s]) => s.project))
+  assert.equal(synKeys.size, 1)
+  assert.match([...synKeys][0], /^[0-9a-f]{12}$/)
+  assert.equal(JSON.stringify(snap.projects).includes('"name"'), false)
+})
+
+test('1.14 §3 A7: switched off, the per-project split folds back without a re-read — the totals the same, no key left', async () => {
+  const fx = makeFixture()
+  addSyntheticProject(fx)
+  await activateHost(fx, REPO, { settings: { 'tokenPace.attribution': 'session' } })
+  await waitOwnColdStart(state)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  const on = JSON.parse(fs.readFileSync(fx.stateFile, 'utf8')) as Snapshot
+  assert.ok(on.buckets.every((b) => typeof b.project === 'string'), 'a bucket without a project under session')
+  const kept = new Map<string, unknown>()
+  await activateHost(fx, REPO, { globalState: kept, settings: { 'tokenPace.attribution': 'session' } })
+  await waitOwnColdStart(state)
+  const cold = coldStartLines(state)
+  state.set('tokenPace.attribution', 'none')
+  state.fireConfigChange(['tokenPace.attribution'])
+  // project ↔ session would change nothing either; none re-reads nothing.
+  await sleep(300)
+  assert.equal(coldStartLines(state), cold)
+  assert.doesNotMatch(state.logText().split('\n').slice(-20).join('\n'), /re-reading the transcripts/)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  const off = JSON.parse(fs.readFileSync(fx.stateFile, 'utf8')) as Snapshot
+  assert.equal(off.attribution, 'none')
+  assert.equal('projects' in off, false)
+  assert.equal(JSON.stringify(off.buckets).includes('"project"'), false)
+  assert.equal(Object.keys(off.sessions).length, 0)
+  const total = (s: Snapshot): number[] => ['input', 'output', 'cacheRead', 'requests'].map((k) => s.buckets.reduce((n, b) => n + (b[k as 'input'] as number), 0))
+  assert.deepEqual(total(off), total(on))
+})
+
+test('1.14 §3 A2 rule 4: a 1.13 snapshot (version 8) under session is read again, and the log says why once', async () => {
+  const fx = makeFixture()
+  const seeded = await seedSnapshot(fx, 8)
+  // As 1.13 wrote it under session: version 8, no project on a bucket, a label on the cursors.
+  const v8 = { ...seeded, version: 8, attribution: 'session' as const }
+  fs.writeFileSync(fx.stateFile, JSON.stringify(v8))
+  // The fake host's log starts anew with each activation (state.reset).
+  const host = await activateHost(fx, REPO, { settings: { 'tokenPace.attribution': 'session' } })
+  await waitOwnColdStart(state)
+  const lines = state.log.filter((l) => l.message.includes('The per-project figures of 1.14 need one re-read of the transcripts.'))
+  assert.equal(lines.length, 1)
+  assert.ok(coldStartLines(state) > host.coldLinesAtStart)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  const after = JSON.parse(fs.readFileSync(fx.stateFile, 'utf8')) as Snapshot
+  assert.equal(after.version, 9)
+  assert.ok(after.buckets.every((b) => typeof b.project === 'string'))
+  // Under none the same version 8 is read on as it stands — no line, the buckets kept.
+  fs.writeFileSync(fx.stateFile, JSON.stringify({ ...seeded, version: 8 }))
+  await activateHost(fx, REPO)
+  await waitOwnColdStart(state)
+  assert.equal(state.log.some((l) => l.message.includes('The per-project figures of 1.14')), false)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })

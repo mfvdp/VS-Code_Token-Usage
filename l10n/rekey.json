@@ -400,6 +400,36 @@
       "part": "dashboard",
       "key": "{0}, {1}",
       "why": "1.14 B6 (R-RLC-113-lists): the same list separator on the page — the page's listOf joins its lists (the data-quality roots, the unpriced and family-priced models, the unrendered fields) through tr('{0}, {1}') — the model part's value copied, one translation in both parts"
+    },
+    {
+      "n": 51,
+      "by": "P4",
+      "kind": "nls-reword",
+      "key": "config.showProjectNames.description",
+      "why": "1.14 A1 rule 5 (§7a Q1): the default is hash now — by default a salted, stable pseudonym (safe in a screen share), with basename the name of the project's folder — and a sentence on the switch: to hash the names are dropped at once, to basename the transcripts are read again (a folder's name is read only while names are on) — translate anew"
+    },
+    {
+      "n": 52,
+      "by": "P4",
+      "kind": "nls-reword",
+      "key": "config.attribution.description",
+      "why": "1.14 A1, A2, A7: what is stored now — a salted key per project folder with the hourly figures, the folder's name only with basename, the session ids —, what a project is (a folder: its Claude Code sessions, their agents in a worktree too, a Codex session started there), and that only switching on re-reads: between project and session or back to none nothing is read again, none deletes the per-session records and the per-project split and the totals stay — the parenthesis on tool names and the Agents section word for word — translate anew"
+    },
+    {
+      "n": 53,
+      "by": "P4",
+      "kind": "add",
+      "part": "model",
+      "key": "(no project)",
+      "why": "1.14 A1 rule 2 (§7a Q15): a new key, the label of usage no folder can be named for — a Codex rollout without a working directory —, shown where a project's name or its pseudonym p:8f31c0a4e2b1 stands (a table cell, a list, a filter chip) — the brackets as in the English, German (kein Projekt)"
+    },
+    {
+      "n": 54,
+      "by": "P4",
+      "kind": "add",
+      "part": "model",
+      "key": "other projects",
+      "why": "1.14 A3 (§7a Q12): a new key, the label of the projects folded together — beyond the 200 most recently active, or idle longer than retentionDays —, shown where a project's name stands (a table cell, a list, a filter chip) — lower case as the English, a label and no sentence, German weitere Projekte"
     }
   ]
 }

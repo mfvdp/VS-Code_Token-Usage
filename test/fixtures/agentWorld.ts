@@ -144,7 +144,9 @@ export function agentWorld(attribution: Attribution = 'none'): { agg: Aggregator
   agg.attribution = attribution
   const raw: string[] = []
   const isSub = (file: string): boolean => file.split(path.sep).includes('subagents')
-  const ctx = (file: string) => ctxFor({ file, isSub: isSub(file), attribution })
+  // 1.14 P4: with a salt, as the host always hands one in with attribution on — a key needs one (project.ts projectKeyOf:
+  // '' without a salt is the unattributed key), and the world's sessions are the project -home-t-alpha, named alpha.
+  const ctx = (file: string) => ctxFor({ file, isSub: isSub(file), attribution, projectSalt: 'salt' })
   const read = (file: string, line: string): void => {
     raw.push(line)
     agg.addClaudeLine(line, ctx(file))

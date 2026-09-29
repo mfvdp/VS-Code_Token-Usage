@@ -1457,7 +1457,7 @@
               "basename",
               "hash"
             ],
-            "default": "basename",
+            "default": "hash",
             "enumDescriptions": [
               "%config.showProjectNames.enum.basename%",
               "%config.showProjectNames.enum.hash%"

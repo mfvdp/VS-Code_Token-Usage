@@ -2078,7 +2078,9 @@ export function agentTreeFor(
     mains: agg.mains(),
     runs: agg.runs(),
     runLaunches: agg.runLaunches(),
-    sessions: agg.sessions(),
+    // 1.14 P4: the records hold the project key; the tree names a session's project by its label (P5 hands the
+    // tree the label table instead).
+    sessions: agg.sessions().map((s) => ({ ...s, project: agg.projectLabelOf(s.project) })),
     attribution: cfg.attribution,
     selected: ui.agentSelected ?? null,
     expanded: ui.agentsExpanded ?? [],

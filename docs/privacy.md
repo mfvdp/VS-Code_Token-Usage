@@ -174,7 +174,22 @@ identifiers and counts, never content:
   model of the newest turn — the `timestamp` of the newest counted `token_count` event of a rollout
   that is not a fork, and the `model` its `turn_context` named, held to letters, digits and `_.:@/-`,
   at most 64 characters. Both were read before for the token count; the value is kept in the token
-  snapshot and never exported.
+  snapshot and never exported;
+* with `tokenPace.attribution` on — `project` or `session`; read since 1.0, under these rules since 1.14
+  ([Sessions and projects](sessions.md)) —, for the project figures: of where a Claude transcript lies, the one
+  `slug` segment directly below `~/.claude/projects/` (the session's directory — never another segment, the file
+  name or a line's field), hashed with a salt of this installation into the project key; of a Claude line the
+  `sessionId` (letters, digits, `_` and `-`, at most 64 characters, else the file's name) and — only with
+  `showProjectNames: basename`, only of a main transcript's line, and only when it names the project folder itself
+  — the `cwd`, of which the folder's name is kept (letters, digits and `_ . : @ -`, every other character a `_`, at
+  most 64 characters); of a Codex rollout's `session_meta` line in `~/.codex/sessions/` the `id` and the `cwd` (the
+  key, and with `basename` the name), beside the `forked_from_id` and `thread_source` read since 1.2 to skip a
+  fork's copied history. Never the path itself, never `gitBranch`, nothing else of these lines. The key goes on the
+  hour, day and month figures of the token snapshot, into its label table (with the time of the project's newest
+  line) and on the session records; the salt `tokenPace.projectSalt`, 16 random bytes, is kept in VS Code's global
+  state, made only while attribution is on, and deleted with the token snapshot by *Clear Stored Data…*. The key,
+  a name and the salt are never in the log, the diagnostics report, a notification or the status bar. With
+  `none` none of this is read, and the snapshot carries no key.
 
 **The status-line mirror** ([Quota sources](quota-sources.md#claude-status-line-bridge-opt-in),
 [Prompt cache](prompt-cache.md#what-is-read)) is written only while you have the opt-in

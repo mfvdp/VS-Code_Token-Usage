@@ -117,8 +117,8 @@ power-user settings sit at the end of their group.
 | `hourRetentionDays` | `45` | How long hour buckets are kept (1–3650) before they are folded into days. Irreversible |
 | `retentionDays` | `400` | How long day buckets are kept (60–36500) before they are folded into months |
 | `quotaHistoryDays` | `30` | How long quota readings are kept as a time series (0–90). `0` empties the `forecast` entry of `statusBar.show` and the `history` section of the dashboard, and leaves the quota cards without a sparkline or a forecast line |
-| `attribution` | `none` | `none`, `project` or `session`. Changing it triggers a full re-scan |
-| `showProjectNames` | `basename` | `basename` or `hash` (salted, screen-share safe) |
+| `attribution` | `none` | `none`, `project` or `session`. Switching it on reads the transcripts again; switching between `project` and `session`, or back to `none`, reads nothing again ([Sessions and projects](sessions.md#switching)) |
+| `showProjectNames` | `hash` | `hash` (a salted, stable pseudonym such as `p:8f31c0a4e2b1`, screen-share safe) or `basename` (the project folder's name) |
 
 ## Alerts
 

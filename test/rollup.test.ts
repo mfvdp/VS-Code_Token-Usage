@@ -3,7 +3,8 @@
 
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { Aggregator } from '../src/agg'
+import { Aggregator, SESSION_CAP } from '../src/agg'
+import { OTHER_PROJECTS, PROJECT_CAP, projectKeyOf } from '../src/project'
 import { addDays, dayOf, dayOfHour, daysBetween, hourIndex, TimeConfig } from '../src/time'
 import { Bucket } from '../src/types'
 import { claudeLine, ctxFor } from './fixtures/helpers'
@@ -242,4 +243,117 @@ test('cost uses the bucket day in the configured zone and the first day of a mon
   assert.ok(c.usd > 0)
   assert.deepEqual(c.unpricedModels, [])
   assert.equal(addDays('2026-01-31', 1), '2026-02-01')
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 P4 (§3 A2 rule 3, §3 A3): the project key through the roll-up, the cap, the idle fold and the session records.
+// ---------------------------------------------------------------------------
+
+const P_SALT = 'salt-1'
+const P_ROOT = '/virtual/claude/projects'
+const projectCtx = (slug: string, file = 'sess.jsonl') => ctxFor({ attribution: 'project', projectSalt: P_SALT, file: `${P_ROOT}/${slug}/${file}` })
+
+function addTo(agg: Aggregator, slug: string, ts: number, input = 10, file?: string): void {
+  agg.addClaudeLine(claudeLine({ id: `msg_${++seq}`, ts, cwd: null, sessionId: null, usage: { input, output: 1 }, final: true }), projectCtx(slug, file))
+}
+
+test('1.14 §3 A2 rule 3: an hour of project p folds into p\'s day, p\'s day into p\'s month — two projects stay two', () => {
+  const agg = new Aggregator()
+  const old = NOW - 500 * DAY
+  const mid = NOW - 60 * DAY
+  for (const slug of ['-home-u-a', '-home-u-b']) {
+    addTo(agg, slug, old, 7)
+    addTo(agg, slug, mid, 5)
+    // A recent line keeps the project from the idle fold.
+    addTo(agg, slug, NOW - DAY, 1)
+  }
+  const before = totals(agg.all())
+  agg.rollup(NOW, 45, 400, utc)
+  const a = projectKeyOf(P_SALT, '-home-u-a')
+  const b = projectKeyOf(P_SALT, '-home-u-b')
+  const byRes = (res: string, key: string) => agg.all().filter((x) => x.res === res && x.project === key)
+  for (const key of [a, b]) {
+    assert.equal(byRes('m', key).length, 1, 'the month of the old line')
+    assert.equal(byRes('m', key)[0].input, 7)
+    assert.equal(byRes('d', key).length, 1, 'the day of the line 60 days back')
+    assert.equal(byRes('d', key)[0].input, 5)
+    assert.equal(byRes('h', key).length, 1)
+  }
+  assert.deepEqual(totals(agg.all()), before)
+  assert.equal(agg.all().every((x) => x.project === a || x.project === b), true)
+  // A late line of an old message follows it into its project's month.
+  assert.equal(agg.all().length, 6)
+})
+
+test('1.14 §3 A3 rule 1: 250 projects (PROJECT_CAP + 50, one line each) → 200 kept, the 50 least recent in other projects, totals exact', () => {
+  const agg = new Aggregator()
+  const slugs = Array.from({ length: PROJECT_CAP + 50 }, (_, i) => `-home-u-gen-${String(i).padStart(3, '0')}`)
+  // Project i's line is i minutes after the first: the first 50 are the least recently active.
+  slugs.forEach((slug, i) => addTo(agg, slug, NOW - 2 * DAY + i * 60_000, i + 1))
+  const before = totals(agg.all())
+  const started = Date.now()
+  agg.rollup(NOW, 45, 400, utc)
+  const ms = Date.now() - started
+  const labels = agg.projects()
+  const own = Object.keys(labels).filter((k) => k !== OTHER_PROJECTS)
+  assert.equal(own.length, PROJECT_CAP)
+  assert.deepEqual(own.sort(), slugs.slice(50).map((s) => projectKeyOf(P_SALT, s)).sort())
+  assert.equal(labels[OTHER_PROJECTS].folded, 50)
+  assert.equal(labels[OTHER_PROJECTS].lastTs, NOW - 2 * DAY + 49 * 60_000)
+  const other = agg.all().filter((b) => b.project === OTHER_PROJECTS)
+  assert.equal(other.reduce((s, b) => s + b.input, 0), (50 * 51) / 2)
+  assert.deepEqual(totals(agg.all()), before)
+  // The session records of the folded projects (one transcript each) take the key of other projects.
+  assert.equal(agg.sessions().filter((s) => s.project === OTHER_PROJECTS).length, 50)
+  // Running it again folds nothing more.
+  assert.equal(agg.foldProjects(NOW, 400), 0)
+  assert.ok(ms < 2000, `the fold of 250 projects took ${ms} ms`)
+})
+
+test('1.14 §3 A3 rules 1, 3: the folded projects\' session records take the key of other projects; a record that goes on takes its key back', () => {
+  const agg = new Aggregator()
+  for (let i = 0; i < PROJECT_CAP + 1; i++) addTo(agg, `-home-u-p${i}`, NOW - DAY + i * 1000, 1, `s${i}.jsonl`)
+  agg.rollup(NOW, 45, 400, utc)
+  const rec = agg.sessions().find((s) => s.sessionId === 's0')
+  assert.equal(rec?.project, OTHER_PROJECTS)
+  assert.equal(agg.sessions().filter((s) => s.project === OTHER_PROJECTS).length, 1)
+  addTo(agg, '-home-u-p0', NOW, 1, 's0.jsonl')
+  assert.equal(agg.sessions().find((s) => s.sessionId === 's0')?.project, projectKeyOf(P_SALT, '-home-u-p0'))
+})
+
+test('1.14 §3 A3 rule 2: a project idle 401 days folds into other projects, one idle 399 days stays — its months keep their totals', () => {
+  const agg = new Aggregator()
+  addTo(agg, '-home-u-idle', NOW - 401 * DAY, 11)
+  addTo(agg, '-home-u-kept', NOW - 399 * DAY, 13)
+  const before = totals(agg.all())
+  agg.rollup(NOW, 45, 400, utc)
+  const idle = projectKeyOf(P_SALT, '-home-u-idle')
+  const kept = projectKeyOf(P_SALT, '-home-u-kept')
+  const labels = agg.projects()
+  assert.equal(idle in labels, false)
+  assert.equal(kept in labels, true)
+  assert.equal(labels[OTHER_PROJECTS].folded, 1)
+  assert.equal(agg.all().filter((b) => b.project === OTHER_PROJECTS).reduce((s, b) => s + b.input, 0), 11)
+  assert.equal(agg.all().filter((b) => b.project === kept).reduce((s, b) => s + b.input, 0), 13)
+  assert.equal(agg.all().some((b) => b.project === idle), false)
+  assert.deepEqual(totals(agg.all()), before)
+})
+
+test('1.14 §3 A3 rule 3: session records older than hourRetentionDays go at the roll-up; 2100 records (SESSION_CAP + 100) → the 2000 newest', () => {
+  const agg = new Aggregator()
+  addTo(agg, '-home-u-a', NOW - 44 * DAY, 1, 'young.jsonl')
+  addTo(agg, '-home-u-a', NOW - 46 * DAY, 1, 'old.jsonl')
+  agg.rollup(NOW, 45, 400, utc)
+  assert.deepEqual(agg.sessions().map((s) => s.sessionId), ['young'])
+
+  const many = new Aggregator()
+  for (let i = 0; i < SESSION_CAP + 100; i++) addTo(many, '-home-u-b', NOW - DAY + i * 1000, 1, `r${i}.jsonl`)
+  assert.equal(many.sessions().length, SESSION_CAP + 100)
+  many.rollup(NOW, 45, 400, utc)
+  assert.equal(many.sessions().length, SESSION_CAP)
+  const ids = new Set(many.sessions().map((s) => s.sessionId))
+  assert.equal(ids.has('r99'), false)
+  assert.equal(ids.has('r100'), true)
+  assert.equal(ids.has(`r${SESSION_CAP + 99}`), true)
+  assert.equal(SESSION_CAP, 2000)
 })

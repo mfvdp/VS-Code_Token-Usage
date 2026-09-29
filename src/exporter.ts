@@ -328,7 +328,8 @@ export function agentRows(agg: Aggregator, range: ExportRange, cfg: Config, tcfg
     mains: agg.mains(),
     runs: agg.runs(),
     runLaunches: agg.runLaunches(),
-    sessions: agg.sessions(),
+    // 1.14 P4: the records hold the project key; the tree names a session's project by its label.
+    sessions: agg.sessions().map((s) => ({ ...s, project: agg.projectLabelOf(s.project) })),
     attribution: cfg.attribution,
     selected: null,
     tcfg,
@@ -492,11 +493,12 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
   }
 
   if (cfg.attribution !== 'none') {
-    // Project labels are exported exactly as they are stored — a basename, or the salted
-    // hash when showProjectNames is 'hash'. The save dialog says so before the file exists.
+    // Project labels as the views show them — a folder's name under showProjectNames basename, else the salted
+    // pseudonym (1.14 P4: the record holds the key since 1.14; P7 completes the export). The save dialog says so
+    // before the file exists.
     out.sessions = agg.sessions().map((s) => ({
       sessionId: s.sessionId,
-      project: s.project,
+      project: agg.projectLabelOf(s.project),
       source: s.source,
       isSub: s.isSub,
       parent: s.parent,

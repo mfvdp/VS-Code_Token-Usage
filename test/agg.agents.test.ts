@@ -19,6 +19,7 @@ import {
   IngestContext, claudePlacement, cleanAgentId, cleanAgentName, parseAgentMeta, rejectedOf,
 } from '../src/agg'
 import { agentTranscriptsOf, configureRoots } from '../src/discover'
+import { projectKeyOf } from '../src/project'
 import { agentRows, agentsCsv, toCsv, toJson, toolsCsv } from '../src/exporter'
 import { AGENT_META_MAX_BYTES, agentReplayFiles, readAgentMeta, replayAgents, scan } from '../src/scan'
 import { newCursor } from '../src/tail'
@@ -107,14 +108,15 @@ test('claudePlacement anchors on the nearest subagents directory, at both depths
   assert.deepEqual(claudePlacement(odd, true), { slug: CLAUDE_SLUG, parent: SESSION, sessionFile: null, workflowId: null })
 })
 
+// 1.14 P4 (pinned and changed: the record's project is the session folder's key, no longer its slug — §3 A1 rule 1).
 test('a workflow agent\'s session record names its real session and project', () => {
   const agg = new Aggregator()
-  const ctx = ctxFor({ file: WF_AGENT, isSub: true, attribution: 'session' })
+  const ctx = ctxFor({ file: WF_AGENT, isSub: true, attribution: 'session', projectSalt: 'salt' })
   agg.addClaudeLine(claudeLine({ id: 'w1', ts: T0, cwd: null, sessionId: null, agentId: 'def456', usage: { input: 1 } }), ctx)
   const rec = agg.sessions()[0]
   // Before the fix these were "workflows" and "subagents".
   assert.equal(rec.parent, SESSION)
-  assert.equal(rec.project, CLAUDE_SLUG)
+  assert.equal(rec.project, projectKeyOf('salt', CLAUDE_SLUG))
   assert.equal(rec.isSub, true)
 })
 
@@ -1198,12 +1200,13 @@ function sampleAgg(): Aggregator {
 
 // 1.6 P2b: pinned version 7, `journalResults` and `agentsReplayed`; the snapshot is version 8 now,
 // with the runs and the agent tables' revision in their place.
-test('the agent tables survive a snapshot round trip at version 8, lookups included', () => {
+// 1.14 P4 (pinned and changed: version 8 → 9, the project key on a bucket — §3 A2; the agent tables unchanged).
+test('the agent tables survive a snapshot round trip at version 9, lookups included', () => {
   const agg = sampleAgg()
   agg.agentsRevision = AGENT_TABLES_REVISION
   const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
   assert.equal(snap.version, STATE_VERSION)
-  assert.equal(STATE_VERSION, 8)
+  assert.equal(STATE_VERSION, 9)
   assert.deepEqual(Object.keys(snap.agents ?? {}).sort(), [AGENT, WF_AGENT].sort())
   assert.deepEqual(Object.keys(snap.launches ?? {}), ['toolu_bg'])
   assert.deepEqual(Object.keys(snap.mains ?? {}), [MAIN])
@@ -1247,11 +1250,12 @@ test('a version 6 or 5 snapshot loads without agent tables and asks for the repl
     assert.equal(old.mains().length, 0, `v${version}`)
     assert.equal(old.runs().length, 0, `v${version}`)
     assert.equal(old.agentsRevision, 0, `v${version}`)
-    // The counting loads as before, and is written back as version 8.
+    // The counting loads as before, and is written back as version 9 (1.14 P4, pinned and changed: was 8).
     assert.deepEqual(old.all(), agg.all(), `v${version}`)
-    assert.equal(old.toSnapshot().version, 8)
+    assert.equal(old.toSnapshot().version, 9)
   }
-  assert.equal(Aggregator.fromSnapshot({ ...snap, version: 9 }).all().length, 0)
+  // 1.14 P4 (pinned and changed: 9 is read now — 10 is the first version this build refuses).
+  assert.equal(Aggregator.fromSnapshot({ ...snap, version: 10 }).all().length, 0)
 })
 
 test('a hand-edited snapshot cannot put a field or a string into the agent tables', () => {

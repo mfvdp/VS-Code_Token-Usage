@@ -188,6 +188,11 @@ const CREDENTIALS_SOURCE = '~/.claude/.credentials.json or the Keychain item Cla
  */
 const PAYLOAD_PAGES = ['privacy', 'notifications']
 const PAYLOAD_SOURCE = 'the notification payload'
+/**
+ * 1.14 §0a.1–§0a.4: the attribution readers — read since 1.0 while `tokenPace.attribution` is project or session, and
+ * put under a row in 1.14 — are held to the privacy page and the sessions page.
+ */
+const ATTRIBUTION_PAGES = ['privacy', 'sessions']
 
 /** @type {ReadContractRow[]} */
 export const READ_CONTRACT = [
@@ -385,6 +390,22 @@ export const READ_CONTRACT = [
   { what: 'the notification payload', source: PAYLOAD_SOURCE, file: 'src/notify.ts', kind: 'fields', body: 'export function payloadOf(', variable: 'e',
     fields: ['event', 'provider', 'program', 'windowLabel', 'windowKind', 'percent', 'resetsAt', 'etaAt', 'since', 'atLeastMs', 'wait', 'at'],
     pages: PAYLOAD_PAGES },
+  // 1.14 §0a.1 (P4): a Claude transcript's project key — of the path the scan opens anyway, the one segment directly
+  // below the projects root (the session's directory, which `claudePlacement` returns as its `slug` for a subagent and
+  // a workflow agent too), hashed with the salt; never a line's field, the file name or another segment.
+  { what: 'attribution: the Claude project folder', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function claudeProjectOf(', variable: 'place',
+    fields: ['slug'], pages: ATTRIBUTION_PAGES },
+  // 1.14 §0a.2 (P4): the folder's name — a main transcript's line's `cwd`, under `showProjectNames: basename` only, and
+  // only when it slugs to the transcript's directory; under hash the line is not looked at.
+  { what: 'attribution: the Claude working directory', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function claudeProjectName(', variable: 'd',
+    fields: ['cwd'], pages: ATTRIBUTION_PAGES },
+  // 1.14 §0a.4 (P4): a Claude line's session id, through the id alphabet.
+  { what: 'attribution: the Claude session id', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function claudeSessionOf(', variable: 'd',
+    fields: ['sessionId'], pages: ATTRIBUTION_PAGES },
+  // 1.14 §0a.3, §0a.4 (P4): a Codex rollout's `session_meta` — `forked_from_id` and `thread_source` for the counting since
+  // 1.2, and with attribution on its `id` and its `cwd` (the key, and under basename the folder's name).
+  { what: 'attribution: the Codex session_meta', source: '~/.codex/sessions/', file: 'src/agg.ts', kind: 'fields', body: 'function codexSessionMeta(', variable: 'p',
+    fields: ['forked_from_id', 'thread_source', 'id', 'cwd'], pages: ATTRIBUTION_PAGES },
 ]
 
 /**

@@ -456,6 +456,8 @@ test('the read contract holds for the shipped sources: every reader names exactl
   const credentialsRow = (what: string): boolean => what === 'the credentials document' || what === 'the credentials document\'s token'
   // 1.12 P6 (§0a.10, pinned and changed): the notification payload's row reads src/notify.ts, where `payloadOf` builds it.
   const payloadRow = (what: string): boolean => what === 'the notification payload'
+  // 1.14 P4 (§0a.1–§0a.4): the four attribution readers, the aggregator's.
+  const attributionRow = (what: string): boolean => what.startsWith('attribution: ')
   const watchRow = (what: string): boolean => (keepWarmRow(what) && !hostRow(what)) || (promptsRow(what) && !listRow(what) && !typedRow(what))
   const fileOf = (what: string): string => what.startsWith('the run record') ? 'src/runRecord.ts'
     : what === 'the agent hook\'s input' ? 'src/agentHookScript.ts' : what === 'the agent hook\'s mirror' ? 'src/agentHook.ts'
@@ -496,8 +498,10 @@ test('the read contract holds for the shipped sources: every reader names exactl
     // 1.12 P6 (§0a.10, pinned and changed): the payload's row to the privacy page — the notifications page joins it when
     // it exists (P9 writes docs/notifications.md; 1.10 P2's precedent for the prompts page). 1.12 P9 (pinned and changed):
     // it exists — the payload's row is held to both.
+    // 1.14 P4 (§0a.1–§0a.4, pinned and changed): the attribution readers' rows are held to the privacy page and the sessions page.
     assert.deepEqual(row.pages, promptCacheRow(row.what) ? ['privacy', 'promptCache'] : promptsRow(row.what) ? ['privacy', 'prompts']
-      : credentialsRow(row.what) ? ['privacy', 'quotaSources'] : payloadRow(row.what) ? ['privacy', 'notifications'] : undefined, row.what)
+      : credentialsRow(row.what) ? ['privacy', 'quotaSources'] : payloadRow(row.what) ? ['privacy', 'notifications']
+        : attributionRow(row.what) ? ['privacy', 'sessions'] : undefined, row.what)
     if (mirrorRow(row.what)) assert.equal(row.source, 'statusline-mirror.json', row.what)
   }
   // 1.8 P10 (§0a.6–§0a.8): the keep-warm host, reader by reader — the two shell-execution events, an
@@ -541,6 +545,14 @@ test('the read contract holds for the shipped sources: every reader names exactl
   assert.deepEqual(contract.READ_CONTRACT.filter((row) => payloadRow(row.what)).map((row) => [row.what, row.source, row.kind, row.body, row.variable, row.fields]), [
     ['the notification payload', 'the notification payload', 'fields', 'export function payloadOf(', 'e',
       ['event', 'provider', 'program', 'windowLabel', 'windowKind', 'percent', 'resetsAt', 'etaAt', 'since', 'atLeastMs', 'wait', 'at']],
+  ])
+  // 1.14 §0a.1–§0a.4 (P4): the attribution readers, each in its own function — the Claude folder from where the file lies
+  // (`place.slug`, never a line's field), the working directory for a name, the session id, and the Codex session_meta.
+  assert.deepEqual(contract.READ_CONTRACT.filter((row) => attributionRow(row.what)).map((row) => [row.what, row.source, row.kind, row.body, row.variable, row.fields]), [
+    ['attribution: the Claude project folder', '~/.claude/projects/', 'fields', 'function claudeProjectOf(', 'place', ['slug']],
+    ['attribution: the Claude working directory', '~/.claude/projects/', 'fields', 'function claudeProjectName(', 'd', ['cwd']],
+    ['attribution: the Claude session id', '~/.claude/projects/', 'fields', 'function claudeSessionOf(', 'd', ['sessionId']],
+    ['attribution: the Codex session_meta', '~/.codex/sessions/', 'fields', 'function codexSessionMeta(', 'p', ['forked_from_id', 'thread_source', 'id', 'cwd']],
   ])
 })
 
@@ -939,4 +951,82 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 P4 (§0a.1–§0a.6): the attribution readers' leak test, on the aggregator itself — beside extension.test.ts's run
+// through the host (log, diagnostics, bar, exports, page), which the restore's allow-list alone would already keep
+// clean: here nothing between the reader and the outputs checks the key again.
+// ---------------------------------------------------------------------------
+
+test('1.14 leak test (§0a.1–§0a.6): under hash no store, view or export of the aggregator holds the folder, the slug, the worktree, the meta\'s other keys or the salt; under basename the name only where a project is shown', () => {
+  const { Aggregator } = require('../src/agg') as typeof import('../src/agg')
+  const { isProjectKey } = require('../src/project') as typeof import('../src/project')
+  const { toCsv, toJson, toMarkdownSummary } = require('../src/exporter') as typeof import('../src/exporter')
+  const { buildViewModel } = require('../src/viewModel') as typeof import('../src/viewModel')
+  const { claudeLine, codexTokenCount, codexTurnContext } = require('./fixtures/helpers') as typeof import('./fixtures/helpers')
+  const { makeConfig, makeInput, timeConfig, NOW, TODAY } = require('./fixtures/viewFixtures') as typeof import('./fixtures/viewFixtures')
+  const SLUG = '-home-u-synthetic-secret-dir-synthetic-project-123'
+  const CWD = '/home/u/synthetic-secret-dir/synthetic-project-123'
+  const SALT = 'f0e1d2c3b4a5968778695a4b3c2d1e0f'
+  const secrets = ['synthetic-secret-dir', 'synthetic-project-123', SLUG, 'synthetic-worktree-456', 'synthetic instruction text', 'synthetic-repo', SALT]
+  const main = `/virtual/claude/projects/${SLUG}/sess-syn.jsonl`
+  const sub = `/virtual/claude/projects/${SLUG}/sess-syn/subagents/agent-b6b6b6.jsonl`
+  const rollout = '/virtual/codex/sessions/2026/09/03/rollout-syn.jsonl'
+  const world = (hashProjects: boolean) => {
+    const agg = new Aggregator()
+    agg.attribution = 'project'
+    const ctx = (file: string, isSub = false) => ({ isSub, file, attribution: 'project' as const, projectSalt: SALT, hashProjects })
+    agg.cursors.set(main, { offset: 0, size: 0, ino: 1, dev: 1 })
+    agg.addClaudeLine(claudeLine({ id: 'p1', ts: NOW - 3_600_000, cwd: CWD, sessionId: 'sess-syn', usage: { input: 70, output: 7 }, final: true }), ctx(main))
+    agg.addClaudeLine(claudeLine({ id: 'p2', ts: NOW - 3_000_000, agentId: 'b6b6b6', sessionId: 'sess-syn', usage: { input: 30, output: 3 }, final: true,
+      cwd: '/home/u/synthetic-project-123/.claude/worktrees/synthetic-worktree-456' }), ctx(sub, true))
+    const cur = { offset: 0, size: 0, ino: 2, dev: 1 }
+    agg.cursors.set(rollout, cur)
+    agg.addCodexLine(JSON.stringify({ timestamp: new Date(NOW - 2_000_000).toISOString(), type: 'session_meta', payload: {
+      id: 'thread-syn', originator: 'codex_cli_rs', cli_version: '0.0.0', cwd: CWD,
+      instructions: 'synthetic instruction text', git: { repository_url: 'https://example.invalid/synthetic-repo' },
+    } }), cur, ctx(rollout))
+    agg.addCodexLine(codexTurnContext(NOW - 2_000_000, 'gpt-5.4'), cur, ctx(rollout))
+    agg.addCodexLine(codexTokenCount({ ts: NOW - 1_900_000, total: { input: 50, cached: 10, output: 5, total: 55 } }), cur, ctx(rollout))
+    const cfg = makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': hashProjects ? 'hash' : 'basename',
+      'tokenPace.dashboard.sections': ['summary', 'tokens', 'agents', 'projects', 'sessions', 'records'] })
+    const range = { from: '2026-08-25', to: TODAY, label: 'Last 10 days', preset: 'custom' }
+    const vm = buildViewModel(makeInput({ agg, cfg }))
+    // The snapshot's values without its path-keyed tables (the read positions and agent tables of 1.0 — §0a.1).
+    const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Record<string, unknown>
+    for (const k of ['cursors', 'agents', 'launches', 'mains', 'runs', 'runLaunches']) delete snap[k]
+    snap.sessions = Object.values(snap.sessions as Record<string, unknown>)
+    for (const p of Object.values(snap.pending as Record<string, Record<string, unknown>>)) delete p.session
+    return {
+      agg,
+      outputs: [
+        ['the snapshot\'s values', JSON.stringify(snap)],
+        ['the view model', JSON.stringify(vm)],
+        ['the CSV', toCsv(agg, range, cfg, timeConfig(cfg))],
+        ['the JSON export', toJson(agg, range, cfg, timeConfig(cfg), NOW)],
+        ['the summary', toMarkdownSummary(vm)],
+      ] as Array<[string, string]>,
+    }
+  }
+  const hashed = world(true)
+  // Every key the store holds is a key — never a segment of a path, never a name.
+  for (const b of hashed.agg.all()) assert.equal(isProjectKey(b.project), true, String(b.project))
+  for (const k of Object.keys(hashed.agg.projects())) assert.equal(isProjectKey(k), true, k)
+  for (const s of hashed.agg.sessions()) assert.equal(isProjectKey(s.project), true, s.project)
+  // One key for the folder's session, its worktree agent and its Codex rollout.
+  assert.equal(new Set(hashed.agg.sessions().map((s) => s.project)).size, 1)
+  for (const [what, text] of hashed.outputs) {
+    for (const secret of secrets) assert.equal(text.includes(secret), false, `hash: ${what} holds ${secret}`)
+  }
+  const named = world(false)
+  assert.equal(Object.values(named.agg.projects())[0].name, 'synthetic-project-123')
+  for (const [what, text] of named.outputs) {
+    for (const secret of secrets) {
+      // The folder's name, with names on, in the label table, the view model and the exports; nothing else, anywhere.
+      if (secret === 'synthetic-project-123' && what !== 'the summary') continue
+      assert.equal(text.includes(secret), false, `basename: ${what} holds ${secret}`)
+    }
+  }
+  assert.ok(named.outputs[0][1].includes('synthetic-project-123') && named.outputs[1][1].includes('synthetic-project-123'))
 })

@@ -101,6 +101,13 @@ export const STORED_MEMENTO_KEYS: Readonly<Record<MementoItem, readonly string[]
 }
 
 /**
+ * 1.14 §0a.5 (§7a Q4): the memento key of the project keys' salt. It goes with the token snapshot — *Clear Stored
+ * Data…*'s "Token snapshot (state.json)" deletes it after the file — so the pseudonyms of an earlier export cannot be
+ * linked to the ones the re-read makes after it: the re-read, with attribution on, draws a new salt.
+ */
+export const PROJECT_SALT_KEY = 'tokenPace.projectSalt'
+
+/**
  * The English name of an item, for the log.
  *
  * Deliberately not the translated one: a log line is pasted into an issue, and a maintainer
@@ -299,6 +306,8 @@ export async function deleteItems(
       const files = storedFiles(key, paths)
       if (files !== null) {
         for (const file of files) unlinkWithTemps(file)
+        // 1.14 §0a.5: the salt goes with the snapshot, after the file.
+        if (key === 'state') await memento.update(PROJECT_SALT_KEY, undefined)
       } else {
         for (const k of STORED_MEMENTO_KEYS[key as MementoItem]) {
           await memento.update(k, undefined)

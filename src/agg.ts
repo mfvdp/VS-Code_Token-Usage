@@ -1,17 +1,19 @@
 // SPDX-FileCopyrightText: 2026 Frederik Marx
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { createHash } from 'crypto'
 import * as path from 'path'
 // Value import, and safe: `adapters` imports this module for types only, so the cycle is erased.
 import { isKnownSource } from './adapters'
 import { AGENT_RETENTION_DAYS, MAX_RUN_AGENTS } from './agentTree'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
+import {
+  OTHER_PROJECTS, PROJECT_CAP, UNATTRIBUTED, cleanProjectName, isProjectKey, projectKeyOf, projectLabel, slugOf,
+} from './project'
 import { cleanRunRecord, cleanRunRecordStat } from './runRecord'
 import { SYSTEM_TIME_CONFIG, TimeConfig, Zone, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
   AgentLaunch, AgentMeta, AgentRec, ApiErrorKind, Attribution, Bucket, CacheMissKind, MainRec, CodexRateLimitsSnapshot, CodexTurn, CompactionRec,
-  Cursor, Effort, JournalAgent, LastRequest, LaunchStatus, PendingMessage, PermissionMode, RateLimitKind, RecordedOutcome, RejectedRequest,
+  Cursor, Effort, JournalAgent, LastRequest, LaunchStatus, PendingMessage, PermissionMode, ProjectLabel, RateLimitKind, RecordedOutcome, RejectedRequest,
   Resolution, RunLaunch, RunRec, RunRecordStat, SessionRec, Snapshot, Source, StopReason, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS,
   STATE_VERSION, TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
 } from './types'
@@ -103,8 +105,14 @@ export function billable(b: Bucket): number {
 }
 
 const MS_HOUR = 3_600_000
-/** Eight days of per-session hour slices — one day more than the longest quota window. */
-const SESSION_HOUR_KEEP = 8 * 24
+
+/**
+ * 1.14 §3 A3 rule 3 (§7a Q12): at most this many session records — the newest kept. One record per transcript file,
+ * every subagent and workflow agent included, each with up to TURN_GAP_CAP gap numbers: 255 of them in four days on
+ * the measuring machine (≈ 64 a day), so 2000 is about 45 days of that pace with room; beside the cap, a record whose
+ * last line is older than `hourRetentionDays` goes at the roll-up.
+ */
+export const SESSION_CAP = 2000
 
 /**
  * How far back the tool side table is kept, whatever `retentionDays` says.
@@ -159,12 +167,109 @@ function monthBounds(month: string): { first: string; last: string } {
   return { first, last: `${month}-${String(days).padStart(2, '0')}` }
 }
 
+// ------------------------------------------------------------- Attribution (1.14 §0a.1–§0a.4)
+
 /**
- * A pseudonym for a project that survives renames of nothing but is stable for one path:
- * the salt is per installation, so two people with the same checkout path do not share it.
+ * §0a.1: a Claude transcript's project key — of where the file lies, never of a line: the directory directly below
+ * the projects root, which `claudePlacement` returns as its `slug` for a main transcript, a subagent and a workflow
+ * agent alike (the session's directory). So the key is known before the first line is parsed, the same for every
+ * line of the file and for every file of a session — a worktree's agent counts to the folder its session was
+ * started in. The segment goes into the hash and nowhere else. '' without a salt or a slug.
  */
-function projectHashOf(salt: string, full: string): string {
-  return createHash('sha256').update(salt + full).digest('hex').slice(0, 12)
+function claudeProjectOf(place: ClaudePlacement, ctx: IngestContext): string {
+  return projectKeyOf(ctx.projectSalt, place.slug)
+}
+
+/**
+ * §0a.2: a folder's name, of a main transcript's counted line — only under `showProjectNames: basename`, and only
+ * when the line's `cwd` slugs to the transcript's directory: the working directory is the project folder itself, not
+ * a worktree or a subdirectory a session moved to. Under hash, off, or for a subagent it returns before the line is
+ * looked at. The `cwd` does not outlive the call.
+ */
+function claudeProjectName(d: any, slug: string, ctx: IngestContext): string | null {
+  if (ctx.attribution === 'none' || ctx.hashProjects || ctx.isSub) return null
+  const cwd = str(d.cwd)
+  if (cwd === null || slugOf(cwd) !== slug) return null
+  return cleanProjectName(path.basename(cwd))
+}
+
+/** §0a.4: a Claude line's session id — `[A-Za-z0-9_-]`, at most 64 characters, else the file's name. */
+function claudeSessionOf(d: any, file: string): string {
+  return cleanAgentId(d.sessionId) ?? path.basename(file, '.jsonl')
+}
+
+/** What a Codex rollout's `session_meta` line gives (§0a.3, §0a.4). */
+interface CodexMetaFacts {
+  /** The rollout is a fork or a subagent's thread: its copied history is skipped (read since 1.2). */
+  forked: boolean
+  forkedFrom: string | null
+  /** With attribution on: the session id, the project key ('' without a `cwd`), with names on the folder's name. */
+  attributed: { sessionId: string; key: string; name: string | null } | null
+}
+
+/**
+ * §0a.3: a rollout's `session_meta` payload — of it `forked_from_id` and `thread_source` for the counting (since
+ * 1.2), and with attribution on `id` and `cwd`: the key is `projectKeyOf(salt, slugOf(cwd))`, so a Codex session
+ * started in a folder and a Claude Code session started there share one key; under basename the folder's name too.
+ * A payload without `cwd` is unattributed (key '') — never its day directory (§7a Q15). The `cwd` does not outlive
+ * the call.
+ */
+function codexSessionMeta(p: any, file: string, ctx: IngestContext): CodexMetaFacts {
+  const forkedFrom = str(p.forked_from_id)
+  const forked = forkedFrom !== null || p.thread_source === 'subagent'
+  if (ctx.attribution === 'none') return { forked, forkedFrom, attributed: null }
+  const sessionId = cleanAgentId(p.id) ?? path.basename(file, '.jsonl')
+  const cwd = str(p.cwd)
+  if (cwd === null) return { forked, forkedFrom, attributed: { sessionId, key: UNATTRIBUTED, name: null } }
+  return {
+    forked, forkedFrom,
+    attributed: {
+      sessionId,
+      key: projectKeyOf(ctx.projectSalt, slugOf(cwd)),
+      name: ctx.hashProjects ? null : cleanProjectName(path.basename(cwd)),
+    },
+  }
+}
+
+/**
+ * 1.14 §3 A2 rule 4: whether a stored snapshot is one this build does not read under the given attribution because
+ * it predates the project key — a version 5–8 snapshot under project or session. The host re-reads the transcripts
+ * then, and its log says why once. Under none a version 5–8 snapshot is read as it stands and saved as 9.
+ */
+export function needsProjectReread(s: Snapshot | undefined, attribution: Attribution): boolean {
+  return s !== undefined && s !== null && attribution !== 'none'
+    && READABLE_STATE_VERSIONS.includes(s.version) && s.version < STATE_VERSION
+}
+
+/**
+ * A stored session record (version 9, attribution on): its project key checked (§0a.6 — anything else is the
+ * unattributed key), and 1.0–1.13's `projectHash` and `hourUsage` left behind (§3 A3 rule 4). Null for no record.
+ */
+function restoreSession(v: unknown): SessionRec | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const rec = { ...(v as SessionRec & { projectHash?: unknown; hourUsage?: unknown }) }
+  delete rec.projectHash
+  delete rec.hourUsage
+  rec.project = storedProjectKey(rec.project) ?? UNATTRIBUTED
+  return rec
+}
+
+/** A project key as stored, or null for anything this build does not accept (§0a.6's allow-list). */
+function storedProjectKey(v: unknown): string | null {
+  return isProjectKey(v) ? v : null
+}
+
+/**
+ * §0a.6: a label as stored — `lastTs` a finite number, `name` exactly what `cleanProjectName` gives (else dropped),
+ * and only with `names` on.
+ */
+function restoreProjectLabel(key: string, v: unknown, names: boolean): ProjectLabel | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const o = v as Record<string, unknown>
+  const label: ProjectLabel = { lastTs: typeof o.lastTs === 'number' && Number.isFinite(o.lastTs) && o.lastTs > 0 ? o.lastTs : 0 }
+  if (names && key !== UNATTRIBUTED && key !== OTHER_PROJECTS && typeof o.name === 'string' && cleanProjectName(o.name) === o.name) label.name = o.name
+  if (key === OTHER_PROJECTS && typeof o.folded === 'number' && Number.isInteger(o.folded) && o.folded > 0) label.folded = o.folded
+  return label
 }
 
 /**
@@ -1329,6 +1434,12 @@ export class Aggregator {
   private buckets = new Map<string, Bucket>()
   private pending = new Map<string, PendingMessage>()
   private sessionMap = new Map<string, SessionRec>()
+  /**
+   * 1.14 §0a.6: the label table — per project key the newest line and, under `showProjectNames: basename`, the
+   * folder's name (`Snapshot.projects`). Filled only while attribution is on; '' and OTHER_PROJECTS have entries
+   * too, never a name.
+   */
+  private projectMap = new Map<string, ProjectLabel>()
   /** Agent transcripts, keyed by path. */
   private agentMap = new Map<string, AgentRec>()
   /** Agent launches, keyed by tool_use id. */
@@ -1422,11 +1533,13 @@ export class Aggregator {
     return d
   }
 
-  private get(source: Source, res: Resolution, hour: number | null, day: string, model: string, isSub: boolean, tier: Tier): Bucket {
-    const k = bucketKey({ source, res, hour, day, model, isSub, tier })
+  private get(
+    source: Source, res: Resolution, hour: number | null, day: string, model: string, isSub: boolean, tier: Tier, project?: string,
+  ): Bucket {
+    const k = bucketKey({ source, res, hour, day, model, isSub, tier, project })
     let b = this.buckets.get(k)
     if (!b) {
-      b = emptyBucket(source, model, isSub, tier, res, hour, day)
+      b = emptyBucket(source, model, isSub, tier, res, hour, day, project)
       this.buckets.set(k, b)
     }
     return b
@@ -1452,15 +1565,16 @@ export class Aggregator {
    * now holds that hour — otherwise the roll-up would silently resurrect hour buckets and
    * the next roll-up would fold them again, double-shifting nothing but confusing sums.
    */
-  bucketFor(source: Source, hour: number, day: string, model: string, isSub: boolean, tier: Tier): Bucket {
+  bucketFor(source: Source, hour: number, day: string, model: string, isSub: boolean, tier: Tier, project?: string): Bucket {
     // Asked for by the counting alone — every ingest that adds to a bucket gets it here (1.6 L5).
     this.changes.buckets = true
     const hh = this.hourHorizon()
-    if (hh === null || hour >= hh) return this.get(source, 'h', hour, day, model, isSub, tier)
+    if (hh === null || hour >= hh) return this.get(source, 'h', hour, day, model, isSub, tier, project)
     const rolledDay = this.dayOfHourMemo(hour, this.timeConfig)
     const dh = this.dayHorizon()
-    if (dh === null || rolledDay >= dh) return this.get(source, 'd', null, rolledDay, model, isSub, tier)
-    return this.get(source, 'm', null, monthOf(rolledDay), model, isSub, tier)
+    // 1.14 §3 A2 rule 3: a late line takes its project into the day or month that holds its hour.
+    if (dh === null || rolledDay >= dh) return this.get(source, 'd', null, rolledDay, model, isSub, tier, project)
+    return this.get(source, 'm', null, monthOf(rolledDay), model, isSub, tier, project)
   }
 
   private noteIngest(ts: number): void {
@@ -1481,14 +1595,10 @@ export class Aggregator {
   }
 
   private newSession(
-    source: Source, sessionId: string, label: string, full: string, isSub: boolean,
-    parent: string | null, ts: number, ctx: IngestContext,
+    source: Source, sessionId: string, project: string, isSub: boolean, parent: string | null, ts: number,
   ): SessionRec {
-    const projectHash = projectHashOf(ctx.projectSalt, full)
     return {
-      source, sessionId,
-      project: ctx.hashProjects ? projectHash : label,
-      projectHash,
+      source, sessionId, project,
       isSub, parent,
       firstTs: ts, lastTs: ts,
       models: [],
@@ -1496,22 +1606,55 @@ export class Aggregator {
       requests: 0, outputFinal: 0,
       lastCacheTtl: null, lastCacheWriteTs: null,
       turnGapsMs: [],
-      hourUsage: {},
     }
   }
 
+  // --------------------------------------------------------------- Projects
+
   /**
-   * Credits one hour of a session with the tokens it was billed for.
-   *
-   * The lifetime counters cannot be sliced afterwards, so the slice is kept while the line
-   * is read. It is the same billable definition and the same UTC hour index the buckets use,
-   * so a per-window attribution and the window's own usage row add up to the same tokens.
+   * 1.14 §3 A2 rule 2: a line of project `key` — `lastTs` the newest, a name only when the table has none yet (the
+   * first name it gets is kept); '' and OTHER_PROJECTS never take a name.
    */
-  private noteSessionHour(s: SessionRec, hour: number, tokens: number): void {
-    if (!Number.isFinite(hour) || !(tokens > 0)) return
-    const map = s.hourUsage ?? (s.hourUsage = {})
-    const k = String(hour)
-    map[k] = (map[k] ?? 0) + tokens
+  private noteProject(key: string, ts: number | null, name: string | null): void {
+    let label = this.projectMap.get(key)
+    if (!label) {
+      label = { lastTs: 0 }
+      this.projectMap.set(key, label)
+    }
+    if (ts !== null && Number.isFinite(ts) && ts > label.lastTs) label.lastTs = ts
+    if (name !== null && label.name === undefined && key !== UNATTRIBUTED && key !== OTHER_PROJECTS) label.name = name
+  }
+
+  /**
+   * §0a.1: the key of a Claude transcript, hashed once per file — kept on its cursor (never the segment, which is
+   * dropped after the call); a line without a cursor (a test's) is hashed each time.
+   */
+  private claudeKeyFor(place: ClaudePlacement, ctx: IngestContext, cur: Cursor | undefined): string {
+    if (cur && cur.project !== undefined) return cur.project
+    const key = claudeProjectOf(place, ctx)
+    if (cur) cur.project = key
+    return key
+  }
+
+  /** 1.14 §0a.6: the label table, a copy — per project key the newest line and, with names on, the folder's name. */
+  projects(): Record<string, ProjectLabel> {
+    const out: Record<string, ProjectLabel> = {}
+    for (const [k, v] of this.projectMap) out[k] = { ...v }
+    return out
+  }
+
+  /**
+   * What a view prints for a project key (project.ts `projectLabel`): the folder's name when the table holds one —
+   * it holds names only under `showProjectNames: basename` —, else `p:` + the key; `(no project)`, `other projects`.
+   */
+  projectLabelOf(key: string): string {
+    const label = this.projectMap.get(key)
+    return projectLabel(key, label ? { [key]: label } : {}, true)
+  }
+
+  /** §3 A7: `showProjectNames` switched to hash — every name leaves the label table at once, no re-read. */
+  dropProjectNames(): void {
+    for (const label of this.projectMap.values()) delete label.name
   }
 
   /** A new request in a session: its distance to the previous one approximates a turn. */
@@ -1829,13 +1972,21 @@ export class Aggregator {
     if (cur) cur.lastTs = ts
     if (!replay) this.noteIngest(ts)
 
+    // 1.14 §0a.1: with attribution on, the key of the folder the transcript lies under — on every bucket its
+    // lines open, in the label table and on the session record; a main line may name the folder (§0a.2).
+    const attributed = !replay && ctx.attribution !== 'none'
+    const place = attributed ? claudePlacement(ctx.file, isSub) : null
+    const project = place ? this.claudeKeyFor(place, ctx, cur) : undefined
+    if (place && project !== undefined) this.noteProject(project, ts, claudeProjectName(d, place.slug, ctx))
+
     const prev = pending.get(id)
     if (!prev) {
       const tier = tierOf(u.speed, u.inference_geo)
       const p: PendingMessage = { hour, day, model, isSub, tier, ...cand, final }
+      if (project !== undefined) p.project = project
       const tools = this.countClaudeTools(p, m.content, !replay)
       if (!replay) {
-        const b = this.bucketFor('claude', hour, day, model, isSub, tier)
+        const b = this.bucketFor('claude', hour, day, model, isSub, tier, project)
         b.input += cand.input
         b.cacheWrite += cand.cacheWrite
         b.cacheWrite1h += cand.cacheWrite1h
@@ -1848,17 +1999,13 @@ export class Aggregator {
         if (final) b.outputFinal += 1
       }
 
-      if (!replay && ctx.attribution !== 'none') {
-        const place = claudePlacement(ctx.file, isSub)
-        const cwd = str(d.cwd)
+      if (place && project !== undefined) {
         const s = this.sessionFor(ctx.file, ctx, () => this.newSession(
-          'claude',
-          str(d.sessionId) ?? path.basename(ctx.file, '.jsonl'),
-          cwd ? path.basename(cwd) : place.slug,
-          cwd ?? place.slug,
-          isSub, place.parent, ts, ctx,
+          'claude', claudeSessionOf(d, ctx.file), project, isSub, place.parent, ts,
         ))
-        if (cur) { cur.sessionId = s.sessionId; cur.project = s.project }
+        // A record folded into other projects (§3 A3) takes its folder's key back with its next line.
+        s.project = project
+        if (cur) cur.sessionId = s.sessionId
         this.noteTurn(s, ts, model)
         s.input += cand.input
         s.cacheWrite += cand.cacheWrite
@@ -1869,7 +2016,6 @@ export class Aggregator {
         s.requests += 1
         if (final) s.outputFinal += 1
         this.noteCacheWrite(s, cand.cacheWrite, cand.cacheWrite1h, ts)
-        this.noteSessionHour(s, hour, cand.input + cand.cacheWrite + cand.output)
         p.session = ctx.file
       }
 
@@ -1912,8 +2058,10 @@ export class Aggregator {
     const newlyFinal = final && !prev.final
     if (!replay) {
       // Looked up by the message's own hour, so a late line follows its message into a
-      // rolled-up bucket.
-      const b = this.bucketFor('claude', prev.hour, prev.day, prev.model, prev.isSub, prev.tier)
+      // rolled-up bucket — and, with attribution on, by the project its first line opened (1.14 §3 A2 rule 1). A
+      // message restored without one (a snapshot edited by hand) grows the unattributed bucket.
+      const b = this.bucketFor('claude', prev.hour, prev.day, prev.model, prev.isSub, prev.tier,
+        attributed ? prev.project ?? UNATTRIBUTED : undefined)
       b.input += delta.input
       b.cacheWrite += delta.cacheWrite
       b.cacheWrite1h += delta.cacheWrite1h
@@ -1936,8 +2084,6 @@ export class Aggregator {
       if (newlyFinal) s.outputFinal += 1
       if (ts > s.lastTs) s.lastTs = ts
       this.noteCacheWrite(s, delta.cacheWrite, delta.cacheWrite1h, ts)
-      // The message's hour, not the late line's: the bucket above follows the same rule.
-      this.noteSessionHour(s, prev.hour, delta.input + delta.cacheWrite + delta.output)
     }
 
     notes.stop = m.stop_reason
@@ -2764,21 +2910,22 @@ export class Aggregator {
     const p = d?.payload
 
     if (type === 'session_meta') {
+      if (!p || typeof p !== 'object') return false
+      const meta = codexSessionMeta(p, ctx.file, ctx)
       // A forked thread carries the parent thread's complete history with it.
-      const forkedFrom = p ? str(p.forked_from_id) : null
-      if (p && (forkedFrom || p.thread_source === 'subagent')) cur.forked = true
-      if (ctx.attribution !== 'none' && p && typeof p === 'object') {
-        const cwd = str(p.cwd)
-        const sessionId = str(p.id) ?? path.basename(ctx.file, '.jsonl')
+      if (meta.forked) cur.forked = true
+      const own = meta.attributed
+      if (own !== null && !ctx.agentsOnly) {
         const at = Number.isFinite(ts) ? ts : Date.now()
+        // 1.14 §0a.3: the key goes onto the cursor — the meta line is read once, and a tail that resumes after a
+        // restart still files the later lines under it. A fork takes its own session_meta's `cwd`.
+        cur.project = own.key
+        this.noteProject(own.key, at, own.name)
         const s = this.sessionFor(ctx.file, ctx, () => this.newSession(
-          'codex', sessionId,
-          cwd ? path.basename(cwd) : path.basename(path.dirname(ctx.file)),
-          cwd ?? ctx.file,
-          !!cur.forked, forkedFrom, at, ctx,
+          'codex', own.sessionId, own.key, !!cur.forked, meta.forkedFrom, at,
         ))
+        s.project = own.key
         cur.sessionId = s.sessionId
-        cur.project = s.project
       }
       return false
     }
@@ -2857,7 +3004,10 @@ export class Aggregator {
     const at = Number.isFinite(ts) ? ts : Date.now()
     const model = cur.model || 'unknown'
     const isSub = !!cur.forked
-    const b = this.bucketFor('codex', hourIndex(at), localDay(at), model, isSub, 'standard')
+    // 1.14 §3 A1 rule 2: the rollout's key from its cursor; a rollout without a session_meta line (or without its
+    // `cwd`) is unattributed — '' —, never its day directory (§7a Q15).
+    const project = ctx.attribution !== 'none' ? (isProjectKey(cur.project) ? cur.project : UNATTRIBUTED) : undefined
+    const b = this.bucketFor('codex', hourIndex(at), localDay(at), model, isSub, 'standard', project)
     const add = {
       input: num(src.input_tokens),
       cacheRead: num(src.cached_input_tokens),
@@ -2877,12 +3027,13 @@ export class Aggregator {
     // 1.8 §0a.3: a turn of the rollout's own — never one of a fork or a subagent's thread.
     if (!isSub) this.noteCodexTurn(ts, cur.model)
 
-    if (ctx.attribution !== 'none') {
+    if (project !== undefined) {
+      this.noteProject(project, at, null)
       const s = this.sessionFor(ctx.file, ctx, () => this.newSession(
-        'codex', path.basename(ctx.file, '.jsonl'), path.basename(path.dirname(ctx.file)),
-        ctx.file, isSub, null, at, ctx,
+        'codex', path.basename(ctx.file, '.jsonl'), project, isSub, null, at,
       ))
-      if (cur.sessionId === undefined) { cur.sessionId = s.sessionId; cur.project = s.project }
+      s.project = project
+      if (cur.sessionId === undefined) cur.sessionId = s.sessionId
       this.noteTurn(s, at, model)
       s.input += add.input
       s.cacheRead += add.cacheRead
@@ -2892,10 +3043,6 @@ export class Aggregator {
       s.requests += 1
       s.outputFinal += 1
       this.noteCacheWrite(s, add.cacheWrite, 0, at)
-      // Codex reports cached tokens inside input_tokens; only the fresh part is billable.
-      this.noteSessionHour(
-        s, hourIndex(at), Math.max(0, add.input - add.cacheRead) + add.cacheWrite + add.output,
-      )
     }
     return true
   }
@@ -2948,7 +3095,7 @@ export class Aggregator {
   // ----------------------------------------------------------- Persistence
 
   toSnapshot(): Snapshot {
-    return {
+    const snap: Snapshot = {
       version: STATE_VERSION,
       buckets: [...this.buckets.values()],
       cursors: Object.fromEntries(this.cursors),
@@ -2967,6 +3114,9 @@ export class Aggregator {
       agentsRevision: this.agentsRevisionValue,
       codexLast: this.codexLastValue,
     }
+    // 1.14 §3 A2 rule 5: the label table only with attribution on — a none snapshot carries no key of it.
+    if (this.attribution !== 'none') snap.projects = this.projects()
+    return snap
   }
 
   /**
@@ -2983,21 +3133,33 @@ export class Aggregator {
    * agent record may carry a completion the workflow journal wrote onto it (1.5 did); that one is
    * taken back, as the run rebuilt by the replay holds the journal's view since 1.6.
    */
-  static fromSnapshot(s: Snapshot | undefined, attribution: Attribution = 'none'): Aggregator {
+  static fromSnapshot(s: Snapshot | undefined, attribution: Attribution = 'none', names = false): Aggregator {
     const a = new Aggregator()
     a.attribution = attribution
     if (!s || !READABLE_STATE_VERSIONS.includes(s.version)) return a
     const stored: Attribution = s.attribution ?? 'none'
     if (attribution !== 'none' && stored === 'none') return a
+    // 1.14 §3 A2 rule 4: a version 5–8 snapshot has no project on a bucket — under project or session only a
+    // re-read can split its hours by folder (a 1.13 session record has lifetime counters only).
+    if (needsProjectReread(s, attribution)) return a
+    const on = attribution !== 'none'
     for (const b of s.buckets ?? []) {
       // The source has to be a provider this build knows, not merely a non-empty string: the
       // snapshot is a file a user can edit and another build can have written, and everything
       // downstream looks the source up in the registry to decide how to read the bucket.
       if (!b || typeof b !== 'object' || !isKnownSource(b.source) || !b.res) continue
-      a.buckets.set(bucketKey(b), b)
+      a.restoreBucket(b, on)
     }
-    for (const [k, v] of Object.entries(s.cursors ?? {})) a.cursors.set(k, v)
-    for (const [k, v] of Object.entries(s.pending ?? {})) a.pending.set(k, v)
+    for (const [k, v] of Object.entries(s.cursors ?? {})) {
+      // §0a.6's allow-list: a cursor's project key as stored, or none at all — a Codex rollout's later lines then
+      // go to the unattributed key, a Claude transcript's key is hashed again from its path.
+      if (on && v && typeof v === 'object' && v.project !== undefined && storedProjectKey(v.project) === null) delete v.project
+      a.cursors.set(k, v)
+    }
+    for (const [k, v] of Object.entries(s.pending ?? {})) {
+      if (on && v && typeof v === 'object' && v.project !== undefined && storedProjectKey(v.project) === null) v.project = UNATTRIBUTED
+      a.pending.set(k, v)
+    }
     for (const t of s.tools ?? []) {
       if (!t || typeof t !== 'object' || !isKnownSource(t.source)) continue
       if (typeof t.day !== 'string' || typeof t.name !== 'string') continue
@@ -3019,8 +3181,15 @@ export class Aggregator {
       names.add(row.name)
     }
     for (const k of s.toolsTruncated ?? []) if (typeof k === 'string' && k) a.toolsTruncated.add(k)
-    if (attribution !== 'none') {
-      for (const [k, v] of Object.entries(s.sessions ?? {})) a.sessionMap.set(k, v)
+    if (on) {
+      for (const [k, v] of Object.entries(s.sessions ?? {})) {
+        const rec = restoreSession(v)
+        if (k && rec) a.sessionMap.set(k, rec)
+      }
+      for (const [k, v] of Object.entries(s.projects ?? {})) {
+        const label = storedProjectKey(k) === null ? null : restoreProjectLabel(k, v, names)
+        if (label) a.projectMap.set(k, label)
+      }
     } else {
       a.dropSessionFields()
     }
@@ -3089,17 +3258,55 @@ export class Aggregator {
     }
   }
 
-  /** Drops per-session data (attribution switched off). */
-  clearSessions(): void {
-    this.sessionMap.clear()
-    this.attribution = 'none'
-    this.dropSessionFields()
+  /**
+   * A stored bucket into the table (1.14 §0a.6): under attribution on its project checked — a malformed or missing
+   * one goes to the unattributed key —, under none its project folded out. Two stored buckets of one key are added
+   * up, never one dropped (a file edited by hand, or the fold). A bucket that changes is copied first: the stored
+   * one can be a live bucket of another aggregator (`fromSnapshot(agg.toSnapshot())`).
+   */
+  private restoreBucket(b: Bucket, on: boolean): void {
+    let row = b
+    if (on) {
+      if (storedProjectKey(b.project) === null) row = { ...b, project: UNATTRIBUTED }
+    } else if (b.project !== undefined) {
+      row = { ...b }
+      delete row.project
+    }
+    const k = bucketKey(row)
+    const have = this.buckets.get(k)
+    if (!have) { this.buckets.set(k, row); return }
+    const sum = { ...have }
+    mergeInto(sum, row)
+    this.buckets.set(k, sum)
   }
 
-  /** Session identifiers also live on cursors and open messages; off means gone everywhere. */
+  /**
+   * 1.14 §3 A7 (§7a Q19): attribution switched off — no re-read. Every bucket's project is folded out (the buckets of
+   * one coordinate added up, so every sum stays exact), and the label table, the session records and the keys on
+   * the cursors and the open messages go.
+   */
+  clearSessions(): void {
+    this.sessionMap.clear()
+    this.projectMap.clear()
+    this.attribution = 'none'
+    this.dropSessionFields()
+    const folded = new Map<string, Bucket>()
+    for (const b of this.buckets.values()) {
+      const row = { ...b }
+      delete row.project
+      const k = bucketKey(row)
+      const have = folded.get(k)
+      if (have) mergeInto(have, row)
+      else folded.set(k, row)
+    }
+    this.buckets = folded
+    this.changes.buckets = true
+  }
+
+  /** Session identifiers and project keys also live on cursors and open messages; off means gone everywhere. */
   private dropSessionFields(): void {
     for (const c of this.cursors.values()) { delete c.sessionId; delete c.project }
-    for (const p of this.pending.values()) delete p.session
+    for (const p of this.pending.values()) { delete p.session; delete p.project }
   }
 
   all(): Bucket[] { return [...this.buckets.values()] }
@@ -3187,13 +3394,14 @@ export class Aggregator {
       if (b.res !== 'h' || b.hour === null || b.hour >= hourHorizon) continue
       const day = this.dayOfHourMemo(b.hour, tcfg)
       this.buckets.delete(k)
-      mergeInto(this.get(b.source, 'd', null, day, b.model, b.isSub, b.tier), b)
+      // 1.14 §3 A2 rule 3: an hour of project p folds into p's day, p's day into p's month.
+      mergeInto(this.get(b.source, 'd', null, day, b.model, b.isSub, b.tier, b.project), b)
       hoursMerged++
     }
     for (const [k, b] of [...this.buckets]) {
       if (b.res !== 'd' || b.day >= dayHorizon) continue
       this.buckets.delete(k)
-      mergeInto(this.get(b.source, 'm', null, monthOf(b.day), b.model, b.isSub, b.tier), b)
+      mergeInto(this.get(b.source, 'm', null, monthOf(b.day), b.model, b.isSub, b.tier, b.project), b)
       daysMerged++
     }
     // The tool table has day resolution and no month step: folding tool names into months
@@ -3216,15 +3424,10 @@ export class Aggregator {
       if (k.slice(k.indexOf('|') + 1) < toolHorizon) this.toolsTruncated.delete(k)
     }
 
-    // The per-session hour slices exist for the quota windows only, and the longest of those
-    // is a week. Keeping them for the full hour-bucket retention would store months of them.
-    const sessionHorizon = Math.max(hourHorizon, hourIndex(now) - SESSION_HOUR_KEEP)
-    for (const s of this.sessionMap.values()) {
-      if (!s.hourUsage) continue
-      for (const k of Object.keys(s.hourUsage)) {
-        if (Number(k) < sessionHorizon) delete s.hourUsage[k]
-      }
-    }
+    // 1.14 §3 A3: the projects beyond the cap or idle past the day horizon fold into other projects, and the session
+    // records are pruned at the hour horizon and capped.
+    this.foldProjects(now, retentionDays)
+    this.pruneSessions(now, hourRetentionDays)
 
     // The agent tables serve a tree of what ran lately, not the history: they keep
     // AGENT_RETENTION_DAYS, whatever the bucket retention says. No setting — the tree has
@@ -3237,6 +3440,68 @@ export class Aggregator {
       retentionDays: Math.max(0, Math.floor(retentionDays)),
     }
     return { hoursMerged, daysMerged }
+  }
+
+  /**
+   * 1.14 §3 A3 rules 1–2 (§7a Q12): a project whose newest line is older than `retentionDays` (the day horizon —
+   * past it only its months are left, and a folder's name kept for a project unused for over a year is a personal
+   * datum kept for nothing), and beyond `PROJECT_CAP` the least recently active, fold into OTHER_PROJECTS: their
+   * buckets merge into the other projects' bucket of the same coordinates (sums exact), their labels go, their
+   * session records take the key OTHER_PROJECTS (a session that goes on takes its folder's key back with its next
+   * line). The count of folded projects is kept on the other projects' label, for the sentence that says the list is
+   * short. Returns how many projects folded now.
+   */
+  foldProjects(now: number, retentionDays: number): number {
+    if (this.projectMap.size === 0) return 0
+    const idleBefore = now - Math.max(0, Math.floor(retentionDays)) * MS_DAY
+    const fold = new Set<string>()
+    const kept: Array<[string, ProjectLabel]> = []
+    for (const entry of this.projectMap) {
+      if (entry[0] === UNATTRIBUTED || entry[0] === OTHER_PROJECTS) continue
+      if (entry[1].lastTs < idleBefore) fold.add(entry[0])
+      else kept.push(entry)
+    }
+    if (kept.length > PROJECT_CAP) {
+      // Newest first; a tie by key, so the choice does not depend on the order the lines were read in.
+      kept.sort((a, b) => b[1].lastTs - a[1].lastTs || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+      for (const [k] of kept.slice(PROJECT_CAP)) fold.add(k)
+    }
+    if (fold.size === 0) return 0
+    const other = this.projectMap.get(OTHER_PROJECTS) ?? { lastTs: 0 }
+    for (const k of fold) {
+      other.lastTs = Math.max(other.lastTs, this.projectMap.get(k)?.lastTs ?? 0)
+      this.projectMap.delete(k)
+    }
+    other.folded = (other.folded ?? 0) + fold.size
+    this.projectMap.set(OTHER_PROJECTS, other)
+    for (const [k, b] of [...this.buckets]) {
+      if (b.project === undefined || !fold.has(b.project)) continue
+      this.buckets.delete(k)
+      mergeInto(this.get(b.source, b.res, b.hour, b.day, b.model, b.isSub, b.tier, OTHER_PROJECTS), b)
+    }
+    for (const rec of this.sessionMap.values()) if (fold.has(rec.project)) rec.project = OTHER_PROJECTS
+    for (const p of this.pending.values()) if (p.project !== undefined && fold.has(p.project)) p.project = OTHER_PROJECTS
+    this.changes.buckets = true
+    return fold.size
+  }
+
+  /**
+   * 1.14 §3 A3 rule 3 (§7a Q12): the session records whose newest line is older than `hourRetentionDays` go, and of
+   * the rest at most SESSION_CAP are kept, the newest. Returns how many went.
+   */
+  pruneSessions(now: number, hourRetentionDays: number): number {
+    const before = now - Math.max(0, Math.floor(hourRetentionDays)) * MS_DAY
+    let gone = 0
+    for (const [k, rec] of this.sessionMap) {
+      if (rec.lastTs < before) { this.sessionMap.delete(k); gone++ }
+    }
+    if (this.sessionMap.size > SESSION_CAP) {
+      const oldest = [...this.sessionMap.entries()]
+        .sort((a, b) => b[1].lastTs - a[1].lastTs || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+        .slice(SESSION_CAP)
+      for (const [k] of oldest) { this.sessionMap.delete(k); gone++ }
+    }
+    return gone
   }
 
   // ---------------------------------------------------------------- Queries

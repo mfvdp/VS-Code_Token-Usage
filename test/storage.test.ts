@@ -12,7 +12,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
-  bridgeBlocksDelete, deleteItems, deleteWarningExternal, formatBytes, hookMirrorNote, inventory, MementoLike, STORED_MEMENTO_KEYS,
+  bridgeBlocksDelete, deleteItems, deleteWarningExternal, formatBytes, hookMirrorNote, inventory, MementoLike, PROJECT_SALT_KEY, STORED_MEMENTO_KEYS,
   StoredPaths, storedFile, storedFiles,
 } from '../src/storage'
 import { scratchDir } from './fixtures/helpers'
@@ -91,6 +91,26 @@ test('deleting a file removes its interrupted temp sibling too', async () => {
   assert.deepEqual(result, { deleted: ['state'], failed: [] })
   assert.equal(fs.existsSync(paths.state), false)
   assert.equal(fs.existsSync(`${paths.state}.tmp`), false)
+})
+
+test('1.14 §0a.5 (§7a Q4): the project salt goes with the token snapshot — and with nothing else', async () => {
+  const dir = scratchDir('storage')
+  const paths = pathsIn(dir)
+  fs.writeFileSync(paths.state, '{}')
+  const memento = new FakeMemento()
+  const salt = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
+  memento.store.set(PROJECT_SALT_KEY, salt)
+  memento.store.set('tokenPace.ui', { range: '7d' })
+  // Every other item leaves it.
+  await deleteItems(['quota', 'history', 'consent', 'alerts', 'notifications', 'ui', 'mirror', 'hookMirror', 'keepWarm', 'prompts'], paths, memento)
+  assert.equal(memento.store.get(PROJECT_SALT_KEY), salt)
+  assert.equal(PROJECT_SALT_KEY, 'tokenPace.projectSalt')
+  // The token snapshot takes it along, after its file; the item's label is unchanged.
+  const result = await deleteItems(['state'], paths, memento)
+  assert.deepEqual(result, { deleted: ['state'], failed: [] })
+  assert.equal(fs.existsSync(paths.state), false)
+  assert.equal(memento.store.has(PROJECT_SALT_KEY), false)
+  assert.equal(inventory(paths, memento).find((i) => i.key === 'state')?.label, 'Token snapshot (state.json)')
 })
 
 test('every temp shape the writers use is swept, and nothing else is', async () => {

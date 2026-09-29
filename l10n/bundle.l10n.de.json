@@ -1,6 +1,7 @@
 {
   "\"Token Pace: Disconnect Claude Status Line\" restores the previous entry exactly — as long as\nthe entry is still the one we installed. Uninstalling the extension does not remove the entry\nbut deletes the script's copy with the extension's storage, and a status line still connected\nwould then start a script that is gone — so disconnect first if you plan to remove Token Pace.": "„Token Pace: Claude-Statuszeile trennen“ stellt den vorherigen Eintrag exakt wieder her — solange er\nnoch der von uns installierte ist. Die Deinstallation entfernt den Eintrag nicht, löscht aber mit\ndem Erweiterungsspeicher die Kopie des Skripts, und eine noch verbundene Statuszeile würde dann ein\ngelöschtes Skript starten — trennen Sie sie daher zuerst, wenn Sie Token Pace entfernen möchten.",
   "(hypothetical)": "(hypothetisch)",
+  "(no project)": "(kein Projekt)",
   "(sub)": "(Sub)",
   "(waiting)": "(wartet)",
   "**{0}**: hit {1} · realised {2} · blended {3} ({4})": "**{0}**: Treffer {1} · realisiert {2} · Mischpreis {3} ({4})",
@@ -958,6 +959,7 @@
   "on pace": "im Tempo",
   "one per assistant turn; a Codex token_count event is not necessarily one turn": "einer je Antwort des Assistenten; ein token_count-Ereignis von Codex ist nicht zwingend ein Turn",
   "other": "andere",
+  "other projects": "weitere Projekte",
   "output": "Ausgabe",
   "output is a lower bound": "Ausgabe ist eine Untergrenze",
   "output is a lower bound: some requests had no terminal line": "die Ausgabe ist eine Untergrenze: bei einigen Anfragen fehlte die Abschlusszeile",

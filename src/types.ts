@@ -36,12 +36,24 @@ export interface Bucket {
   /** server_tool_use counters (Claude); priced per call, not per token. */
   webSearch: number
   webFetch: number
+  /**
+   * 1.14 §0a.6: the project key (project.ts `PROJECT_KEY_RE` or `OTHER_PROJECTS`) — absent, not '', while
+   * `tokenPace.attribution` is none, so a none bucket and its key are byte for byte 1.13's. With attribution on,
+   * two projects active in one hour are two buckets of that hour; their sum is the one bucket of none.
+   */
+  project?: string
 }
 
+/**
+ * The key a bucket is kept under. 1.14 §0a.6: `|<project>` is appended when the bucket carries a project, so a
+ * none bucket's key is 1.13's string — and a build that does not know the field would fold two projects' buckets
+ * of one hour onto one key, which is why STATE_VERSION is 9.
+ */
 export function bucketKey(
-  b: Pick<Bucket, 'source' | 'res' | 'hour' | 'day' | 'model' | 'isSub' | 'tier'>,
+  b: Pick<Bucket, 'source' | 'res' | 'hour' | 'day' | 'model' | 'isSub' | 'tier' | 'project'>,
 ): string {
-  return `${b.source}|${b.res}|${b.res === 'h' ? b.hour : b.day}|${b.model}|${b.isSub ? 1 : 0}|${b.tier}`
+  const base = `${b.source}|${b.res}|${b.res === 'h' ? b.hour : b.day}|${b.model}|${b.isSub ? 1 : 0}|${b.tier}`
+  return b.project === undefined ? base : `${base}|${b.project}`
 }
 
 export function emptyBucket(
@@ -52,12 +64,32 @@ export function emptyBucket(
   res: Resolution,
   hour: number | null,
   day: string,
+  project?: string,
 ): Bucket {
-  return {
+  const b: Bucket = {
     source, model, isSub, tier, res, hour, day,
     input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0,
     requests: 0, outputFinal: 0, webSearch: 0, webFetch: 0,
   }
+  // Only with a project: a none bucket gains no key at all (§3 A2 rule 5).
+  if (project !== undefined) b.project = project
+  return b
+}
+
+/**
+ * 1.14 §0a.6: what the label table keeps of a project, by its key (`Snapshot.projects`) — only while
+ * `tokenPace.attribution` is not none.
+ */
+export interface ProjectLabel {
+  /** The newest line of the project (ms) — pruning (§3 A3) and the table's "Last activity". */
+  lastTs: number
+  /** §0a.2: the folder's name, project.ts `cleanProjectName`'d — only while `showProjectNames` is basename. */
+  name?: string
+  /**
+   * §3 A3 rule 1: on the label of OTHER_PROJECTS only — how many projects have folded into it (a project that
+   * folds, comes back and folds again counts twice), for "{0} projects folded into other projects".
+   */
+  folded?: number
 }
 
 /** Running state for one Claude message.id that spans several lines. */
@@ -79,6 +111,11 @@ export interface PendingMessage {
   final: boolean
   /** Session file key, when attribution is on. */
   session?: string
+  /**
+   * 1.14 §3 A2 rule 1: the project key of the bucket the message's first line opened, when attribution is on —
+   * a later line of the message grows that bucket, whichever file it is in.
+   */
+  project?: string
   /**
    * The agent transcript this message was credited to, by its file name without `.jsonl`
    * (`agent-<id>`); `main` names the main session's transcript the same way (its session
@@ -186,7 +223,11 @@ export interface Cursor {
   forked?: boolean
   /** Codex: newest rate_limits block seen in this file (network-free quota source). */
   lastRateLimits?: CodexRateLimitsSnapshot
-  /** Attribution: session id and project label for this file. */
+  /**
+   * Attribution: the session id and, since 1.14, the project key of this file (§0a.1, §0a.3) — for a Codex rollout
+   * taken from its `session_meta` line, which is read once, so a tail that resumes after a restart still files the
+   * later lines; for a Claude transcript the key of its directory, kept so it is hashed once per file.
+   */
   sessionId?: string
   project?: string
   /** Timestamp (ms) of the last counted line, for turn-duration and cache-TTL estimates. */
@@ -197,10 +238,11 @@ export interface Cursor {
 export interface SessionRec {
   source: Source
   sessionId: string
-  /** Basename of the working directory, or a salted hash (showProjectNames = hash). */
+  /**
+   * 1.14 §0a.6: the project key (project.ts `PROJECT_KEY_RE` or `OTHER_PROJECTS`) — was a basename or the hash.
+   * 1.0–1.13's `projectHash` and `hourUsage` (written, never read since 1.2.2) are gone.
+   */
   project: string
-  /** sha256(salt + full path).slice(0, 12) — stable pseudonym. */
-  projectHash: string
   isSub: boolean
   parent: string | null
   firstTs: number
@@ -219,15 +261,6 @@ export interface SessionRec {
   lastCacheWriteTs: number | null
   /** Gaps between consecutive counted lines (ms), capped reservoir of 200, for turn-duration ≈. */
   turnGapsMs: number[]
-  /**
-   * Billable tokens per UTC hour index (the key is the index as a string) — the only
-   * time slice a session carries, and the basis for attributing usage to a quota window.
-   * The lifetime counters above cannot answer "inside this window": a session resumed over
-   * days would bring its whole history into a five-hour box. Pruned in `rollup` to the
-   * horizon the hour buckets themselves keep, and at most the length of the longest quota
-   * window. Absent on records written by older builds — read it as "no slice known".
-   */
-  hourUsage?: Record<string, number>
 }
 
 export type Attribution = 'none' | 'project' | 'session'
@@ -618,6 +651,11 @@ export interface Snapshot {
   pending: Record<string, PendingMessage>
   sessions: Record<string, SessionRec>
   attribution: Attribution
+  /**
+   * 1.14 §0a.6: the label table — per project key the newest line and, under `showProjectNames: basename`, the
+   * folder's name. Written only while attribution is on; absent from a none snapshot (§3 A2 rule 5).
+   */
+  projects?: Record<string, ProjectLabel>
   /** Roll-up bookkeeping: last run (ms) and the retention the run used. */
   rollup: { lastRun: number; hourRetentionDays: number; retentionDays: number }
   /** First ingest (ms) — heatmap days before it are "outside coverage", not zero. */
@@ -660,7 +698,12 @@ export interface Snapshot {
   codexLast?: CodexTurn | null
 }
 
-export const STATE_VERSION = 8
+/**
+ * 9 (1.14 §0a.6): a bucket may carry a project key and the snapshot a label table. `fromSnapshot` recomputes every
+ * bucket's key, so a build that does not know `project` would fold two projects' buckets of one hour onto one key —
+ * 1.13 refuses a version 9 snapshot and re-reads instead. A none snapshot is version 9 too (§7a Q25).
+ */
+export const STATE_VERSION = 9
 
 /**
  * Snapshot versions this build can load. Each older version lacks a table that simply starts
@@ -668,8 +711,11 @@ export const STATE_VERSION = 8
  * side table, 6 no agent tables (agents, launches, main sessions), 7 no workflow runs. Tool
  * counts then start at the next ingest; the agent tables and the runs are rebuilt once from the
  * transcripts and journals still on disk, because none of them states the agent tables' revision.
+ * 8 has no project on a bucket: under attribution none it is read as it stands and saved as 9; under
+ * project or session it is not read (agg.ts `needsProjectReread`) — the hour split by project cannot be
+ * derived from 1.13's lifetime session records, so the transcripts are read once more.
  */
-export const READABLE_STATE_VERSIONS: readonly number[] = [5, 6, 7, 8]
+export const READABLE_STATE_VERSIONS: readonly number[] = [5, 6, 7, 8, 9]
 
 export type WindowKind = 'session' | 'weekly' | 'other'
 

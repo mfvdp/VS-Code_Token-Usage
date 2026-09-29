@@ -280,7 +280,8 @@ test('the tool table survives a snapshot round trip; a version 5 snapshot loads 
   agg.addClaudeLine(claudeLine({ id: 's1', ts: T0 + 100, usage: { input: 5, output: 3 }, tools: [{ name: 'Read', id: 'toolu_a' }] }), CTX)
   const snap = agg.toSnapshot()
   assert.equal(snap.version, STATE_VERSION)
-  assert.equal(STATE_VERSION, 8)
+  // 1.14 P4 (pinned and changed: 8 → 9, the project key on a bucket — §3 A2).
+  assert.equal(STATE_VERSION, 9)
   assert.deepEqual(snap.tools, [{ source: 'claude', day: DAY0, model: 'claude-opus-4-6', name: 'Read', calls: 1 }])
   assert.deepEqual(snap.toolsTruncated, [])
   // Only names, ids and counts are persisted — no argument of a call.

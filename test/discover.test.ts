@@ -8,6 +8,7 @@ import * as path from 'path'
 import { Aggregator } from '../src/agg'
 import * as discover from '../src/discover'
 import { configureRoots, findTranscripts, isClaudeSubagent, isClaudeTranscript, isCodexRollout, rootOf } from '../src/discover'
+import { projectKeyOf } from '../src/project'
 import { scan } from '../src/scan'
 import { claudeLine, codexMeta, codexTokenCount, codexTurnContext, tmpDir } from './fixtures/helpers'
 
@@ -163,8 +164,15 @@ test('scan walks every root, passes the context through, and is incremental', as
   const sessions = new Map(agg.sessions().map((s) => [s.sessionId, s]))
   assert.equal(sessions.get('agent-a1')!.parent, 'sess-0001')
   assert.equal(sessions.get('agent-a1')!.isSub, true)
-  assert.equal(sessions.get('sess-0001')!.project, 'proj-alpha')
-  assert.equal(sessions.get('thread-0001')!.project, 'proj-beta')
+  // 1.14 P4 (pinned and changed: the records hold the folder's key, the label table its name — §3 A1, §0a.6). The
+  // Claude session, its subagent and the Codex rollout of another folder: two keys; the names only in the label table.
+  const alpha = projectKeyOf('salt', '-home-tester-proj-alpha')
+  const beta = projectKeyOf('salt', '-home-tester-proj-beta')
+  assert.equal(sessions.get('sess-0001')!.project, alpha)
+  assert.equal(sessions.get('agent-a1')!.project, alpha)
+  assert.equal(sessions.get('thread-0001')!.project, beta)
+  assert.equal(agg.projectLabelOf(alpha), 'proj-alpha')
+  assert.equal(agg.projectLabelOf(beta), 'proj-beta')
   assert.equal(agg.attribution, 'session')
 
   // Nothing changed: nothing counted, and the pre-filter leaves the cursors as they were.

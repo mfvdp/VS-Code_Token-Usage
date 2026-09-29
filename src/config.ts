@@ -848,7 +848,7 @@ export function sanitize(raw: Record<string, unknown>): Config {
     retentionDays: num(get('tokenPace.retentionDays'), 400, 60, 36500),
     quotaHistoryDays: num(get('tokenPace.quotaHistoryDays'), 30, 0, 90),
     attribution: pick(get('tokenPace.attribution'), ATTRIBUTIONS, 'none'),
-    showProjectNames: pick(get('tokenPace.showProjectNames'), PROJECT_NAME_MODES, 'basename'),
+    showProjectNames: pick(get('tokenPace.showProjectNames'), PROJECT_NAME_MODES, 'hash'),
 
     alerts: {
       thresholds: alertThresholds(get('tokenPace.alerts.thresholds')),

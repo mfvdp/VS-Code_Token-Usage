@@ -2259,12 +2259,13 @@ export function records(
       if (dayOf(rec.lastTs, ctx.tcfg) < range.from || dayOf(rec.firstTs, ctx.tcfg) > range.to) continue
       const use = billable(emptySession(rec))
       if (use <= 0) continue
+      // 1.14 P4: the record holds the project key; the rows show its label (P5 builds them from the buckets).
       const g = projects.get(rec.project) ?? { usage: 0, sessions: 0 }
       g.usage += use
       g.sessions++
       projects.set(rec.project, g)
       // No per-day model split on a session record, so a per-session cost would be a guess.
-      sessions.push({ label: rec.sessionId, detail: rec.project, usage: use, cost: '–' })
+      sessions.push({ label: rec.sessionId, detail: ctx.agg.projectLabelOf(rec.project), usage: use, cost: '–' })
       sessionTotal += use
     }
   }
@@ -2282,8 +2283,8 @@ export function records(
     // counters run over a lifetime and bucket sums over the range, and dividing one by the
     // other would invent a percentage of two different things.
     topProjects: topOf(
-      [...projects.entries()].map(([label, g]) => ({
-        label,
+      [...projects.entries()].map(([key, g]) => ({
+        label: ctx.agg.projectLabelOf(key),
         detail: g.sessions === 1 ? t('{0} session', g.sessions) : t('{0} sessions', g.sessions),
         usage: g.usage,
         cost: '–',
@@ -2766,8 +2767,9 @@ export function projectRows(ctx: StatsCtx): ProjectRow[] {
   }
   return [...groups.entries()]
     .sort((a, b) => b[1].usage - a[1].usage)
-    .map(([project, g]) => ({
-      project,
+    .map(([key, g]) => ({
+      // 1.14 P4: grouped by the project key, shown by its label (P5 rebuilds the table from the range's buckets).
+      project: ctx.agg.projectLabelOf(key),
       usage: tokens(g.usage),
       // Sessions carry no per-day model split, so a per-project cost would be a guess.
       cost: '–',
@@ -2790,7 +2792,7 @@ export function sessionRows(ctx: StatsCtx, limit = 50): SessionRow[] {
     const parts = cacheHitParts(b)
     return {
       session: s.sessionId,
-      project: s.project,
+      project: ctx.agg.projectLabelOf(s.project),
       source: s.source,
       isSub: s.isSub,
       // The configured calendar, not UTC: `drill` files this session under `dayOf(firstTs)`,

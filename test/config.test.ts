@@ -702,3 +702,17 @@ test('C0: the six Alerts sentences say alert, never notification; the German Ale
   assert.notEqual(englishNls['configuration.alerts.title'], englishNls['configuration.notifications.title'])
   assert.ok(!germanNls['configuration.notifications.title'].startsWith(germanNls['configuration.alerts.title']))
 })
+
+// 1.14 P4 (§3 A1 rule 5, §7a Q1): showProjectNames defaults to hash — in the code and in the manifest; the enum and a
+// written basename stay valid.
+test('1.14: tokenPace.showProjectNames defaults to hash; basename stays a value a reader can write', () => {
+  assert.equal(sanitize({}).showProjectNames, 'hash')
+  assert.equal(sanitize({ 'tokenPace.showProjectNames': 'basename' }).showProjectNames, 'basename')
+  assert.equal(sanitize({ 'tokenPace.showProjectNames': 'full' }).showProjectNames, 'hash')
+  assert.equal(sanitize({}).attribution, 'none')
+  const manifest = readJson('package.json') as {
+    contributes: { configuration: Array<{ properties?: Record<string, { default?: unknown; enum?: unknown[] }> }> }
+  }
+  const prop = manifest.contributes.configuration.map((c) => c.properties?.['tokenPace.showProjectNames']).find((p) => p !== undefined)
+  assert.deepEqual([prop?.default, prop?.enum], ['hash', ['basename', 'hash']])
+})

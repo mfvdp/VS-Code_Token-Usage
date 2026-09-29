@@ -30,7 +30,8 @@ export interface ScanWorkerData {
 async function main(): Promise<void> {
   const data: ScanWorkerData = workerData ?? {}
   if (data.claudeDirs || data.codexDirs) configureRoots(data.claudeDirs ?? [], data.codexDirs ?? [])
-  const agg = Aggregator.fromSnapshot(data.snapshot, data.ctx?.attribution ?? 'none')
+  // 1.14 §3 A7: a folder's name kept only while names are on — the same rule the host restores by.
+  const agg = Aggregator.fromSnapshot(data.snapshot, data.ctx?.attribution ?? 'none', data.ctx ? !data.ctx.hashProjects : false)
   if (data.timeConfig) agg.timeConfig = data.timeConfig
   let last = 0
   const counted = await scan(agg, {

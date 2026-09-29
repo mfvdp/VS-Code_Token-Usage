@@ -3,13 +3,14 @@
 
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { AGENT_TABLES_REVISION, Aggregator, USER_LINE_TIME_RE, billable, localDay, userLineTimeOf } from '../src/agg'
+import { AGENT_TABLES_REVISION, Aggregator, IngestContext, USER_LINE_TIME_RE, billable, localDay, needsProjectReread, userLineTimeOf } from '../src/agg'
 import { freshInput } from '../src/stats'
 import { hourIndex, TimeConfig } from '../src/time'
 import { Bucket, MainRec, Snapshot, Source, ToolStat, bucketKey, STATE_VERSION } from '../src/types'
 import { buildViewModel } from '../src/viewModel'
+import { OTHER_PROJECTS, isProjectKey, projectKeyOf } from '../src/project'
 import {
-  CLAUDE_MAIN, CLAUDE_SUB, agentResultLine, agentToolUseLine, claudeLine, compactSummaryLine, ctxFor, iso, promptLine, toolResultLine,
+  CLAUDE_MAIN, CLAUDE_SLUG, CLAUDE_SUB, agentResultLine, agentToolUseLine, claudeLine, compactSummaryLine, ctxFor, iso, promptLine, toolResultLine,
 } from './fixtures/helpers'
 import { makeInput } from './fixtures/viewFixtures'
 
@@ -116,20 +117,26 @@ test('attribution off: no session records, cursor keeps only lastTs', () => {
   assert.equal(agg.toSnapshot().attribution, 'none')
 })
 
-test('attribution on: session id, project basename, salted hash, and never the cwd itself', () => {
+// 1.14 P4 (pinned and changed: the record's project is the folder's key, no projectHash — §3 A1 rule 1, §0a.6): the key of
+// the directory the transcript lies under, on the record, on every bucket and in the label table; the folder's name only
+// under basename, of a main line whose cwd slugs to the directory; never the cwd itself.
+test('attribution on: session id, the folder\'s key on the record and every bucket, the name only under basename, never the cwd itself', () => {
   const agg = new Aggregator()
   agg.cursors.set(CLAUDE_MAIN, { offset: 0, size: 0, ino: 1, dev: 1 })
   const ctx = ctxFor({ attribution: 'session', projectSalt: 'salt-1' })
   agg.addClaudeLine(claudeLine({ id: 'msg_a', ts: T0, usage: { input: 10, cacheWrite: 100, cacheRead: 5, output: 3 } }), ctx)
   agg.addClaudeLine(claudeLine({ id: 'msg_a', ts: T0 + 100, usage: { input: 10, cacheWrite: 100, cacheRead: 5, output: 9 }, final: true }), ctx)
   agg.addClaudeLine(claudeLine({ id: 'msg_b', ts: T0 + 90_000, model: 'claude-sonnet-4-6', usage: { input: 4, output: 2, thinking: 1 } }), ctx)
+  const key = projectKeyOf('salt-1', CLAUDE_SLUG)
+  assert.match(key, /^[0-9a-f]{12}$/)
   const s = agg.sessions()
   assert.equal(s.length, 1)
   const rec = s[0]
   assert.equal(rec.source, 'claude')
   assert.equal(rec.sessionId, 'sess-0001')
-  assert.equal(rec.project, 'proj-alpha')
-  assert.match(rec.projectHash, /^[0-9a-f]{12}$/)
+  assert.equal(rec.project, key)
+  assert.equal('projectHash' in rec, false)
+  assert.equal('hourUsage' in rec, false)
   assert.equal(rec.isSub, false)
   assert.equal(rec.parent, null)
   assert.equal(rec.firstTs, T0)
@@ -143,49 +150,72 @@ test('attribution on: session id, project basename, salted hash, and never the c
   // A turn gap runs from the last counted line of the previous message (T0+100) to the
   // first line of the next — the streaming continuation is part of the previous turn.
   assert.deepEqual(rec.turnGapsMs, [89_900])
+  // Every bucket carries the key, the label table the name (basename is ctxFor's default here) and the newest line.
+  for (const b of agg.all()) assert.equal(b.project, key)
+  assert.equal(bucketKey(agg.all()[0]).endsWith(`|${key}`), true)
+  assert.deepEqual(agg.projects(), { [key]: { lastTs: T0 + 90_000, name: 'proj-alpha' } })
+  assert.equal(agg.projectLabelOf(key), 'proj-alpha')
   const cur = agg.cursors.get(CLAUDE_MAIN)!
   assert.equal(cur.sessionId, 'sess-0001')
-  assert.equal(cur.project, 'proj-alpha')
+  assert.equal(cur.project, key)
   const snap = agg.toSnapshot()
   assert.equal(snap.attribution, 'session')
+  assert.deepEqual(snap.projects, agg.projects())
   assert.equal(JSON.stringify(snap).includes('/home/tester/proj-alpha'), false)
 
-  // The hash is a function of salt and path: same salt → same hash, other salt → other hash.
+  // The key is a function of salt and folder: same salt → same key, other salt → other key.
   const again = new Aggregator()
   again.addClaudeLine(claudeLine({ id: 'msg_a', ts: T0, usage: { input: 1 } }), ctxFor({ attribution: 'project', projectSalt: 'salt-1' }))
-  assert.equal(again.sessions()[0].projectHash, rec.projectHash)
+  assert.equal(again.sessions()[0].project, key)
   const other = new Aggregator()
   other.addClaudeLine(claudeLine({ id: 'msg_a', ts: T0, usage: { input: 1 } }), ctxFor({ attribution: 'project', projectSalt: 'salt-2' }))
-  assert.notEqual(other.sessions()[0].projectHash, rec.projectHash)
+  assert.notEqual(other.sessions()[0].project, key)
 
-  // hashProjects: the label is the pseudonym; the record carries no basename. (The record's
-  // key is the transcript path, and Claude's path embeds the project slug — a fact of the
-  // file layout, present in cursor keys since the first release, not something to hide here.)
+  // hashProjects: the pseudonym; no name anywhere. (The record's key is the transcript path, and Claude's path embeds
+  // the project slug — a fact of the file layout, present in cursor keys since the first release, §0a.1.)
   const hashed = new Aggregator()
   hashed.addClaudeLine(claudeLine({ id: 'msg_a', ts: T0, usage: { input: 1 } }), ctxFor({ attribution: 'project', projectSalt: 'salt-1', hashProjects: true }))
   const h = hashed.sessions()[0]
-  assert.equal(h.project, h.projectHash)
+  assert.equal(h.project, key)
+  assert.deepEqual(hashed.projects(), { [key]: { lastTs: T0 } })
+  assert.equal(hashed.projectLabelOf(key), `p:${key}`)
+  assert.equal(JSON.stringify(hashed.toSnapshot().projects).includes('proj-alpha'), false)
   assert.equal(JSON.stringify(h).includes('proj-alpha'), false)
   assert.equal(hashed.cursors.size, 0)
 })
 
-test('a line without cwd falls back to the project directory slug', () => {
+// 1.14 P4 (pinned and changed: was "a line without cwd falls back to the project directory slug" — the label was the
+// slug; §3 A1 rule 1): the key comes from where the file lies, never from a line.
+test('the key is the directory\'s whatever a line says; a line without cwd or with another cwd names nothing', () => {
+  const ctx = ctxFor({ attribution: 'session', projectSalt: 'salt-1' })
+  const key = projectKeyOf('salt-1', CLAUDE_SLUG)
   const agg = new Aggregator()
-  agg.addClaudeLine(claudeLine({ id: 'msg_a', ts: T0, cwd: null, sessionId: null, usage: { input: 1 } }), ctxFor({ attribution: 'session' }))
+  agg.addClaudeLine(claudeLine({ id: 'msg_a', ts: T0, cwd: null, sessionId: null, usage: { input: 1 } }), ctx)
   const rec = agg.sessions()[0]
-  assert.equal(rec.project, '-home-tester-proj-alpha')
+  assert.equal(rec.project, key)
   assert.equal(rec.sessionId, 'sess-0001') // basename of the transcript
+  assert.deepEqual(agg.projects(), { [key]: { lastTs: T0 } })
+  // A session that moved to a subdirectory (its cwd slugs to another directory) keeps the folder's key and gives no name.
+  agg.addClaudeLine(claudeLine({ id: 'msg_b', ts: T0 + 1000, cwd: '/home/tester/proj-alpha/packages/web', usage: { input: 1 } }), ctx)
+  assert.deepEqual(agg.projects(), { [key]: { lastTs: T0 + 1000 } })
+  for (const b of agg.all()) assert.equal(b.project, key)
+  // The first line whose cwd is the folder itself names it; a later name changes nothing.
+  agg.addClaudeLine(claudeLine({ id: 'msg_c', ts: T0 + 2000, usage: { input: 1 } }), ctx)
+  assert.equal(agg.projects()[key].name, 'proj-alpha')
 })
 
-test('subagent transcripts: isSub, parent from the session directory, own id from the file name', () => {
+// 1.14 P4 (pinned and changed: the record's project is the session's folder key, §3 A1 rule 6).
+test('subagent transcripts: isSub, parent from the session directory, own id from the file name, the session\'s key', () => {
   const agg = new Aggregator()
-  const ctx = ctxFor({ attribution: 'session', file: CLAUDE_SUB, isSub: true })
+  const ctx = ctxFor({ attribution: 'session', projectSalt: 'salt-1', file: CLAUDE_SUB, isSub: true })
   agg.addClaudeLine(claudeLine({ id: 'msg_sub', ts: T0, sessionId: null, usage: { input: 3 } }), ctx)
   const rec = agg.sessions()[0]
   assert.equal(rec.isSub, true)
   assert.equal(rec.parent, 'sess-0001')
   assert.equal(rec.sessionId, 'agent-a1')
-  assert.equal(rec.project, 'proj-alpha')
+  assert.equal(rec.project, projectKeyOf('salt-1', CLAUDE_SLUG))
+  // A subagent's line never names the folder, even when its cwd is the folder (its cwd may be a worktree).
+  assert.equal(agg.projects()[rec.project].name, undefined)
   assert.equal(agg.all()[0].isSub, true)
   assert.equal(bucketKey(agg.all()[0]).split('|')[4], '1')
 })
@@ -770,7 +800,8 @@ test('lastUserAt: the replay gives what a fresh read gives; a round trip keeps i
 
   const snap = JSON.parse(JSON.stringify(live.toSnapshot())) as Snapshot
   assert.equal(snap.version, STATE_VERSION)
-  assert.equal(STATE_VERSION, 8, 'the field is additive: the schema version stays')
+  // 1.14 P4 (pinned and changed: 8 → 9 — the project key on a bucket moved it, §3 A2; lastUserAt stays additive).
+  assert.equal(STATE_VERSION, 9, 'the field is additive: the schema version stays what the project key made it')
   assert.equal(mainRecOf(Aggregator.fromSnapshot(snap), CLAUDE_MAIN).lastUserAt, T0 + 70_000)
   const edited = (v: unknown, direct = false): number | null => {
     const s = direct ? structuredClone(live.toSnapshot()) : JSON.parse(JSON.stringify(live.toSnapshot())) as Snapshot
@@ -821,4 +852,219 @@ test('the time of a user line keeps nothing else of it: no prompt, no tool outpu
       assert.equal(text.includes(never), false, `the ${what} holds ${never}`)
     }
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 P4 (§3 A2, §3 A7, §0a.6): the per-project store, STATE_VERSION 9 and its migration, the fold back to none.
+// ---------------------------------------------------------------------------
+
+const P_SALT = 'salt-1'
+const pctx = (slug: string, over: Partial<IngestContext> = {}): IngestContext =>
+  ctxFor({ attribution: 'project', projectSalt: P_SALT, file: `/virtual/claude/projects/${slug}/sess.jsonl`, ...over })
+const noneCtx = (slug: string): IngestContext => ctxFor({ file: `/virtual/claude/projects/${slug}/sess.jsonl` })
+const COUNTER_KEYS = ['input', 'cacheWrite', 'cacheWrite1h', 'cacheRead', 'output', 'reasoning', 'requests', 'outputFinal', 'webSearch', 'webFetch'] as const
+const sums = (bs: Bucket[]): Record<string, number> =>
+  Object.fromEntries(COUNTER_KEYS.map((k) => [k, bs.reduce((n, b) => n + b[k], 0)]))
+/** The buckets without their project, folded by the 1.13 key — what the same lines give under none. */
+const withoutProjects = (bs: Bucket[]): Map<string, Record<string, number>> => {
+  const out = new Map<string, Record<string, number>>()
+  for (const b of bs) {
+    const k = bucketKey({ ...b, project: undefined })
+    const have = out.get(k) ?? Object.fromEntries(COUNTER_KEYS.map((c) => [c, 0]))
+    for (const c of COUNTER_KEYS) have[c] += b[c]
+    out.set(k, have)
+  }
+  return out
+}
+
+/** The 1.13 bucket's fields, in order — a none bucket of 1.14 has exactly these (§3 A2 rule 5). */
+const BUCKET_FIELDS_1_13 = ['source', 'model', 'isSub', 'tier', 'res', 'hour', 'day', 'input', 'cacheWrite', 'cacheWrite1h', 'cacheRead',
+  'output', 'reasoning', 'requests', 'outputFinal', 'webSearch', 'webFetch']
+
+function twoProjectLines(agg: Aggregator, ctxOf: (slug: string) => IngestContext): void {
+  // Two projects active in one hour, each with its own model mix, and one of them in another hour too.
+  agg.addClaudeLine(claudeLine({ id: 'a1', ts: T0, usage: { input: 10, output: 3 }, final: true }), ctxOf('-home-u-a'))
+  agg.addClaudeLine(claudeLine({ id: 'b1', ts: T0 + 60_000, usage: { input: 20, output: 5 }, final: true }), ctxOf('-home-u-b'))
+  agg.addClaudeLine(claudeLine({ id: 'b2', ts: T0 + 120_000, model: 'claude-sonnet-4-6', usage: { input: 4, output: 1 }, final: true }), ctxOf('-home-u-b'))
+  agg.addClaudeLine(claudeLine({ id: 'a2', ts: T0 + 2 * HOUR_MS, usage: { input: 7, output: 2 }, final: true }), ctxOf('-home-u-a'))
+}
+
+test('1.14 §3 A2 rules 1, 5: two projects in one hour are two buckets whose sum is the none bucket; a none bucket is 1.13\'s', () => {
+  const none = new Aggregator()
+  twoProjectLines(none, noneCtx)
+  const on = new Aggregator()
+  twoProjectLines(on, (slug) => pctx(slug))
+  const a = projectKeyOf(P_SALT, '-home-u-a')
+  const b = projectKeyOf(P_SALT, '-home-u-b')
+  const hour = hourIndex(T0)
+  const opusHour = on.all().filter((x) => x.hour === hour && x.model === 'claude-opus-4-6')
+  assert.deepEqual(opusHour.map((x) => x.project).sort(), [a, b].sort())
+  assert.equal(on.all().length, none.all().length + 1)
+  assert.deepEqual(withoutProjects(on.all()), withoutProjects(none.all()))
+  assert.deepEqual(sums(on.all()), sums(none.all()))
+  // The none bucket: exactly 1.13's fields and key; the none snapshot: no label table.
+  for (const x of none.all()) {
+    assert.deepEqual(Object.keys(x), BUCKET_FIELDS_1_13)
+    assert.equal(bucketKey(x).split('|').length, 6)
+  }
+  const snap = none.toSnapshot()
+  assert.equal('projects' in snap, false)
+  assert.equal(JSON.stringify(snap).includes('"project"'), false)
+  assert.equal(snap.version, 9)
+  assert.equal(bucketKey(opusHour[0]).split('|').length, 7)
+})
+
+test('1.14 §3 A2 rule 1: a later line of a message grows the bucket its first line opened — its project and its hour', () => {
+  const agg = new Aggregator()
+  // The message starts in project a at 09:59 and a line of the same id comes from project b's file at 10:01.
+  const start = Date.UTC(2026, 2, 10, 9, 59)
+  agg.addClaudeLine(claudeLine({ id: 'm', ts: start, usage: { input: 10, output: 1 } }), pctx('-home-u-a'))
+  agg.addClaudeLine(claudeLine({ id: 'm', ts: start + 2 * 60_000, usage: { input: 10, output: 40 }, final: true }), pctx('-home-u-b'))
+  const a = projectKeyOf(P_SALT, '-home-u-a')
+  assert.equal(agg.all().length, 1)
+  assert.deepEqual([agg.all()[0].project, agg.all()[0].hour, agg.all()[0].output], [a, hourIndex(start), 40])
+  // And after a round trip the open message still grows it.
+  const back = Aggregator.fromSnapshot(JSON.parse(JSON.stringify(agg.toSnapshot())), 'project', true)
+  back.addClaudeLine(claudeLine({ id: 'm', ts: start + 3 * 60_000, usage: { input: 10, output: 50 }, final: true }), pctx('-home-u-b'))
+  assert.equal(back.all().length, 1)
+  assert.equal(back.all()[0].output, 50)
+})
+
+/**
+ * A version 8 snapshot of 1.13's shape, as the measuring machine's (read 2026-09-29, counted by shape only): 150 hour
+ * buckets over 72 active hours, two models, main and sub; under `session` also a session record with 1.13's
+ * `projectHash` and `hourUsage`. Synthetic numbers — never the machine's own file.
+ */
+function v8Snapshot(attribution: 'none' | 'session'): Snapshot {
+  const first = hourIndex(Date.UTC(2026, 8, 25, 17))
+  const buckets: Bucket[] = []
+  // 72 hours: the first 6 with three buckets (opus main, fable sub, opus sub), the other 66 with two — 150.
+  const kinds = [['claude-opus-5-5', false], ['claude-fable-5-1', true], ['claude-opus-5-5', true]] as const
+  for (let i = 0; i < 72; i++) {
+    const hour = first + i
+    for (const [model, isSub] of kinds.slice(0, i < 6 ? 3 : 2)) {
+      buckets.push({
+        source: 'claude', model, isSub, tier: 'standard', res: 'h', hour, day: localDay(hour * HOUR_MS),
+        input: 10 + i, cacheWrite: 100, cacheWrite1h: 0, cacheRead: 1000 + i, output: 20, reasoning: 0, requests: 2, outputFinal: 2,
+        webSearch: 0, webFetch: 0,
+      })
+    }
+  }
+  const sessions: Snapshot['sessions'] = attribution === 'none' ? {} : {
+    '/virtual/claude/projects/-home-u-a/s.jsonl': {
+      source: 'claude', sessionId: 's', project: 'a', projectHash: '0123456789ab', isSub: false, parent: null,
+      firstTs: T0, lastTs: T0, models: ['claude-opus-5-5'], input: 1, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 1,
+      reasoning: 0, requests: 1, outputFinal: 1, lastCacheTtl: null, lastCacheWriteTs: null, turnGapsMs: [], hourUsage: { 1: 2 },
+    } as unknown as Snapshot['sessions'][string],
+  }
+  return {
+    version: 8, buckets, cursors: { '/virtual/claude/projects/-home-u-a/s.jsonl': { offset: 10, size: 10, ino: 1, dev: 1, project: 'a', sessionId: 's' } },
+    pending: {}, sessions, attribution, rollup: { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 }, firstIngest: first * HOUR_MS,
+    tools: [], toolsTruncated: [], agents: {}, launches: {}, mains: {}, runs: {}, runLaunches: {}, agentsRevision: 10, codexLast: null,
+  }
+}
+
+test('1.14 §3 A2 rule 4: a version 8 snapshot under none is read as it stands and saved as 9 — the buckets byte for byte, no re-read', () => {
+  const v8 = v8Snapshot('none')
+  assert.equal(v8.buckets.length, 150)
+  assert.equal(new Set(v8.buckets.map((b) => b.hour)).size, 72)
+  const text = JSON.stringify(v8.buckets)
+  assert.equal(needsProjectReread(v8, 'none'), false)
+  const agg = Aggregator.fromSnapshot(JSON.parse(JSON.stringify(v8)), 'none')
+  const saved = agg.toSnapshot()
+  assert.equal(saved.version, 9)
+  assert.equal(JSON.stringify(saved.buckets), text)
+  assert.equal('projects' in saved, false)
+})
+
+test('1.14 §3 A2 rule 4: a version 5–8 snapshot under project or session is not read on — the host re-reads, and says why', () => {
+  for (const version of [5, 6, 7, 8]) {
+    for (const stored of ['none', 'session'] as const) {
+      const snap = { ...v8Snapshot(stored), version }
+      for (const attribution of ['project', 'session'] as const) {
+        assert.equal(needsProjectReread(snap, attribution), true, `v${version} ${stored} → ${attribution}`)
+        const agg = Aggregator.fromSnapshot(snap, attribution)
+        assert.equal(agg.all().length, 0, `v${version} ${stored} → ${attribution}`)
+        assert.equal(agg.sessions().length, 0)
+        assert.equal(agg.cursors.size, 0)
+      }
+    }
+  }
+  assert.equal(needsProjectReread(undefined, 'session'), false)
+  assert.equal(needsProjectReread({ ...v8Snapshot('none'), version: 9 }, 'session'), false)
+})
+
+test('1.14 §0a.6: a version 9 snapshot is checked on the way in — a malformed key goes to (no project), a name outside the alphabet goes, 1.13\'s fields go', () => {
+  const agg = new Aggregator()
+  twoProjectLines(agg, (slug) => pctx(slug, { file: `/virtual/claude/projects/${slug}/sess.jsonl` }))
+  const a = projectKeyOf(P_SALT, '-home-u-a')
+  const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+  assert.deepEqual(Object.keys(snap.projects ?? {}).sort(), [a, projectKeyOf(P_SALT, '-home-u-b')].sort())
+  snap.buckets[0].project = '/home/u/a'
+  const rec = Object.values(snap.sessions)[0] as unknown as Record<string, unknown>
+  rec.projectHash = 'ffffffffffff'
+  rec.hourUsage = { 5: 1 }
+  rec.project = 'not a key'
+  snap.projects = { [a]: { lastTs: T0, name: 'bad name<b>' }, 'not-a-key': { lastTs: T0, name: 'x' }, [OTHER_PROJECTS]: { lastTs: 1, name: 'n', folded: 3 } }
+  const back = Aggregator.fromSnapshot(snap, 'project', true)
+  assert.equal(back.all().some((b) => b.project === ''), true)
+  assert.equal(back.all().every((b) => isProjectKey(b.project)), true)
+  assert.deepEqual(sums(back.all()), sums(agg.all()))
+  const r = back.sessions()[0] as unknown as Record<string, unknown>
+  assert.equal(r.project, '')
+  assert.equal('projectHash' in r, false)
+  assert.equal('hourUsage' in r, false)
+  assert.deepEqual(back.projects(), { [a]: { lastTs: T0 }, [OTHER_PROJECTS]: { lastTs: 1, folded: 3 } })
+})
+
+test('1.14 §3 A7: basename → hash drops every name at once, a snapshot read under hash keeps none; a none restore folds the split back', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'n', ts: T0, cwd: '/home/u/a', usage: { input: 1 } }), pctx('-home-u-a', { hashProjects: false }))
+  const a = projectKeyOf(P_SALT, '-home-u-a')
+  assert.equal(agg.projects()[a].name, 'a')
+  const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+  // Read under hash (names false, the host's `showProjectNames === 'basename'`): no name.
+  assert.deepEqual(Aggregator.fromSnapshot(snap, 'project', false).projects(), { [a]: { lastTs: T0 } })
+  assert.equal(Aggregator.fromSnapshot(snap, 'project').projects()[a].name, undefined, 'the default keeps no name')
+  assert.equal(Aggregator.fromSnapshot(snap, 'project', true).projects()[a].name, 'a')
+  agg.dropProjectNames()
+  assert.deepEqual(agg.projects(), { [a]: { lastTs: T0 } })
+  assert.equal(JSON.stringify(agg.toSnapshot()).includes('"name"'), false)
+
+  // A version 9 snapshot of project read under none: the split folded back, sums exact, no key left.
+  const two = new Aggregator()
+  twoProjectLines(two, (slug) => pctx(slug))
+  const none = new Aggregator()
+  twoProjectLines(none, noneCtx)
+  const off = Aggregator.fromSnapshot(JSON.parse(JSON.stringify(two.toSnapshot())), 'none')
+  assert.deepEqual(withoutProjects(off.all()), withoutProjects(none.all()))
+  assert.equal(off.all().length, none.all().length)
+  const offSnap = off.toSnapshot()
+  assert.equal('projects' in offSnap, false)
+  assert.equal(JSON.stringify(offSnap).includes('"project"'), false)
+})
+
+test('1.14 §3 A7 (§7a Q19): attribution switched off folds the per-project buckets back without a re-read — sums exact, keys gone everywhere', () => {
+  const agg = new Aggregator()
+  agg.cursors.set('/virtual/claude/projects/-home-u-a/sess.jsonl', { offset: 0, size: 0, ino: 1, dev: 1 })
+  twoProjectLines(agg, (slug) => pctx(slug))
+  // An open message remembers its project; switched off, it forgets it.
+  agg.addClaudeLine(claudeLine({ id: 'open', ts: T0 + 3 * HOUR_MS, usage: { input: 1 } }), pctx('-home-u-a'))
+  const none = new Aggregator()
+  twoProjectLines(none, noneCtx)
+  none.addClaudeLine(claudeLine({ id: 'open', ts: T0 + 3 * HOUR_MS, usage: { input: 1 } }), noneCtx('-home-u-a'))
+  agg.clearSessions()
+  assert.equal(agg.attribution, 'none')
+  assert.equal(agg.all().length, none.all().length)
+  assert.deepEqual(withoutProjects(agg.all()), withoutProjects(none.all()))
+  for (const b of agg.all()) assert.deepEqual(Object.keys(b), BUCKET_FIELDS_1_13)
+  assert.deepEqual(agg.projects(), {})
+  assert.equal(agg.sessions().length, 0)
+  const snap = agg.toSnapshot()
+  assert.equal(JSON.stringify(snap).includes('"project"'), false)
+  assert.equal('projects' in snap, false)
+  // The open message's later line grows the folded bucket, under none.
+  agg.addClaudeLine(claudeLine({ id: 'open', ts: T0 + 3 * HOUR_MS + 1, usage: { input: 1, output: 9 }, final: true }), noneCtx('-home-u-a'))
+  none.addClaudeLine(claudeLine({ id: 'open', ts: T0 + 3 * HOUR_MS + 1, usage: { input: 1, output: 9 }, final: true }), noneCtx('-home-u-a'))
+  assert.deepEqual(withoutProjects(agg.all()), withoutProjects(none.all()))
 })

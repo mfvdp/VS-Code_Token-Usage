@@ -43,7 +43,7 @@ import {
   HOOK_MIRROR_NAME, HOOK_SCRIPT_NAME, HookMirror, hookSetupDocument, installHookScript, refreshHookScript,
 } from './agentHook'
 import { AgentTreeVm, hookKey, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
-import { AGENT_TABLES_REVISION, Aggregator, cleanAgentId, IngestChanges } from './agg'
+import { AGENT_TABLES_REVISION, Aggregator, cleanAgentId, IngestChanges, needsProjectReread } from './agg'
 import { Alerts } from './alerts'
 import { isolate, itemAriaLabel } from './bidi'
 import {
@@ -88,7 +88,7 @@ import { buildItems, USAGE_PAGE } from './statusText'
 import { TerminalWatch } from './terminalWatch'
 import {
   bridgeBlocksDelete, deleteItems, deleteWarning, deleteWarningExternal, formatBytes, hookMirrorNote, inventory,
-  StoredKey, StoredPaths,
+  PROJECT_SALT_KEY, StoredKey, StoredPaths,
 } from './storage'
 import { DayRange, dayOf, RangePreset, rangeFor } from './time'
 import { Forecast, PaceVerdict, QuotaState, Snapshot, Source } from './types'
@@ -139,7 +139,8 @@ export const AGENT_POLL_MS = 5000
 /** The debug log file is rotated at this size; exactly one older generation is kept. */
 const LOG_ROTATE_BYTES = 5 * 1024 * 1024
 
-const SALT_KEY = 'tokenPace.projectSalt'
+/** 1.14 §0a.5: the salt's memento key — storage.ts's, which deletes it with the token snapshot. */
+const SALT_KEY = PROJECT_SALT_KEY
 const UI_KEY = 'tokenPace.ui'
 const REMOTE_HINT_KEY = 'tokenPace.remoteHintShown'
 const EXTENSION_ID = 'frederik.token-pace'
@@ -317,17 +318,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   log.info(`Codex roots:  ${CODEX_ROOTS.join(' · ') || 'none'}`)
   log.info(`Quota files:  ${CLAUDE_QUOTA_FILE} | ${CODEX_QUOTA_FILE}`)
 
-  // A per-machine random salt: project hashes stay stable across sessions but say nothing
-  // about the directory to anyone who has not got this machine's globalState.
-  let salt = context.globalState.get<string>(SALT_KEY, '')
-  if (typeof salt !== 'string' || salt.length < 16) {
-    salt = crypto.randomBytes(16).toString('hex')
-    await context.globalState.update(SALT_KEY, salt)
+  /**
+   * 1.14 §0a.5: the per-machine random salt of the project keys — they stay stable across sessions but say nothing
+   * about a folder to anyone who has not got this machine's globalState. Read, or created, only while attribution
+   * is on: an activation under none neither reads nor writes it. Read from the memento at every scan rather than
+   * kept here, so *Clear Stored Data…*, which deletes it with the token snapshot, leaves no old salt behind: the
+   * re-read after it makes a new one, and an earlier export's pseudonyms no longer match the new ones.
+   */
+  function projectSalt(): string {
+    if (cfg.attribution === 'none') return ''
+    const stored = context.globalState.get<unknown>(SALT_KEY)
+    if (typeof stored === 'string' && stored.length >= 16) return stored
+    const fresh = crypto.randomBytes(16).toString('hex')
+    // The memento holds the value at once; the write to disk follows.
+    context.globalState.update(SALT_KEY, fresh).then(undefined, (err: unknown) => log.warn(`The project salt could not be stored (${errorKind(err)}).`))
+    return fresh
+  }
+
+  /**
+   * A stored snapshot into an aggregator under the settings of now — the names kept only under
+   * `showProjectNames: basename` (§3 A7: a snapshot written under basename and read under hash drops them at once).
+   */
+  function restoreAgg(snapshot: Snapshot | undefined): Aggregator {
+    const restored = Aggregator.fromSnapshot(snapshot, cfg.attribution, cfg.showProjectNames === 'basename')
+    restored.timeConfig = readTimeConfig(cfg)
+    return restored
   }
 
   // --------------------------------------------------------------- core objects
-  let agg = Aggregator.fromSnapshot(loadSnapshot(paths.state), cfg.attribution)
-  agg.timeConfig = readTimeConfig(cfg)
+  const stored = loadSnapshot(paths.state)
+  // 1.14 §3 A2 rule 4: a 1.13 snapshot under project or session is not read on — the host re-reads, and says why.
+  if (needsProjectReread(stored, cfg.attribution)) log.info('The per-project figures of 1.14 need one re-read of the transcripts.')
+  if (cfg.attribution !== 'none') projectSalt()
+  let agg = restoreAgg(stored)
   let snapshotBytes = fileSize(paths.state)
 
   const history = new QuotaHistory(paths.history, cfg.quotaHistoryDays)
@@ -503,7 +526,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   function scanContext(): ScanContext {
     return {
       attribution: cfg.attribution,
-      projectSalt: salt,
+      projectSalt: projectSalt(),
       hashProjects: cfg.showProjectNames === 'hash',
     }
   }
@@ -951,8 +974,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       // swapped in now serves no window, and its "Cold start done" line would land in whatever
       // log comes next.
       if (disposed) return
-      agg = Aggregator.fromSnapshot(snapshot, cfg.attribution)
-      agg.timeConfig = readTimeConfig(cfg)
+      agg = restoreAgg(snapshot)
       if (fromNothing) agg.agentsRevision = AGENT_TABLES_REVISION
       log.info(`Cold start done: ${snapshot.buckets.length} bucket(s), ${Object.keys(snapshot.cursors).length} file(s)`)
     } catch (err) {
@@ -1316,8 +1338,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   }
 
   function followerReload(): void {
-    agg = Aggregator.fromSnapshot(loadSnapshot(paths.state), cfg.attribution)
-    agg.timeConfig = readTimeConfig(cfg)
+    agg = restoreAgg(loadSnapshot(paths.state))
     snapshotBytes = fileSize(paths.state)
     history.load()
     // The leader has just written; whatever the manager last read is one step behind.
@@ -1652,8 +1673,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         // A replay still at work belongs to the aggregator about to be dropped: it ends first,
         // so that the replay below is this re-read's own.
         if (replayRun) await replayRun
-        agg = Aggregator.fromSnapshot(undefined, cfg.attribution)
-        agg.timeConfig = readTimeConfig(cfg)
+        agg = restoreAgg(undefined)
         await coldScan()
         rollup(Date.now())
         // The re-read fed the agent tables from its own lines, every one from the first byte, and
@@ -2068,22 +2088,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         updateRole()
       }
 
-      // Session records can only come from a re-read; switching them off just drops the table.
+      // 1.14 §3 A7: a re-read only where data is missing. Session records and project keys can only come from a
+      // re-read (none → project or session, the salt made if missing); a folder's name is read only under basename,
+      // so hash → basename re-reads too. Switching off folds the per-project buckets back (sums exact) and drops the
+      // label table and the records; basename → hash drops the names; project ↔ session changes nothing.
       const attributionOn = before.attribution === 'none' && cfg.attribution !== 'none'
-      // Project labels are stored, not derived when they are shown: a switch between
-      // basenames and salted hashes reaches only the records that are read again, so
-      // it needs the same cold re-read — otherwise the table would mix both forms.
-      const labelsChanged = cfg.attribution !== 'none'
-        && cfg.showProjectNames !== before.showProjectNames
-      if (attributionOn || labelsChanged) {
+      const namesOn = cfg.attribution !== 'none' && before.showProjectNames === 'hash' && cfg.showProjectNames === 'basename'
+      const namesOff = cfg.attribution !== 'none' && before.showProjectNames === 'basename' && cfg.showProjectNames === 'hash'
+      if (attributionOn || namesOn) {
         log.info(attributionOn
           ? `Attribution switched to "${cfg.attribution}" — re-reading the transcripts.`
           : `Project names switched to "${cfg.showProjectNames}" — re-reading the transcripts.`)
-        agg = Aggregator.fromSnapshot(undefined, cfg.attribution)
-        agg.timeConfig = readTimeConfig(cfg)
+        agg = restoreAgg(undefined)
         void coldScan().then(() => { rollup(Date.now()); render(true); void replayAgentTables('re-read') })
       } else if (before.attribution !== 'none' && cfg.attribution === 'none') {
         agg.clearSessions()
+        dirty = true
+      } else if (namesOff) {
+        log.info('Project names switched to "hash" — the names are dropped; nothing is re-read.')
+        agg.dropProjectNames()
         dirty = true
       }
 

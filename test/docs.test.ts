@@ -37,7 +37,7 @@ import { durationText } from '../src/stats'
 import { buildItems, selectWindows, viewOf, windowValue } from '../src/statusText'
 import { labelOf, StoredKey } from '../src/storage'
 import { formatReset, lastFailureText, nextAttemptWords, refreshWords, retryWords, TimeConfig } from '../src/time'
-import { FAILURE_TRANSIENT, QuotaState, QuotaWindow, STATE_VERSION } from '../src/types'
+import { FAILURE_TRANSIENT, QuotaState, QuotaWindow } from '../src/types'
 import { SOURCES, SOURCE_TITLE } from '../src/adapters'
 import { MAX_AGENT_EXPANDED } from '../src/viewModel'
 import { readManifest } from './helpers/nls'
@@ -1912,6 +1912,13 @@ test('docs/agents.md quotes durations as durationText writes them, rounded to th
 const RELEASED_1_10 = { EXPORT_SCHEMA_VERSION: 3 } as const
 
 /**
+ * 1.14 P4 (§3 A2, pinned and changed): the snapshot version 1.6.0 … 1.13.0 wrote, where 1.14 moved on to 9 — the release
+ * notes of those versions say `8`, history now, pinned as a released constant (RELEASED_1_10's pattern). Every release
+ * notes test below read the live STATE_VERSION until 1.13.
+ */
+const RELEASED_1_13 = { STATE_VERSION: 8 } as const
+
+/**
  * 1.11 P5 (§3 C5 rule 3): a day of the price table as docs/cost.md writes it — `2026-09-06` → "6 September 2026" —, the
  * one formatter the docs tests hold the page's dates to, so that the page is held to the constants, never to a literal.
  */
@@ -1936,7 +1943,7 @@ test('the snapshot version and the agent tables\' revision are stated on the pag
   // now that the code's is 9. 1.11 P5 (pinned and changed, §3 C4 rule 4): the schema version 1.6.0 wrote — 3 —
   // likewise, now that the code's is 4.
   for (const claim of ['1.5.0 and 1.5.1 were committed but never published; their changes ship here.',
-    `(\`STATE_VERSION\` ${STATE_VERSION})`, '(`AGENT_TABLES_REVISION` 8)',
+    `(\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION})`, '(`AGENT_TABLES_REVISION` 8)',
     'the first start after the upgrade replays the agent tables once', `\`agents[]\` (\`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION})`,
     '### Added', '### Changed', '### Fixed', '### Privacy']) {
     assert.ok(flat.includes(claim), `the 1.6.0 entry does not say: ${claim}`)
@@ -2280,7 +2287,7 @@ test('the 1.7.0 release notes: in the order a store page reads, the versions unc
     '**The Agents and Context sections are left out while the switch shows Codex**',
     'The status bar, its tooltips, the `budget` and `agents` entries, the alerts, the CSV and JSON exports and *Copy Diagnostics* follow no view',
     '**`retry reset due`.**', 'it now reads `retry due`', '`12.3K lower bound, since 11:59`', 'one copy instead of 25, the same figures',
-    `\`STATE_VERSION\` ${STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${RELEASED_1_7.AGENT_TABLES_REVISION} and the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) are the values 1.6.0 wrote, unchanged`,
+    `\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${RELEASED_1_7.AGENT_TABLES_REVISION} and the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) are the values 1.6.0 wrote, unchanged`,
     'the update replays nothing and re-reads nothing',
     'Nothing new is read from any Claude Code or Codex file, and the read contract is unchanged.',
     'never a credential, a header or an exception\'s text',
@@ -2290,7 +2297,7 @@ test('the 1.7.0 release notes: in the order a store page reads, the versions unc
   // unchanged ones still read from the code. 1.11 P5 (pinned and changed, §3 C4 rule 4): the export's is 4 since, so
   // the entry is held to 1.7.0's 3 as well.
   for (const m of flat.matchAll(/`(STATE_VERSION|AGENT_TABLES_REVISION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
-    const actual = { STATE_VERSION, AGENT_TABLES_REVISION: RELEASED_1_7.AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION: RELEASED_1_10.EXPORT_SCHEMA_VERSION }[m[1] as 'STATE_VERSION']
+    const actual = { STATE_VERSION: RELEASED_1_13.STATE_VERSION, AGENT_TABLES_REVISION: RELEASED_1_7.AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION: RELEASED_1_10.EXPORT_SCHEMA_VERSION }[m[1] as 'STATE_VERSION']
     assert.equal(Number(m[2]), actual, `the 1.7.0 entry says ${m[1]} ${m[2]}`)
   }
   // P-A is one copy, not a speed-up (the lead's rule: nothing measured one).
@@ -2687,7 +2694,7 @@ test('the 1.8.0 release notes: the newest entry, every section in order, the ver
     '**Nothing new is read from a transcript.**', 'never a terminal\'s name, its output or its environment', '**Three opt-ins now**',
     // Internal: the versions, the pushes, the measured build, L-6, the read contract.
     // 1.11 P5 (pinned and changed, §3 C4 rule 4): the schema version 1.8.0 shipped, 3 — the code's is 4 since.
-    `\`STATE_VERSION\` ${STATE_VERSION} and the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) are unchanged`,
+    `\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION} and the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) are unchanged`,
     `\`AGENT_TABLES_REVISION\` 8 → ${RELEASED_1_8.AGENT_TABLES_REVISION}`, 'rebuilds the agent tables once',
     'a median 36 ms instead of 53 in UTC and 55 instead of 73 in Europe/Berlin — a measurement, not a promise',
     'Opening a folded section of the dashboard runs every fit again', '(13 rows, the narrowing at activation among them)',
@@ -2705,7 +2712,7 @@ test('the 1.8.0 release notes: the newest entry, every section in order, the ver
   assert.equal(flat.includes(KEEP_WARM_TERMS_PASSAGE), false, 'the entry quotes the terms passage — the page and the dialog do')
   // Every version the entry names is the one 1.8.0 ships (1.11 P5, pinned and changed: the export's as released).
   for (const m of flat.matchAll(/`(STATE_VERSION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
-    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : RELEASED_1_10.EXPORT_SCHEMA_VERSION, `the 1.8.0 entry says ${m[1]} ${m[2]}`)
+    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? RELEASED_1_13.STATE_VERSION : RELEASED_1_10.EXPORT_SCHEMA_VERSION, `the 1.8.0 entry says ${m[1]} ${m[2]}`)
   }
   // Claims to avoid (the P11 input): B1 was struck; L-6 is no visible fix; no cooling, countdown or cost
   // for Codex; no "safe"; nothing it cannot see is claimed seen; Q19 superseded the spec's four and 55 minutes.
@@ -3178,8 +3185,8 @@ test('the 1.9.0 release notes: its date set at publish, every section in order, 
     '**One setting is written for you**: `tokenPace.language`', '`l10n/bundle.l10n.<language>.json`',
     // Internal: the versions, Review 2's (e), L-7 with development.md's figures, L-8, the reset line, the frame, H-1, C-1, the contract.
     // 1.11 P5 (pinned and changed, §3 C4 rule 4): the schema version 1.9.0 shipped, 3 — the code's is 4 since.
-    `\`STATE_VERSION\` ${STATE_VERSION} and the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) are unchanged; \`AGENT_TABLES_REVISION\` ${RELEASED_1_8_REVISION} → ${AGENT_TABLES_REVISION}`,
-    `The first start of 1.9.0 rebuilds the agent tables once (revision ${AGENT_TABLES_REVISION}), so sessions already read have that time at once; nothing is counted again and the snapshot schema stays ${STATE_VERSION}.`,
+    `\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION} and the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) are unchanged; \`AGENT_TABLES_REVISION\` ${RELEASED_1_8_REVISION} → ${AGENT_TABLES_REVISION}`,
+    `The first start of 1.9.0 rebuilds the agent tables once (revision ${AGENT_TABLES_REVISION}), so sessions already read have that time at once; nothing is counted again and the snapshot schema stays ${RELEASED_1_13.STATE_VERSION}.`,
     'a view-model build took a median 26 ms instead of 49 in Europe/Berlin and 26 instead of 31 in UTC, measured on the developer\'s machine — a measurement, not a promise',
     'A cost series asked for without pricing is priced through one shared empty options object.',
     'so nothing on screen changes', 'the first 16 hex digits of the SHA-256 of the English it was translated from',
@@ -3190,9 +3197,9 @@ test('the 1.9.0 release notes: its date set at publish, every section in order, 
   assert.equal(/46 ms|22 ms|46 → 22/.test(flat), false, 'the 1.9.0 entry quotes the profiler\'s figure, not development.md\'s')
   // The versions it names are the code's; the snapshot schema and the export stay. 1.11 P5 (pinned and changed, §3 C4
   // rule 4): the export's as 1.9.0 shipped it, 3 — the code's is the one after it.
-  assert.deepEqual([STATE_VERSION, RELEASED_1_10.EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 3, 10])
+  assert.deepEqual([RELEASED_1_13.STATE_VERSION, RELEASED_1_10.EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 3, 10])
   for (const m of flat.matchAll(/`(STATE_VERSION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
-    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : RELEASED_1_10.EXPORT_SCHEMA_VERSION, `the 1.9.0 entry says ${m[1]} ${m[2]}`)
+    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? RELEASED_1_13.STATE_VERSION : RELEASED_1_10.EXPORT_SCHEMA_VERSION, `the 1.9.0 entry says ${m[1]} ${m[2]}`)
   }
   // The examples are what the code prints: the weekday of each language, the day label 1.9 writes and the one 1.8 wrote.
   const weekday = (tag: string, day = 0): string => underLocale(tag, () => formatTime(MONDAY_0600(day), UTC_TIME, true).split(' ')[0])
@@ -3665,10 +3672,10 @@ test('the 1.10.0 release notes: the newest entry, its date set at publish, every
   assert.ok(section('### Fixed').includes('(`reading`, check 14 of the keep-warm line)'))
   // The versions it names are the code's; the snapshot schema and the export stay. 1.11 P5 (pinned and changed, §3 C4
   // rule 4): the export's as 1.10.0 shipped it, 3 — the code's is 4 since.
-  assert.deepEqual([STATE_VERSION, RELEASED_1_10.EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 3, 10])
-  assert.ok(section('### Internal').includes(`\`STATE_VERSION\` ${STATE_VERSION}, the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) and \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} are unchanged`))
+  assert.deepEqual([RELEASED_1_13.STATE_VERSION, RELEASED_1_10.EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 3, 10])
+  assert.ok(section('### Internal').includes(`\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION}, the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) and \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} are unchanged`))
   for (const m of flat.matchAll(/`(STATE_VERSION|EXPORT_SCHEMA_VERSION|AGENT_TABLES_REVISION)` (\d+)/g)) {
-    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : m[1] === 'EXPORT_SCHEMA_VERSION' ? RELEASED_1_10.EXPORT_SCHEMA_VERSION : AGENT_TABLES_REVISION, `the 1.10.0 entry says ${m[1]} ${m[2]}`)
+    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? RELEASED_1_13.STATE_VERSION : m[1] === 'EXPORT_SCHEMA_VERSION' ? RELEASED_1_10.EXPORT_SCHEMA_VERSION : AGENT_TABLES_REVISION, `the 1.10.0 entry says ${m[1]} ${m[2]}`)
   }
   // The ledger's count and the contract's rows are what the files hold. 1.11 P1 (pinned and changed: the count read from
   // l10n/rekey.json): `l10n-rekey.mjs --start b89ff43` began 1.11's ledger and emptied the entries, so 1.10's count is
@@ -3971,11 +3978,11 @@ test('the 1.11.0 release notes: the newest entry, its date set at publish, every
   assert.ok(privacy.includes('never a path, a URL with a path, or a session or project name the export did not already carry'))
   // The versions it names are the code's.
   const internal = section('### Internal')
-  assert.deepEqual([STATE_VERSION, EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 4, 10])
-  assert.ok(internal.includes(`\`STATE_VERSION\` ${STATE_VERSION} and \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} are unchanged`))
+  assert.deepEqual([RELEASED_1_13.STATE_VERSION, EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 4, 10])
+  assert.ok(internal.includes(`\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION} and \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} are unchanged`))
   assert.ok(internal.includes(`\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} → ${EXPORT_SCHEMA_VERSION}`))
   for (const m of flat.matchAll(/`(STATE_VERSION|AGENT_TABLES_REVISION)` (\d+)/g)) {
-    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : AGENT_TABLES_REVISION, `the 1.11.0 entry says ${m[1]} ${m[2]}`)
+    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? RELEASED_1_13.STATE_VERSION : AGENT_TABLES_REVISION, `the 1.11.0 entry says ${m[1]} ${m[2]}`)
   }
   // The ledger's count, and its base the 1.10.0 release. 1.12 P1 (pinned and changed: the count read from l10n/rekey.json,
   // its base b89ff43): `l10n-rekey.mjs --start d39c2df` began 1.12's ledger and emptied the entries, so 1.11's count is
@@ -4447,10 +4454,10 @@ test('the 1.12.0 release notes: the newest entry, its date set at publish, every
 
   // Internal: the versions unchanged, the ledger's count (a literal of history since 1.13 P1, below).
   const internal = section('### Internal')
-  assert.deepEqual([STATE_VERSION, AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION], [8, 10, 4])
-  assert.ok(internal.includes(`\`STATE_VERSION\` ${STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and \`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION} are unchanged`))
+  assert.deepEqual([RELEASED_1_13.STATE_VERSION, AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION], [8, 10, 4])
+  assert.ok(internal.includes(`\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and \`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION} are unchanged`))
   for (const m of flat.matchAll(/`(STATE_VERSION|AGENT_TABLES_REVISION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
-    const want = m[1] === 'STATE_VERSION' ? STATE_VERSION : m[1] === 'AGENT_TABLES_REVISION' ? AGENT_TABLES_REVISION : EXPORT_SCHEMA_VERSION
+    const want = m[1] === 'STATE_VERSION' ? RELEASED_1_13.STATE_VERSION : m[1] === 'AGENT_TABLES_REVISION' ? AGENT_TABLES_REVISION : EXPORT_SCHEMA_VERSION
     assert.equal(Number(m[2]), want, `the 1.12.0 entry says ${m[1]} ${m[2]}`)
   }
   // 1.13 P1 (pinned and changed: the base read from l10n/rekey.json as d39c2df, the count from its entries, and no pending
@@ -4869,8 +4876,8 @@ test('the 1.13.0 release notes: the newest entry, its date set at publish, Added
 
   // Internal: the versions, the files, the ledger's count read from l10n/rekey.json, the frame, the lease, the door.
   const internal = section('### Internal')
-  assert.deepEqual([STATE_VERSION, AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION], [8, 10, 4])
-  assert.ok(internal.includes(`\`STATE_VERSION\` ${STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and \`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION} are unchanged`))
+  assert.deepEqual([RELEASED_1_13.STATE_VERSION, AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION], [8, 10, 4])
+  assert.ok(internal.includes(`\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and \`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION} are unchanged`))
   const bundles = readdirSync(join(ROOT, 'l10n')).filter((f) => /^bundle\.l10n\.[a-z-]+\.json$/.test(f))
   assert.equal(bundles.length, 28)
   assert.ok(internal.includes('The three languages are three more of Token Pace\'s own translation files, twenty-eight in all'))

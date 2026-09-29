@@ -19,7 +19,7 @@ import { StatsCtx, calendar, heatmap, totalRow } from '../src/stats'
 import { markdownDocument, quickPickItems } from '../src/textViews'
 import { readTimeConfig } from '../src/config'
 import { Attribution, Snapshot } from '../src/types'
-import { ViewModel, agentTreeFor, buildViewModel, defaultUiState } from '../src/viewModel'
+import { UiState, ViewModel, agentTreeFor, buildViewModel, defaultUiState } from '../src/viewModel'
 import { QuotaHistory } from '../src/quotaHistory'
 import {
   AGENT_CONTENT, AGENT_WORLD, agentNode, agentWorld, agentWorldFile, everyParent, treeNodes,
@@ -29,7 +29,7 @@ import {
   timeConfig, win,
 } from './fixtures/viewFixtures'
 import type { PromptCacheReading } from '../src/quotaSources'
-import { CLAUDE_ROOT } from './fixtures/helpers'
+import { CLAUDE_ROOT, claudeLine, codexMeta, codexTokenCount, codexTurnContext } from './fixtures/helpers'
 import { ROOT } from './helpers/nls'
 import { toolAgg } from './helpers/toolAgg'
 
@@ -1148,4 +1148,55 @@ test('a cooling cache is a moment, not a record: Copy Usage Summary carries noth
   for (const word of ['prompt cache', 'cold start', 're-writes', '9d0eb37a', '5f1c2d3e']) {
     assert.equal(summary.includes(word), false, `Copy Usage Summary says ${word}`)
   }
+})
+
+/**
+ * 1.14 P4 (§3 A2 rule 6, first half): the per-project store changes no figure built from the buckets. The same lines,
+ * read once under project — three Claude folders and a Codex rollout of a fourth — and once under none, give view
+ * models (built alike, so the attribution's own sections do not differ by design) whose every figure is the same: the
+ * totals and window rows, the KPIs, the tokens table, the chart, the models, the heat map, the hours, the records, the
+ * budgets and the tools — the data quality's bucket counts excepted, which count buckets. (The chip half is P5's.)
+ */
+test('1.14 §3 A2 rule 6: three projects under project give every bucket-built figure the none world gives', () => {
+  const slugs = ['-home-t-alpha', '-home-t-beta', '-home-t-gamma']
+  const read = (attribution: Attribution): Aggregator => {
+    const agg = new Aggregator()
+    agg.attribution = attribution
+    let n = 0
+    const days = [0, 0, 1, 2, 6, 12, 40]
+    for (const [i, back] of days.entries()) {
+      for (const [j, slug] of slugs.entries()) {
+        const file = path.join(CLAUDE_ROOT, slug, `s${j}.jsonl`)
+        const ts = NOW - back * 86_400_000 - (i * 3 + j) * 900_000
+        agg.addClaudeLine(claudeLine({
+          id: `m-${++n}`, ts, model: j === 1 ? 'claude-sonnet-4-6' : j === 2 && i % 2 === 0 ? 'claude-experimental-x' : 'claude-opus-4-6', final: true,
+          cwd: `/home/t/${slug.slice(8)}`, sessionId: `s${j}`,
+          usage: { input: 100 * (j + 1) + i, cacheWrite: 40 + i, cacheWrite1h: j === 0 ? 10 : 0, cacheRead: 900 + 10 * j, output: 30 + i + j, thinking: 3 },
+        }), { isSub: false, file, attribution, projectSalt: 'salt', hashProjects: false })
+      }
+    }
+    const cur = { offset: 0, size: 0, ino: 9, dev: 1 }
+    const x = { isSub: false, file: path.join('/virtual', 'codex', 'sessions', 'rollout-p.jsonl'), attribution, projectSalt: 'salt', hashProjects: false }
+    agg.addCodexLine(codexMeta({ ts: NOW - 3_600_000, id: 'thread-p', cwd: '/home/t/delta' }), cur, x)
+    agg.addCodexLine(codexTurnContext(NOW - 3_600_000, 'gpt-5.3-codex'), cur, x)
+    agg.addCodexLine(codexTokenCount({ ts: NOW - 3_000_000, total: { total: 900, input: 700, cached: 300, output: 200, reasoning: 50 } }), cur, x)
+    return agg
+  }
+  const on = read('project')
+  const off = read('none')
+  assert.equal(new Set(on.all().map((b) => b.project)).size, 4)
+  assert.ok(on.all().length > off.all().length, 'no hour held two projects')
+  const cfg = makeConfig({ 'tokenPace.showCost': true })
+  // What the split moves by design: the data quality's bucket counts (they count buckets), and the turn figures of the
+  // models table, which come from the session records attribution keeps (none keeps no record) — no bucket figure.
+  const bySplit = new Set(['turnAvg', 'turnP90'])
+  const strip = (v: unknown): unknown => Array.isArray(v) ? v.map(strip)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([k]) => !bySplit.has(k)).map(([k, x]) => [k, strip(x)])) : v
+  const figures = (agg: Aggregator, range: UiState['range'] = '30d'): Record<string, unknown> => {
+    const vm = strip(JSON.parse(JSON.stringify(buildViewModel(makeInput({ agg, cfg, ui: { range } }))))) as Record<string, unknown>
+    delete vm.dataQuality
+    return vm
+  }
+  assert.deepEqual(figures(on), figures(off))
+  for (const range of ['7d', 'thisMonth', '90d', 'today', 'all'] as const) assert.deepEqual(figures(on, range), figures(off, range), range)
 })

@@ -5,6 +5,7 @@ import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import * as path from 'path'
 import { Aggregator, parseCodexRateLimits } from '../src/agg'
+import { projectKeyOf } from '../src/project'
 import { hourIndex } from '../src/time'
 import { Cursor, Snapshot } from '../src/types'
 import {
@@ -246,7 +247,9 @@ test('codexRateLimits(): newest per limit id across all files', () => {
   assert.equal(back.codexRateLimits().length, 2)
 })
 
-test('attribution: session id and project from session_meta, hashed on request, cwd never stored', () => {
+// 1.14 P4 (pinned and changed: the record's project is the folder's key, no projectHash; a rollout without session_meta
+// is unattributed — was "its directory the label", project '10' — §3 A1 rule 2, §7a Q15).
+test('attribution: session id and the folder\'s key from session_meta, the name only under basename, cwd never stored', () => {
   const agg = new Aggregator()
   const cur = cursor()
   agg.cursors.set(CODEX_FILE, cur)
@@ -257,11 +260,13 @@ test('attribution: session id and project from session_meta, hashed on request, 
     codexTokenCount({ ts: T0 + 1000, total: { input: 80, cached: 20, output: 20, reasoning: 5, total: 100 } }),
     codexTokenCount({ ts: T0 + 31_000, total: { input: 160, cached: 40, output: 40, reasoning: 9, total: 200 }, last: { input: 80, cached: 20, output: 20, reasoning: 4, total: 100 } }),
   ], ctx)
+  // Claude Code's slug of the same folder — one key in both programs (§3 A1 rule 3).
+  const key = projectKeyOf('s', '-home-tester-proj-beta')
   const rec = agg.sessions()[0]
   assert.equal(rec.source, 'codex')
   assert.equal(rec.sessionId, 'thread-0001')
-  assert.equal(rec.project, 'proj-beta')
-  assert.match(rec.projectHash, /^[0-9a-f]{12}$/)
+  assert.equal(rec.project, key)
+  assert.equal('projectHash' in rec, false)
   assert.equal(rec.isSub, false)
   assert.equal(rec.parent, null)
   assert.equal(rec.firstTs, T0)
@@ -276,8 +281,16 @@ test('attribution: session id and project from session_meta, hashed on request, 
   assert.deepEqual(rec.turnGapsMs, [1000, 30_000])
   assert.equal(rec.lastCacheTtl, null)
   assert.equal(cur.sessionId, 'thread-0001')
-  assert.equal(cur.project, 'proj-beta')
+  assert.equal(cur.project, key)
+  for (const b of agg.all()) assert.equal(b.project, key)
+  assert.deepEqual(agg.projects(), { [key]: { lastTs: T0 + 31_000, name: 'proj-beta' } })
   assert.equal(JSON.stringify(agg.toSnapshot()).includes('/home/tester/proj-beta'), false)
+  // A tail that resumes after a restart files its later lines under the key on the snapshot's cursor.
+  const back = Aggregator.fromSnapshot(JSON.parse(JSON.stringify(agg.toSnapshot())), 'session', true)
+  const cur1 = back.cursors.get(CODEX_FILE)!
+  back.addCodexLine(codexTokenCount({ ts: T0 + 61_000, total: { input: 240, cached: 60, output: 60, reasoning: 9, total: 300 }, last: { input: 80, cached: 20, output: 20, total: 100 } }), cur1, ctx)
+  for (const b of back.all()) assert.equal(b.project, key)
+  assert.equal(back.all().reduce((n, b) => n + b.requests, 0), 3)
 
   const forked = new Aggregator()
   const cur2 = cursor()
@@ -285,20 +298,33 @@ test('attribution: session id and project from session_meta, hashed on request, 
     codexMeta({ ts: T0, id: 'thread-0002', forkedFrom: 'thread-0001' }),
     codexTaskStarted(T0 + 10),
     codexTokenCount({ ts: T0 + 1000, total: { input: 5, total: 5 } }),
-  ], ctxFor({ file: CODEX_FILE, attribution: 'project', hashProjects: true }))
+  ], ctxFor({ file: CODEX_FILE, attribution: 'project', projectSalt: 's', hashProjects: true }))
   const f = forked.sessions()[0]
   assert.equal(f.isSub, true)
   assert.equal(f.parent, 'thread-0001')
-  assert.equal(f.project, f.projectHash)
+  // A fork takes its own session_meta's cwd (the fixture's default, the same folder); hash names nothing.
+  assert.equal(f.project, key)
+  assert.deepEqual(forked.projects(), { [key]: { lastTs: T0 + 1000 } })
 
-  // Without session_meta the file name is the id and its directory the label.
+  // Without session_meta the file name is the id and the rollout is unattributed.
   const bare = new Aggregator()
   feed(bare, cursor(), [
     codexTurnContext(T0, 'gpt-5.4'),
     codexTokenCount({ ts: T0 + 1000, total: { input: 5, total: 5 } }),
-  ], ctxFor({ file: CODEX_FILE, attribution: 'session' }))
+  ], ctxFor({ file: CODEX_FILE, attribution: 'session', projectSalt: 's' }))
   assert.equal(bare.sessions()[0].sessionId, 'rollout-2026-03-10T09-00-00-thread-0001')
-  assert.equal(bare.sessions()[0].project, '10')
+  assert.equal(bare.sessions()[0].project, '')
+  assert.equal(bare.all()[0].project, '')
+  assert.equal(bare.projectLabelOf(''), '(no project)')
+  // And so is one whose session_meta has no cwd — never its day directory.
+  const noCwd = new Aggregator()
+  feed(noCwd, cursor(), [
+    codexMeta({ ts: T0, cwd: null }),
+    codexTokenCount({ ts: T0 + 1000, total: { input: 5, total: 5 } }),
+  ], ctxFor({ file: CODEX_FILE, attribution: 'session', projectSalt: 's' }))
+  assert.equal(noCwd.sessions()[0].project, '')
+  assert.deepEqual(Object.keys(noCwd.projects()), [''])
+  assert.equal(JSON.stringify(noCwd.toSnapshot()).includes('"10"'), false)
 
   // Attribution off: session_meta leaves no trace.
   const off = new Aggregator()
@@ -306,6 +332,9 @@ test('attribution: session id and project from session_meta, hashed on request, 
   feed(off, cur3, [codexMeta({ ts: T0 }), codexTokenCount({ ts: T0 + 1000, total: { input: 5, total: 5 } })])
   assert.equal(off.sessions().length, 0)
   assert.equal(cur3.sessionId, undefined)
+  assert.equal(cur3.project, undefined)
+  assert.deepEqual(off.projects(), {})
+  assert.equal(off.all()[0].project, undefined)
 })
 
 test('malformed and irrelevant lines return false without touching the cursor state', () => {

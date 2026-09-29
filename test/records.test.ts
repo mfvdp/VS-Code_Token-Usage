@@ -204,10 +204,10 @@ test('projects and sessions stay empty while attribution is off', () => {
 /** Two session records, enough to prove the attribution gate is the setting and not the data. */
 function sessionsOf(): SessionRec[] {
   return [{
-    source: 'claude', sessionId: 's1', project: 'alpha', projectHash: 'h', isSub: false, parent: null,
+    source: 'claude', sessionId: 's1', project: 'alpha', isSub: false, parent: null,
     firstTs: NOW - 3_600_000, lastTs: NOW, models: ['claude-opus-4-6'], input: 1000, cacheWrite: 0,
     cacheWrite1h: 0, cacheRead: 0, output: 100, reasoning: 0, requests: 1, outputFinal: 1,
-    lastCacheTtl: null, lastCacheWriteTs: null, turnGapsMs: [], hourUsage: {},
+    lastCacheTtl: null, lastCacheWriteTs: null, turnGapsMs: [],
   }]
 }
 

@@ -115,7 +115,7 @@ function launch(id: string, over: Partial<AgentLaunch> = {}): AgentLaunch {
 
 function sessionRec(over: Partial<SessionRec> = {}): SessionRec {
   return {
-    source: 'claude', sessionId: S1, project: 'alpha', projectHash: 'abc123def456', isSub: false, parent: null,
+    source: 'claude', sessionId: S1, project: 'alpha', isSub: false, parent: null,
     firstTs: NOW - 2 * HOUR, lastTs: NOW - 2 * MIN, models: ['claude-opus-5'],
     input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0, requests: 0, outputFinal: 0,
     lastCacheTtl: null, lastCacheWriteTs: null, turnGapsMs: [],

@@ -84,10 +84,10 @@ function hourBucket(hoursAgo: number, over: Partial<Bucket> = {}): Bucket {
 /** One session record with only the fields a test cares about filled in. */
 function session(over: Partial<SessionRec>): SessionRec {
   return {
-    source: 'claude', sessionId: 's', project: 'p', projectHash: 'h', isSub: false, parent: null,
+    source: 'claude', sessionId: 's', project: 'p', isSub: false, parent: null,
     firstTs: NOW, lastTs: NOW, models: [], input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0,
     output: 0, reasoning: 0, requests: 0, outputFinal: 0, lastCacheTtl: null,
-    lastCacheWriteTs: null, turnGapsMs: [], hourUsage: {}, ...over,
+    lastCacheWriteTs: null, turnGapsMs: [], ...over,
   }
 }
 
@@ -308,7 +308,6 @@ test('turn P90 needs enough samples, the average does not', () => {
     source: 'claude' as Source,
     sessionId: 's1',
     project: 'alpha',
-    projectHash: 'h',
     isSub: false,
     parent: null,
     firstTs: NOW - 3_600_000,
@@ -1211,7 +1210,7 @@ test('1.13 (Review 1 F1): the host\'s ranges take their arrow from the words\' d
 
 test('the cache TTL countdown is an estimate and expires', () => {
   const base: SessionRec = {
-    source: 'claude', sessionId: 's', project: 'p', projectHash: 'h', isSub: false, parent: null,
+    source: 'claude', sessionId: 's', project: 'p', isSub: false, parent: null,
     firstTs: NOW - 3_600_000, lastTs: NOW, models: [], input: 0, cacheWrite: 0, cacheWrite1h: 0,
     cacheRead: 0, output: 0, reasoning: 0, requests: 0, outputFinal: 0,
     lastCacheTtl: '5m', lastCacheWriteTs: NOW - 60_000, turnGapsMs: [],

@@ -13,7 +13,8 @@ Part of the [Token Pace documentation](../README.md#documentation).
 day, hour, source, model, isSub, tier, res,
 input, cacheWrite5m, cacheWrite1h, cacheRead, output, reasoning,
 requests, outputFinal, webSearch, costUsd, priced,
-listCostUsd, priceFrom, priceApproximate
+listCostUsd, priceFrom, priceApproximate,
+project
 ```
 
 `priced` is `exact`, `family`, `custom` or `none`; an unpriced bucket leaves `costUsd` empty
@@ -31,6 +32,19 @@ price alone priced the bucket. `priceApproximate` is `true` where no rule covere
 and the nearest one was used ([how the table is dated](cost.md)). An unpriced bucket leaves all three
 empty, as it leaves `costUsd`; the `TOTAL` row carries the list amounts of the priced buckets summed
 and leaves the other two empty. The eighteen columns before them keep their positions.
+
+The last column (1.14), `project`, names the bucket's project while `tokenPace.attribution` is
+`project` or `session` ([Sessions and projects](sessions.md)) — the label the dashboard shows: the
+folder's name with `showProjectNames: basename`, else its pseudonym `p:8f31c0a4e2b1`; `(no project)`
+for a Codex session without a working directory and `other projects` for the projects folded into it
+(beyond the 200 kept, or idle longer than `retentionDays`), both in English as the whole file is. A name never stands beside its pseudonym — the file
+holds the one or the other, so a file shared under `hash` cannot be matched with the folder —, and it
+holds no path and no salt. Buckets of several projects in one hour are separate rows, one per project:
+summing an hour's or a day's rows gives the figures a schema 4 file had in its one row. Under `none` the
+column is there and empty in every row — the header is the same for every file of schema 5, and the
+twenty-one columns before it keep their positions —, and the `TOTAL` row leaves it empty, the total
+being every project's of the range. The export follows no project filter: every project of the range
+is in the file, and the column is there to filter by in a spreadsheet.
 
 The tool table cannot be a column on a bucket row — it is keyed by day and model, a bucket row
 by day, hour, model, tier and isSub, so any per-row tool number would be an invented split. It
@@ -97,31 +111,46 @@ qualify them. `costUsd` is `null`, not `0`, where there is no price. Each bucket
 them empty — and `totals` carries `listCostUsd`; the note says what they are: *listCostUsd is the same
 usage at the published list price (multiplier 1, no custom price); where a custom price alone priced a
 model, it equals costUsd; priceFrom is the day the price rule used was read; priceApproximate means no
-rule covered that day and the nearest one was used.* With attribution on it also
-carries a `sessions[]` array, and the note says the project labels are exactly as stored. It also
+rule covered that day and the nearest one was used.* With attribution on each bucket carries the
+CSV's `project` as its last field — under `none` no bucket does —, and the file carries a `sessions[]`
+array: the session records whose activity touches a day of the range (1.14 — until 1.13 every record),
+the first to start first, each with the same `project` label and its counters over its whole lifetime,
+which can reach outside the range. Two notes say so, after the ones versions 1–4 wrote: *sessions[] holds
+the session records whose activity overlaps the exported range's days, each counted over its whole
+lifetime, which can reach outside the range; project is the label its buckets carry* and *project is the
+project's label as the dashboard shows it — the folder's name with showProjectNames basename, else a
+salted pseudonym; buckets of several projects in one hour are separate rows.* It also
 carries `tools[]` (day, source, model, tool, calls) and `toolsTruncated`, and `agents[]` — the
 agents file's rows, with the same fields and Claude Code's report as one `report` object
 (`tokens`, `durationMs`, `toolUses`, or `null`); an absent value is `null`, never `0`, and an
 install without agents exports an empty list. Its note says which agents and what of them:
 *agents[] holds the agent records whose activity overlaps the exported range's days, within the
 agent tables' 7-day retention; ids, names and counts only — never a path, a description or a
-prompt.* `schema_version` is `4` since 1.11 added `listCostUsd`, `priceFrom` and
-`priceApproximate` to `buckets[]`, `listCostUsd` to `totals`, and `checked_later` and `sources` to
-`pricing` (`3` added `agents[]`, `2` the tool table); everything versions 1–3 wrote is still there
-and still means the same thing. The save dialog names what is
+prompt.* `schema_version` is `5` since 1.14 added `project` to `buckets[]` and as the CSV's last
+column, and gave `sessions[]` the range's sessions named by the dashboard's label — `p:` and the key
+where 1.13 wrote the bare hash of another rule, so no pseudonym of 1.14 matches one of an earlier file
+(`4`, 1.11, added `listCostUsd`, `priceFrom` and `priceApproximate` to `buckets[]`, `listCostUsd` to
+`totals`, and `checked_later` and `sources` to `pricing`; `3` added `agents[]`, `2` the tool table);
+every field versions 1–4 wrote is still there under its name, and under `none` a schema 5 JSON file is a
+schema 4 one with the new number. The save dialog names what is
 about to leave the machine — model names always, tool names and the agents' ids and types
-(*Agents are included as agents[].*), project labels (basenames or salted hashes) when
-attribution is on — because that is the last moment to say no. After the export one message
+(*Agents are included as agents[].*), project labels when attribution is on (*Includes model names and
+project labels (salted hashes).*, with `showProjectNames: basename` *Includes model names and project
+labels (directory basenames).*) — because that is the last moment to say no. After the export one message
 names every file written, the companions included.
 
 **Copy Usage Summary** puts a markdown version on the clipboard: quota windows, token tables,
-cache economy, the digest and the footnotes. The `~` and the lower-bound marks travel with the
+the projects (with attribution on), cache economy, the digest and the footnotes. The `~` and the lower-bound marks travel with the
 numbers, and so does the sentence of a transient failure of our own fetch after the reading shown —
 `_Last attempt at 14:20 failed: HTTP 429 — backing off before the next attempt · next attempt in
 1h12m_` under the provider's heading, as the markdown view prints it. It follows the dashboard's
 provider switch as the markdown view does: under one provider it carries that provider's figures
-alone and its heading ends `· Codex only`. The CSV and JSON exports and *Copy Diagnostics* follow
-neither the switch nor the chips: the exports write every provider's rows of the range.
+alone and its heading ends `· Codex only`. It follows the dashboard's project filter the same way
+(1.14): with attribution on it carries the Projects table as the markdown view prints it — the same
+columns, the price footnote once among the footnotes, the lower-bound and the folded line under the
+table —, and while a project chip is pressed its figures are the chosen projects' and its heading ends
+`· project filter: p:8f31c0a4e2b1` (the folder's name with `basename`). The CSV and JSON exports and *Copy Diagnostics* follow
+neither the switch nor the chips: the exports write every provider's and every project's rows of the range.
 
 **Copy Diagnostics** builds a report from a field **allow-list**, not by dumping and redacting.
 An unknown field makes the builder throw, so a leak cannot be introduced silently. It contains:

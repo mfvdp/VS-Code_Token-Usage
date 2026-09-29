@@ -487,5 +487,15 @@ the JSON the price rows checked after the table's day and the pages the table wa
 from a constant in the code; never a path, a URL with a path, or a session or project name the export did
 not already carry ([Export and diagnostics](export.md)).
 
+**What an export adds in 1.14.** Only with `tokenPace.attribution` on: per bucket its project — the CSV's last
+column `project`, `buckets[].project` in the JSON — and the same label on each row of `sessions[]`, which now holds
+the range's sessions only. The label is the one the dashboard shows: the folder's name (letters, digits and
+`_ . : @ -`) with `showProjectNames: basename`, else the salted pseudonym `p:` and twelve hex digits; `(no project)`
+and `other projects` in words. Never the key beside a name — a name and its pseudonym together would link a file
+shared under `hash` with its folder —, never the salt, never a path. With `none` the column is empty, no bucket
+carries a project and there is no `sessions[]`. The files follow no project filter; *Copy Usage Summary*, built
+from what the dashboard shows, follows it and names it in its heading, and carries the Projects table with
+attribution on ([Export and diagnostics](export.md)).
+
 The webview loads no external resource at all, no telemetry of any kind is collected, and there
 is no endpoint setting to point somewhere else.

@@ -21,18 +21,22 @@ import { t } from './i18n'
 import {
   CostBreakdown, PRICES_AS_OF, PRICES_CHECKED_LATER, PRICE_SOURCE_PAGES, PricingOptions, costOfBucket, isCustomPricing,
 } from './prices'
-import { viewTitle } from './textViews'
+import { OTHER_PROJECTS, UNATTRIBUTED, cleanProjectName, isProjectKey, projectLabel } from './project'
+import { projectsTableLines, viewTitle } from './textViews'
 import { TimeConfig, dayOfHour, dayOf as dayOfInstant } from './time'
-import { Bucket, TOOL_NAME_CAP } from './types'
+import { Bucket, ProjectLabel, TOOL_NAME_CAP } from './types'
 import type { ViewModel } from './viewModel'
 
 /**
  * 2 added `tools[]` and `toolsTruncated`; 3 (1.6 O2) added `agents[]`; 4 (1.11) added `listCostUsd`,
  * `priceFrom`, `priceApproximate` to `buckets[]`, `listCostUsd` to `totals`, `checked_later` and
- * `sources` to `pricing` (and the CSV the same three columns after `priced`). Everything versions 1–3
- * wrote is still there and still means the same thing, so a reader written for 1, 2 or 3 keeps working.
+ * `sources` to `pricing` (and the CSV the same three columns after `priced`); 5 (1.14 §3 A6) added
+ * `buckets[].project` and the CSV's last column `project` — with attribution on, the label the dashboard
+ * shows; the column empty under none — and gave `sessions[]` the range's sessions only, each named by the
+ * same label. Everything versions 1–4 wrote is still there under the same names, so a reader written for
+ * 1–4 keeps working, a reader of the CSV by position too (the new column is the last).
  */
-export const EXPORT_SCHEMA_VERSION = 4
+export const EXPORT_SCHEMA_VERSION = 5
 
 /**
  * The agents file's columns (1.6 O2) — the fields of a JSON `agents[]` row, in their order, with
@@ -76,7 +80,41 @@ export const CSV_COLUMNS = [
   'requests', 'outputFinal', 'webSearch', 'costUsd', 'priced',
   // 1.11 C4 (schema 4): appended, so the eighteen columns before them keep their positions.
   'listCostUsd', 'priceFrom', 'priceApproximate',
+  // 1.14 §3 A6 (schema 5): the last, always in the header and empty under attribution none — one header for every
+  // file of schema 5, and the twenty-one columns before it where schema 4 had them.
+  'project',
 ] as const
+
+/** The label the files write for a project key while attribution is on — see `projectNamer`. */
+type ProjectNamer = (key: string | undefined) => string
+
+/**
+ * 1.14 §0a.7: how both files name a bucket's or a session's project — null under attribution none, where no project
+ * leaves the machine. With attribution on, the label the dashboard shows (`projectLabel`): the folder's name under
+ * `showProjectNames: basename`, else the pseudonym `p:` + the key — never both for one project, so a file shared under
+ * `hash` cannot be matched with a file that names the folder; `(no project)` and `other projects` in English, as the
+ * files stay English in every language (i18n.ts). Checked once more on the way out: a name outside the names' alphabet
+ * (`cleanProjectName`) is no name, and a value that is no key is the unattributed one — whatever a snapshot from
+ * elsewhere held, the column holds a name, a pseudonym or one of the two words, never a path, never the salt.
+ */
+function projectNamer(agg: Aggregator, cfg: Config): ProjectNamer | null {
+  if (cfg.attribution === 'none') return null
+  const names = cfg.showProjectNames === 'basename'
+  const labels: Record<string, ProjectLabel> = {}
+  if (names) {
+    for (const [key, label] of Object.entries(agg.projects())) {
+      if (isProjectKey(key) && typeof label.name === 'string' && cleanProjectName(label.name) === label.name) {
+        labels[key] = { lastTs: label.lastTs, name: label.name }
+      }
+    }
+  }
+  return (key) => {
+    const k = isProjectKey(key) ? key : UNATTRIBUTED
+    if (k === UNATTRIBUTED) return '(no project)'
+    if (k === OTHER_PROJECTS) return 'other projects'
+    return projectLabel(k, labels, names)
+  }
+}
 
 /**
  * 1.11 C4: what a bucket's cost breakdown says of its price, as both exports write it — each only for
@@ -136,7 +174,10 @@ function rowsOf(agg: Aggregator, from: string, to: string, tcfg: TimeConfig): Bu
       if (s !== 0) return s
       const m = a.model.localeCompare(b.model)
       if (m !== 0) return m
-      return a.tier.localeCompare(b.tier)
+      const tier = a.tier.localeCompare(b.tier)
+      if (tier !== 0) return tier
+      // 1.14: two projects' buckets of one hour are two rows, in the order of their keys (none under attribution none).
+      return (a.project ?? '').localeCompare(b.project ?? '')
     })
 }
 
@@ -165,6 +206,7 @@ export interface ExportRange {
  */
 export function toCsv(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: TimeConfig): string {
   const pricing = pricingOf(cfg)
+  const projectOf = projectNamer(agg, cfg)
   const lines: string[] = [CSV_COLUMNS.join(',')]
   const total = {
     input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0,
@@ -188,6 +230,8 @@ export function toCsv(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: Ti
       facts.list === null ? '' : amount(facts.list),
       facts.from ?? '',
       facts.approximate ? 'true' : '',
+      // 1.14 §3 A6: the project's label with attribution on, empty under none.
+      projectOf ? projectOf(b.project) : '',
     ].map(csvCell).join(','))
     total.input += b.input
     total.cacheWrite5m += write5m
@@ -209,8 +253,9 @@ export function toCsv(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: Ti
     amount(total.cost),
     // A total over partly unpriced buckets is a lower bound, and says so in its own column.
     total.unpriced ? 'lowerBound' : '',
-    // The list amount over the same priced buckets; a sum has no rule and no day of its own.
-    amount(total.listCost), '', '',
+    // The list amount over the same priced buckets; a sum has no rule and no day of its own — and no project: the
+    // total is every project's of the range.
+    amount(total.listCost), '', '', '',
   ].map(csvCell).join(','))
   return lines.join('\n') + '\n'
 }
@@ -328,8 +373,9 @@ export function agentRows(agg: Aggregator, range: ExportRange, cfg: Config, tcfg
     mains: agg.mains(),
     runs: agg.runs(),
     runLaunches: agg.runLaunches(),
-    // 1.14 P4: the records hold the project key; the tree names a session's project by its label.
-    sessions: agg.sessions().map((s) => ({ ...s, project: agg.projectLabelOf(s.project) })),
+    // 1.14 P7: the records as they are — the tree takes their project keys (1.14 P5). No label table: a session root's
+    // project is a label of the tree's, and an agent row carries no project (AGENT_KEYS), so nothing of it is exported.
+    sessions: agg.sessions(),
     attribution: cfg.attribution,
     selected: null,
     tcfg,
@@ -387,8 +433,24 @@ export interface JsonExport {
   notes: string[]
 }
 
+/**
+ * 1.14 §3 A6 rule 1: the JSON's note on the project fields, word for word the spec's — written with attribution on,
+ * after the notes versions 1–4 wrote.
+ */
+export const PROJECT_NOTE = 'project is the project\'s label as the dashboard shows it — the folder\'s name with showProjectNames '
+  + 'basename, else a salted pseudonym; buckets of several projects in one hour are separate rows'
+
+/**
+ * The note on `sessions[]` (with attribution on). 1.14 (schema 5): the range's sessions, as `agents[]` holds the range's
+ * agents — the note of 1.0–1.13, "sessions[] carries project labels as stored (basename or salted hash)", is no longer
+ * true: a record stores the key, and the file writes the label.
+ */
+export const SESSIONS_NOTE = 'sessions[] holds the session records whose activity overlaps the exported range\'s days, each '
+  + 'counted over its whole lifetime, which can reach outside the range; project is the label its buckets carry'
+
 export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: TimeConfig, now = Date.now()): string {
   const pricing = pricingOf(cfg)
+  const projectOf = projectNamer(agg, cfg)
   // The tool table is addressed by the day the ingest stored, so it takes the range bounds
   // as they are — there is no hour left in a tool row to re-address in another zone.
   const toolQuery = agg.tools(range.from, range.to)
@@ -428,6 +490,8 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
       listCostUsd: facts.list === null ? null : Number(amount(facts.list)),
       priceFrom: facts.from,
       priceApproximate: facts.approximate,
+      // 1.14 §3 A6 (schema 5): the last field, as in the CSV — and only with attribution on (§0a.7).
+      ...(projectOf ? { project: projectOf(b.project) } : {}),
     })
     totals.usage += billable(b)
     totals.input += b.input
@@ -492,13 +556,17 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
     ],
   }
 
-  if (cfg.attribution !== 'none') {
-    // Project labels as the views show them — a folder's name under showProjectNames basename, else the salted
-    // pseudonym (1.14 P4: the record holds the key since 1.14; P7 completes the export). The save dialog says so
-    // before the file exists.
-    out.sessions = agg.sessions().map((s) => ({
+  if (projectOf) {
+    // 1.14 §3 A6 rule 1: the sessions whose activity — from their first line to their last — touches a day of the
+    // range, as agents[] takes the agents (1.6 O2) and the Sessions table the sessions (§3 A4 rule 6); every project's
+    // (the export follows no filter, rule 2), the first to start first. Each named by the label its buckets carry —
+    // never the key beside a name (§0a.7). The save dialog says so before the file exists.
+    const sessions = agg.sessions()
+      .filter((s) => dayOfInstant(s.firstTs, tcfg) <= range.to && dayOfInstant(s.lastTs, tcfg) >= range.from)
+      .sort((a, b) => a.firstTs - b.firstTs || a.sessionId.localeCompare(b.sessionId))
+    out.sessions = sessions.map((s) => ({
       sessionId: s.sessionId,
-      project: agg.projectLabelOf(s.project),
+      project: projectOf(s.project),
       source: s.source,
       isSub: s.isSub,
       parent: s.parent,
@@ -514,7 +582,8 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
       requests: s.requests,
       outputFinal: s.outputFinal,
     }))
-    out.notes.push('sessions[] carries project labels as stored (basename or salted hash)')
+    // After the notes versions 1–4 wrote, so theirs keep their places; the sessions note in the place 1.0 gave it.
+    out.notes.push(SESSIONS_NOTE, PROJECT_NOTE)
   }
   return JSON.stringify(out, null, 2) + '\n'
 }
@@ -542,8 +611,11 @@ export function toMarkdownSummary(vm: ViewModel): string {
   // 1.7 F1: the summary follows the dashboard's provider switch, as the markdown view does, and its
   // heading names the provider while the switch shows one.
   const shown = viewTitle(vm)
+  // 1.14 §3 A6 rule 3: and the project filter, as it names the provider — P5's line ('project filter: {0}', the labels
+  // by listOf), while a project chip is pressed; the figures below are the view model's, so they follow it already.
   L.push(`# ${t('Token Pace — {0}', vm.range.label)} (${vm.range.from} → ${vm.range.to})`
-    + (shown !== null ? ` · ${t('{0} only', shown)}` : ''))
+    + (shown !== null ? ` · ${t('{0} only', shown)}` : '')
+    + (vm.projectFilterText ? ` · ${vm.projectFilterText}` : ''))
   L.push('')
   if (vm.preview) L.push(`> **${t('Preview data — not a reading.')}**`, '')
 
@@ -597,6 +669,10 @@ export function toMarkdownSummary(vm: ViewModel): string {
     L.push('')
     L.push(`_${t('Your own limits; USD is the hypothetical API equivalent, not a bill.')}_`, '')
   }
+
+  // 1.14 §3 A6 rule 3: the Projects table as the markdown document prints it — the same helper, so the two cannot
+  // differ —, with attribution on only; the price footnote stands once, in the footnotes below.
+  L.push(...projectsTableLines(vm))
 
   if (vm.cacheEconomy.length > 0) {
     L.push(`## ${t('Cache economy')}`, '')

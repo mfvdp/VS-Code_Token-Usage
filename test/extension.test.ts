@@ -3447,6 +3447,9 @@ test('the exports say the agents are about to leave before anything is written, 
   state.answers.push(uri(chosen), undefined)
   await state.execute('tokenPace.exportCsv')
   const title = String(state.saveDialogs[state.saveDialogs.length - 1]?.title ?? '')
+  // 1.14 P7 (§3 A6 rule 2, §0a.7): under attribution none the dialog's first sentence names the model names alone.
+  assert.ok(title.startsWith('Token Pace export — Includes model names. '), title)
+  assert.equal(title.includes('project labels'), false, title)
   assert.ok(title.includes('Tool names go into a second file beside it (.tools.csv).'), title)
   assert.ok(title.includes('Agent ids and types go into a third file beside it (.agents.csv).'), title)
   const agentsFile = path.join(fx.data, 'out', 'usage.agents.csv')
@@ -3471,7 +3474,8 @@ test('the exports say the agents are about to leave before anything is written, 
   assert.equal(state.writes.length, 4)
   const written = JSON.parse(state.writes[3].text) as { schema_version: number; agents: Array<{ agentId: string; type: string | null }> }
   // 1.11 P5 (pinned and changed: schema 3 → 4, §3 C4 — the price fields; agents[] is as schema 3 wrote it).
-  assert.equal(written.schema_version, 4)
+  // 1.14 P7 (pinned and changed: schema 4 → 5, §3 A6 — the project fields; agents[] still as schema 3 wrote it).
+  assert.equal(written.schema_version, 5)
   assert.deepEqual(written.agents.map((a) => [a.agentId, a.type]).sort(),
     [['a1a1a1', 'workflow-subagent'], ['b1b1b1', null], ['c3c3c3', 'Explore']])
   assert.equal(state.messages[state.messages.length - 1]?.text, `Token Pace: exported to ${json}`)
@@ -5511,6 +5515,12 @@ test('1.14 leak test (§0a.1–§0a.5, §0a.9): under hash no output holds the f
     state.answers.push(uri(path.join(fx.data, 'out', 'usage.json')), undefined)
     await state.execute('tokenPace.exportJson')
     assert.ok(state.writes.length >= before + 2, 'the exports wrote nothing')
+    // 1.14 P7 (§3 A6 rule 2, §0a.7): each save dialog names the project labels and how they are written — unchanged English.
+    const names = state.settings.get('tokenPace.showProjectNames') === 'basename'
+    for (const dialog of state.saveDialogs.slice(-2)) {
+      assert.ok(String(dialog.title ?? '').startsWith(`Token Pace export — Includes model names and project labels (${names ? 'directory basenames' : 'salted hashes'}). `),
+        String(dialog.title))
+    }
     return [
       ['page', JSON.stringify(page.sent.slice(-3))],
       ['markdown', lastMarkdown()],
@@ -5525,6 +5535,12 @@ test('1.14 leak test (§0a.1–§0a.5, §0a.9): under hash no output holds the f
   const hashed = await outputs()
   // The Projects table is there, by its pseudonym: the key of the folder's directory, one project for both programs.
   assert.match(hashed[0][1], /p:[0-9a-f]{12}/)
+  // 1.14 P7 (§0a.7): the summary and both files name the folder's project by its pseudonym under hash.
+  const { projectKeyOf } = require('../src/project') as typeof import('../src/project')
+  const synKey = projectKeyOf(salt, SYN_SLUG)
+  for (const [what, text] of hashed.filter(([w]) => w === 'summary' || w === 'exports')) {
+    assert.ok(text.includes(`p:${synKey}`), `hash: the ${what} does not name the project by its pseudonym`)
+  }
   for (const [what, text] of hashed) {
     for (const secret of [...SYN_SECRETS, salt]) assert.equal(text.includes(secret), false, `hash: the ${what} holds ${secret}`)
   }
@@ -5539,13 +5555,21 @@ test('1.14 leak test (§0a.1–§0a.5, §0a.9): under hash no output holds the f
   await waitFor('the name on the page', () => JSON.stringify(page.sent.slice(-1)).includes('synthetic-project-123'))
   const named = await outputs()
   for (const [what, text] of named) {
-    const shown = ['page', 'markdown', 'quick pick', 'exports'].includes(what)
+    // 1.14 P7 (pinned and changed: + the summary — it carries the Projects table since P7, §3 A6 rule 3).
+    const shown = ['page', 'markdown', 'quick pick', 'summary', 'exports'].includes(what)
     for (const secret of [...SYN_SECRETS, salt]) {
       if (secret === 'synthetic-project-123' && shown) continue
       assert.equal(text.includes(secret), false, `basename: the ${what} holds ${secret}`)
     }
   }
   assert.ok(named[1][1].includes('synthetic-project-123'), 'the markdown does not name the folder')
+  // 1.14 P7 (§0a.7): the summary and the files name the folder — never with its key beside it (the page's chips carry
+  // the key as their value, which never leaves the machine; the quick pick's output holds every control of the test,
+  // the ones opened under hash among them).
+  for (const [what, text] of named.filter(([w]) => ['markdown', 'summary', 'exports'].includes(w))) {
+    if (what === 'summary' || what === 'exports') assert.ok(text.includes('synthetic-project-123'), `basename: the ${what} does not name the folder`)
+    assert.equal(text.includes(synKey), false, `basename: the ${what} holds the key beside the name`)
+  }
 
   // basename → hash: the names go at once, nothing is read again.
   const coldBefore = coldStartLines(state)

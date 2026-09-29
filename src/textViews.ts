@@ -945,6 +945,28 @@ function markdownRecords(L: string[], rec: ViewModel['records']): void {
 }
 
 /**
+ * 1.14 §3 A4 rule 10: the Projects table of the markdown document — the page's columns, the cost always (a dash with
+ * costs off, as every table of the document), the sessions' lower-bound line and the folded line under it; nothing while
+ * attribution is off or the range holds no project. §3 A6 rule 3 (1.14 P7): *Copy Usage Summary* prints the same lines
+ * (exporter.ts `toMarkdownSummary`), so the clipboard and the document cannot tell a project's figures differently.
+ */
+export function projectsTableLines(vm: ViewModel): string[] {
+  if (!vm.projects.enabled || vm.projects.rows.length === 0) return []
+  const L: string[] = []
+  L.push(`## ${t('Projects')}`, '')
+  L.push(t('| Project | Usage | API cost | Requests | Cache hit | Share | Sessions | Last activity |'))
+  L.push('|---|---|---|---|---|---|---|---|')
+  for (const p of vm.projects.rows) {
+    L.push(`| ${cell(p.project)} | ${cell(p.usage)} | ${cell(p.cost)}${p.costLowerBound || p.costFamily ? ' ⚠' : ''} | `
+      + `${cell(p.requests)} | ${cell(p.cacheHit)} | ${cell(p.share)} | ${cell(p.sessions)} | ${cell(p.lastActive)} |`)
+  }
+  L.push('')
+  if (vm.projects.note) L.push(`_⚠ ${vm.projects.note}_`, '')
+  if (vm.projects.folded) L.push(`_${vm.projects.folded.text}_`, '')
+  return L
+}
+
+/**
  * The read-only `tokenpace:/usage.md` document — the same figures as tables. `textTree` is the
  * agent tree with every node open (1.6 D3), built for the document; without it the Agents
  * section prints the view model's, which holds what the dashboard has open.
@@ -1241,19 +1263,7 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
     L.push(`_${t('A budget is your own number; `usd` is the hypothetical API equivalent, not a bill.')}_`, '')
   }
 
-  if (vm.projects.enabled && vm.projects.rows.length > 0) {
-    // 1.14 §3 A4 rule 10: the page's columns, the cost always (a dash with costs off, as every table of the document).
-    L.push(`## ${t('Projects')}`, '')
-    L.push(t('| Project | Usage | API cost | Requests | Cache hit | Share | Sessions | Last activity |'))
-    L.push('|---|---|---|---|---|---|---|---|')
-    for (const p of vm.projects.rows) {
-      L.push(`| ${cell(p.project)} | ${cell(p.usage)} | ${cell(p.cost)}${p.costLowerBound || p.costFamily ? ' ⚠' : ''} | `
-        + `${cell(p.requests)} | ${cell(p.cacheHit)} | ${cell(p.share)} | ${cell(p.sessions)} | ${cell(p.lastActive)} |`)
-    }
-    L.push('')
-    if (vm.projects.note) L.push(`_⚠ ${vm.projects.note}_`, '')
-    if (vm.projects.folded) L.push(`_${vm.projects.folded.text}_`, '')
-  }
+  L.push(...projectsTableLines(vm))
   if (vm.sessions.enabled && vm.sessions.rows.length > 0) {
     L.push(`## ${t('Sessions')}`, '')
     L.push(t('| Session | Project | Started | Duration | Usage | Req. | Models | Cache |'))

@@ -961,7 +961,7 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
 
 test('1.14 leak test (§0a.1–§0a.6): under hash no store, view or export of the aggregator holds the folder, the slug, the worktree, the meta\'s other keys or the salt; under basename the name only where a project is shown', () => {
   const { Aggregator } = require('../src/agg') as typeof import('../src/agg')
-  const { isProjectKey } = require('../src/project') as typeof import('../src/project')
+  const { isProjectKey, projectKeyOf } = require('../src/project') as typeof import('../src/project')
   const { toCsv, toJson, toMarkdownSummary } = require('../src/exporter') as typeof import('../src/exporter')
   const { buildViewModel } = require('../src/viewModel') as typeof import('../src/viewModel')
   const { claudeLine, codexTokenCount, codexTurnContext } = require('./fixtures/helpers') as typeof import('./fixtures/helpers')
@@ -973,10 +973,11 @@ test('1.14 leak test (§0a.1–§0a.6): under hash no store, view or export of t
   const main = `/virtual/claude/projects/${SLUG}/sess-syn.jsonl`
   const sub = `/virtual/claude/projects/${SLUG}/sess-syn/subagents/agent-b6b6b6.jsonl`
   const rollout = '/virtual/codex/sessions/2026/09/03/rollout-syn.jsonl'
-  const world = (hashProjects: boolean) => {
+  // 1.14 P7 (pinned and changed: the world takes the attribution — §0a.7's none case).
+  const world = (hashProjects: boolean, attribution: 'none' | 'project' = 'project') => {
     const agg = new Aggregator()
-    agg.attribution = 'project'
-    const ctx = (file: string, isSub = false) => ({ isSub, file, attribution: 'project' as const, projectSalt: SALT, hashProjects })
+    agg.attribution = attribution
+    const ctx = (file: string, isSub = false) => ({ isSub, file, attribution, projectSalt: SALT, hashProjects })
     agg.cursors.set(main, { offset: 0, size: 0, ino: 1, dev: 1 })
     agg.addClaudeLine(claudeLine({ id: 'p1', ts: NOW - 3_600_000, cwd: CWD, sessionId: 'sess-syn', usage: { input: 70, output: 7 }, final: true }), ctx(main))
     agg.addClaudeLine(claudeLine({ id: 'p2', ts: NOW - 3_000_000, agentId: 'b6b6b6', sessionId: 'sess-syn', usage: { input: 30, output: 3 }, final: true,
@@ -989,7 +990,7 @@ test('1.14 leak test (§0a.1–§0a.6): under hash no store, view or export of t
     } }), cur, ctx(rollout))
     agg.addCodexLine(codexTurnContext(NOW - 2_000_000, 'gpt-5.4'), cur, ctx(rollout))
     agg.addCodexLine(codexTokenCount({ ts: NOW - 1_900_000, total: { input: 50, cached: 10, output: 5, total: 55 } }), cur, ctx(rollout))
-    const cfg = makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': hashProjects ? 'hash' : 'basename',
+    const cfg = makeConfig({ 'tokenPace.attribution': attribution, 'tokenPace.showProjectNames': hashProjects ? 'hash' : 'basename',
       'tokenPace.dashboard.sections': ['summary', 'tokens', 'agents', 'projects', 'sessions', 'records'] })
     const range = { from: '2026-08-25', to: TODAY, label: 'Last 10 days', preset: 'custom' }
     const vm = buildViewModel(makeInput({ agg, cfg }))
@@ -1019,14 +1020,38 @@ test('1.14 leak test (§0a.1–§0a.6): under hash no store, view or export of t
   for (const [what, text] of hashed.outputs) {
     for (const secret of secrets) assert.equal(text.includes(secret), false, `hash: ${what} holds ${secret}`)
   }
+  // 1.14 P7 (§0a.7): the files and the summary name the project by its pseudonym under hash — the key the folder gives.
+  const KEY = projectKeyOf(SALT, SLUG)
+  const files = (w: ReturnType<typeof world>): Array<[string, string]> => w.outputs.filter(([what]) => ['the CSV', 'the JSON export', 'the summary'].includes(what))
+  for (const [what, text] of files(hashed)) assert.ok(text.includes(`p:${KEY}`), `hash: ${what} does not name the project by its pseudonym`)
   const named = world(false)
   assert.equal(Object.values(named.agg.projects())[0].name, 'synthetic-project-123')
   for (const [what, text] of named.outputs) {
     for (const secret of secrets) {
-      // The folder's name, with names on, in the label table, the view model and the exports; nothing else, anywhere.
-      if (secret === 'synthetic-project-123' && what !== 'the summary') continue
+      // The folder's name, with names on, in the label table, the view model, the exports and — 1.14 P7 (pinned and
+      // changed: the summary carries the Projects table since P7, §3 A6 rule 3) — the summary; nothing else, anywhere.
+      if (secret === 'synthetic-project-123') continue
       assert.equal(text.includes(secret), false, `basename: ${what} holds ${secret}`)
     }
   }
   assert.ok(named.outputs[0][1].includes('synthetic-project-123') && named.outputs[1][1].includes('synthetic-project-123'))
+  // §0a.7: under basename the files and the summary name the folder — and never its key beside it: a name and its
+  // pseudonym together would link a file shared under hash with its folder.
+  for (const [what, text] of files(named)) {
+    assert.ok(text.includes('synthetic-project-123'), `basename: ${what} does not name the folder`)
+    assert.equal(text.includes(KEY), false, `basename: ${what} holds the key beside the name`)
+  }
+  // §0a.7: under none neither file nor the summary holds a project — no column value, no field, no sessions[], no name.
+  const off = world(false, 'none')
+  for (const b of off.agg.all()) assert.equal(b.project, undefined)
+  for (const [what, text] of files(off)) {
+    for (const secret of [...secrets, KEY, '(no project)']) assert.equal(text.includes(secret), false, `none: ${what} holds ${secret}`)
+    assert.equal(/p:[0-9a-f]{12}/.test(text), false, `none: ${what} holds a pseudonym`)
+  }
+  const [head, ...rows] = off.outputs.find(([what]) => what === 'the CSV')![1].trim().split('\n').map((l) => l.split(','))
+  assert.equal(head[head.length - 1], 'project')
+  for (const r of rows) assert.equal(r[head.length - 1], '', r.join(','))
+  const json = JSON.parse(off.outputs.find(([what]) => what === 'the JSON export')![1]) as { buckets: object[]; sessions?: unknown }
+  assert.equal(json.buckets.some((b) => 'project' in b), false)
+  assert.equal(json.sessions, undefined)
 })

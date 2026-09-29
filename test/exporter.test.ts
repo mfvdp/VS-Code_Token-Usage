@@ -6,15 +6,17 @@ import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { AGENT_RETENTION_DAYS } from '../src/agentTree'
 import {
-  AGENTS_CSV_COLUMNS, AGENTS_FILE_SUFFIX, CSV_COLUMNS, EXPORT_SCHEMA_VERSION, TOOLS_CSV_COLUMNS, TOOLS_FILE_SUFFIX, agentRows,
-  agentsCsv, companionPath, toCsv, toJson, toMarkdownSummary, toolsCsv,
+  AGENTS_CSV_COLUMNS, AGENTS_FILE_SUFFIX, CSV_COLUMNS, EXPORT_SCHEMA_VERSION, PROJECT_NOTE, SESSIONS_NOTE, TOOLS_CSV_COLUMNS,
+  TOOLS_FILE_SUFFIX, agentRows, agentsCsv, companionPath, toCsv, toJson, toMarkdownSummary, toolsCsv,
 } from '../src/exporter'
 import { agentTreeFor, buildViewModel } from '../src/viewModel'
 import { AGENT_WORLD, agentNode, agentWorld, treeNodes } from './fixtures/agentWorld'
 import {
   FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, timeConfig, win,
 } from './fixtures/viewFixtures'
-import { markdownDocument } from '../src/textViews'
+import { markdownDocument, projectsTableLines } from '../src/textViews'
+import { projectKeyOf, slugOf } from '../src/project'
+import { claudeLine, codexMeta, codexTokenCount, codexTurnContext } from './fixtures/helpers'
 import { toolAgg } from './helpers/toolAgg'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -35,11 +37,12 @@ test('the CSV header is the documented column list', () => {
   const rows = csvRows(toCsv(buildAgg(), range, cfg, tcfg))
   assert.deepEqual(rows[0], [...CSV_COLUMNS])
   // 1.11 P5 (rewritten: 18 → 21 columns, §3 C4): the three price columns are appended after `priced`, so the
-  // eighteen of schema 1–3 keep their positions.
-  assert.equal(rows[0].length, 21)
+  // eighteen of schema 1–3 keep their positions. 1.14 P7 (pinned and changed: 21 → 22 columns, §3 A6 rule 1): `project`
+  // is appended after them, so the twenty-one of schema 4 keep theirs.
+  assert.equal(rows[0].length, 22)
   assert.deepEqual(rows[0].slice(0, 18), ['day', 'hour', 'source', 'model', 'isSub', 'tier', 'res', 'input', 'cacheWrite5m',
     'cacheWrite1h', 'cacheRead', 'output', 'reasoning', 'requests', 'outputFinal', 'webSearch', 'costUsd', 'priced'])
-  assert.deepEqual(rows[0].slice(18), ['listCostUsd', 'priceFrom', 'priceApproximate'])
+  assert.deepEqual(rows[0].slice(18), ['listCostUsd', 'priceFrom', 'priceApproximate', 'project'])
 })
 
 test('every row is one stored bucket, in calendar order', () => {
@@ -176,7 +179,9 @@ test('session rows are exported only with attribution on, and the notes say what
   assert.ok(Array.isArray(on.sessions))
   assert.ok(on.sessions.length >= 1)
   assert.ok(on.sessions[0].project)
-  assert.ok(on.notes.some((n: string) => n.includes('project labels as stored')))
+  // 1.14 P7 (pinned and changed: "project labels as stored" → the range's sessions and the label, §3 A6 rule 1): a record
+  // stores the key since 1.14, and the file writes the label its buckets carry.
+  assert.ok(on.notes.includes(SESSIONS_NOTE), on.notes.join(' | '))
   // Never the working directory itself — only the label the snapshot already holds.
   assert.equal(JSON.stringify(on).includes('/home/t/'), false)
 })
@@ -375,10 +380,11 @@ const AGENT_KEYS = [
 
 test('the JSON export carries agents[] (schema 3 on): the documented fields, and the note that says what they are', () => {
   // 1.11 P5 (rewritten: schema 3 → 4, §3 C4): 1.11 added the price fields; agents[] is as schema 3 wrote it.
-  assert.equal(EXPORT_SCHEMA_VERSION, 4)
+  // 1.14 P7 (pinned and changed: schema 4 → 5, §3 A6): 1.14 added the project fields; agents[] is still schema 3's.
+  assert.equal(EXPORT_SCHEMA_VERSION, 5)
   const { agg } = agentWorld()
   const j = JSON.parse(toJson(agg, WORLD_DAY, cfg, tcfg, NOW))
-  assert.equal(j.schema_version, 4)
+  assert.equal(j.schema_version, 5)
   // Everything version 2 carried is still there.
   for (const k of ['range', 'timezone', 'pricing', 'totals', 'buckets', 'tools', 'toolsTruncated', 'notes']) assert.ok(k in j, k)
   assert.ok(Array.isArray(j.agents) && j.agents.length > 0)
@@ -604,9 +610,10 @@ test('1.11 C4: the CSV carries the list amount, the rule\'s day and "approximate
   const discount = makeConfig({ 'tokenPace.pricing.multiplier': 0.9 })
   const text = toCsv(priceWorld(), PRICE_WORLD_RANGE, discount, timeConfig(discount))
   // One whole row: Opus 4.6 on a day its rule covers — list $16.405 (5 + 1.875 + 1 + 1 + 7.5 for the tokens, $0.03 for three
-  // searches), 0.9 of it configured; the rule read on PRICES_AS_OF; not approximate.
+  // searches), 0.9 of it configured; the rule read on PRICES_AS_OF; not approximate. 1.14 P7 (pinned and changed: one more
+  // empty cell at the end — schema 5's `project`, empty under attribution none).
   assert.ok(text.split('\n').includes(
-    `2026-09-10,,claude,claude-opus-4-6,false,standard,d,1000000,300000,100000,2000000,300000,0,4,4,3,14.764500,exact,16.405000,${PRICES_AS_OF},`), text)
+    `2026-09-10,,claude,claude-opus-4-6,false,standard,d,1000000,300000,100000,2000000,300000,0,4,4,3,14.764500,exact,16.405000,${PRICES_AS_OF},,`), text)
   const rows = csvByModel(text)
   // Sonnet 4.6's hour on 1 September, before its rule's day: priced from the nearest rule, and it says so.
   assert.deepEqual([rows.get('claude-sonnet-4-6')?.costUsd, rows.get('claude-sonnet-4-6')?.listCostUsd, rows.get('claude-sonnet-4-6')?.priceFrom,
@@ -658,7 +665,8 @@ test('1.11 C4: under the family rule the rule is the donor\'s — its day, and "
 test('1.11 C4: the JSON buckets carry the same three fields — null and false where the CSV is empty — and the totals the list sum', () => {
   const discount = makeConfig({ 'tokenPace.pricing.multiplier': 0.9 })
   const j = JSON.parse(toJson(priceWorld(), PRICE_WORLD_RANGE, discount, timeConfig(discount), NOW))
-  assert.equal(j.schema_version, 4)
+  // 1.14 P7 (pinned and changed: schema 4 → 5; under attribution none the buckets are schema 4's).
+  assert.equal(j.schema_version, 5)
   const by = new Map<string, Record<string, unknown>>(j.buckets.map((b: Record<string, unknown>) => [b.model as string, b]))
   const facts = (m: string): unknown[] => ['costUsd', 'listCostUsd', 'priceFrom', 'priceApproximate'].map((k) => by.get(m)?.[k])
   assert.deepEqual(facts('claude-opus-4-6'), [14.7645, 16.405, PRICES_AS_OF, false])
@@ -775,9 +783,11 @@ test('1.11 C4: a reader of schema 3 reads the same values from a schema 4 file �
   delete j.pricing.sources
   assert.equal(j.notes.filter((n: string) => n.startsWith('listCostUsd is')).length, 1)
   j.notes = j.notes.filter((n: string) => !n.startsWith('listCostUsd is'))
-  assert.equal(j.schema_version, 4)
+  // 1.14 P7 (pinned and changed: schema 4 → 5): under attribution none schema 5 adds nothing to the JSON — no project, no
+  // note —, so the same drop still gives 1.10.0's file.
+  assert.equal(j.schema_version, 5)
   // The table's day is today's constant, whatever a re-check makes it; everything else is 1.10.0's file as it was.
-  assert.deepEqual(j, { ...SCHEMA_3_PRICE_WORLD, schema_version: 4, pricing: { ...SCHEMA_3_PRICE_WORLD.pricing, as_of: PRICES_AS_OF } })
+  assert.deepEqual(j, { ...SCHEMA_3_PRICE_WORLD, schema_version: 5, pricing: { ...SCHEMA_3_PRICE_WORLD.pricing, as_of: PRICES_AS_OF } })
 })
 
 test('1.11 §0a.5: the new fields hold amounts, days, true and host names — neither export names a path or a URL', () => {
@@ -805,4 +815,253 @@ test('1.11 §0a.5: the new fields hold amounts, days, true and host names — ne
       assert.match(r[20], /^(true)?$/, `${what} priceApproximate`)
     }
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 P7 (§3 A6; §0a.7): schema 5 — the CSV's project column, buckets[].project, sessions[] of the range, the notes,
+// the markdown summary's filter line and Projects table
+// ---------------------------------------------------------------------------
+
+/** Schema 4's twenty-one columns, as 1.11–1.13 wrote them — what a reader by position of schema 4 reads. */
+const SCHEMA_4_CSV_COLUMNS = ['day', 'hour', 'source', 'model', 'isSub', 'tier', 'res', 'input', 'cacheWrite5m', 'cacheWrite1h',
+  'cacheRead', 'output', 'reasoning', 'requests', 'outputFinal', 'webSearch', 'costUsd', 'priced', 'listCostUsd', 'priceFrom',
+  'priceApproximate']
+
+/** The two folders of the two-project world, and their keys under the fixtures' salt. */
+const UNO = projectKeyOf('salt', '-home-u-proj-uno')
+const DOS = projectKeyOf('salt', slugOf('/home/u/proj-dos'))
+/** buildAgg's two projects (viewModel.test's ALPHA and BETA): the Claude folder /home/t/alpha, the Codex rollout of /home/t/beta. */
+const ALPHA = projectKeyOf('salt', '-home-t-alpha')
+const BETA = projectKeyOf('salt', slugOf('/home/t/beta'))
+const PROJECT_DAY = { from: TODAY, to: TODAY, label: 'Today', preset: 'today' }
+
+/**
+ * Two Claude projects in one hour with one model — two buckets of one coordinate — and a Codex rollout without a working
+ * directory (unattributed). The ingest reads the folders' names (hashProjects false), as it does under basename; the
+ * config decides whether a file shows them.
+ */
+function twoProjectHour(attribution: 'none' | 'project' = 'project'): Aggregator {
+  const agg = new Aggregator()
+  agg.attribution = attribution
+  const ts = Date.UTC(2026, 8, 3, 9, 20)
+  for (const [name, input, ino] of [['proj-uno', 1000, 1], ['proj-dos', 3000, 2]] as const) {
+    const file = `/virtual/claude/projects/${slugOf(`/home/u/${name}`)}/sess-${name}.jsonl`
+    agg.cursors.set(file, { offset: 0, size: 0, ino, dev: 1 })
+    agg.addClaudeLine(claudeLine({ id: `msg-${name}`, ts: ts + ino * 60_000, model: 'claude-opus-4-6', final: true, cwd: `/home/u/${name}`,
+      sessionId: `sess-${ino}`, usage: { input, output: input / 10 } }), { isSub: false, file, attribution, projectSalt: 'salt', hashProjects: false })
+  }
+  const rollout = '/virtual/codex/sessions/2026/09/03/rollout-bare.jsonl'
+  const cur = { offset: 0, size: 0, ino: 3, dev: 1 }
+  agg.cursors.set(rollout, cur)
+  const x = { isSub: false, file: rollout, attribution, projectSalt: 'salt', hashProjects: false }
+  agg.addCodexLine(codexMeta({ ts, id: 'thread-bare', cwd: null }), cur, x)
+  agg.addCodexLine(codexTurnContext(ts, 'gpt-5.3-codex'), cur, x)
+  agg.addCodexLine(codexTokenCount({ ts: ts + 5 * 60_000, total: { input: 500, cached: 100, output: 50, total: 550 } }), cur, x)
+  return agg
+}
+
+const projectCfg = (names: 'hash' | 'basename'): ReturnType<typeof makeConfig> =>
+  makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': names })
+
+/** A CSV's body rows as records by column name — a reader by name. */
+function csvRecords(text: string): Array<Record<string, string>> {
+  const [head, ...body] = csvRows(text)
+  return body.map((r) => Object.fromEntries(head.map((k, i) => [k, r[i]])))
+}
+
+test('1.14 §3 A6 rule 1: schema 5 — the CSV\'s last column is project, always in the header; the twenty-one of schema 4 where they were; empty under attribution none', () => {
+  assert.equal(EXPORT_SCHEMA_VERSION, 5)
+  const none = toCsv(twoProjectHour('none'), PROJECT_DAY, cfg, tcfg)
+  const on = toCsv(twoProjectHour(), PROJECT_DAY, projectCfg('hash'), tcfg)
+  // One header for every file of schema 5, whatever the attribution.
+  assert.equal(none.split('\n')[0], on.split('\n')[0])
+  const head = csvRows(none)[0]
+  assert.deepEqual(head, [...CSV_COLUMNS])
+  assert.deepEqual(head.slice(0, 21), SCHEMA_4_CSV_COLUMNS)
+  assert.equal(head[21], 'project')
+  assert.equal(head.length, 22)
+  // Under none every row — the TOTAL too — has the cell, empty: no project leaves the machine.
+  for (const r of csvRows(none).slice(1)) {
+    assert.equal(r.length, 22, r.join(','))
+    assert.equal(r[21], '', r.join(','))
+  }
+  // A reader by position of schema 4 reads the same twenty-one cells: under none the file is schema 4's plus an empty cell.
+  assert.equal(none.split('\n').slice(1).every((l) => l === '' || l.endsWith(',')), true)
+  // With attribution on the TOTAL row's cell stays empty — the total is every project's of the range.
+  const total = csvRows(on).slice(-1)[0]
+  assert.deepEqual([total[0], total[21]], ['TOTAL', ''])
+  // The JSON under none: no bucket carries project, and there is no sessions[].
+  const j = JSON.parse(toJson(twoProjectHour('none'), PROJECT_DAY, cfg, tcfg, NOW))
+  assert.equal(j.schema_version, 5)
+  assert.equal(j.buckets.some((b: Record<string, unknown>) => 'project' in b), false)
+  assert.equal('sessions' in j, false)
+  assert.equal(JSON.stringify(j).includes('project'), false, 'a none JSON file names a project')
+})
+
+test('1.14 §3 A6 rule 1: a two-project hour is two rows, each with its project\'s label as the dashboard shows it — the pseudonym under hash, the folder\'s name under basename, (no project) for a rollout without a working directory; their sum the none file\'s row', () => {
+  const opus = (text: string): Array<Record<string, string>> => csvRecords(text).filter((r) => r.model === 'claude-opus-4-6')
+  const none = opus(toCsv(twoProjectHour('none'), PROJECT_DAY, cfg, tcfg))
+  assert.equal(none.length, 1)
+  const hashed = opus(toCsv(twoProjectHour(), PROJECT_DAY, projectCfg('hash'), tcfg))
+  assert.equal(hashed.length, 2)
+  // One hour, one model: the same coordinate twice, in the order of the keys.
+  for (const k of ['day', 'hour', 'source', 'model', 'isSub', 'tier', 'res']) assert.equal(new Set(hashed.map((r) => r[k])).size, 1, k)
+  assert.deepEqual(hashed.map((r) => r.project), [UNO, DOS].sort().map((k) => `p:${k}`))
+  // The two rows add up to the none file's one row, column by column — a reader of schema 4 who sums a coordinate's rows
+  // reads the figures it read before.
+  for (const k of ['input', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'output', 'reasoning', 'requests', 'outputFinal', 'webSearch']) {
+    assert.equal(hashed.reduce((n, r) => n + Number(r[k]), 0), Number(none[0][k]), k)
+  }
+  assert.equal(Number((hashed.reduce((n, r) => n + Number(r.costUsd), 0)).toFixed(6)), Number(none[0].costUsd))
+  const named = opus(toCsv(twoProjectHour(), PROJECT_DAY, projectCfg('basename'), tcfg))
+  assert.deepEqual(named.map((r) => [r.project, r.input]).sort(), [['proj-dos', '3000'], ['proj-uno', '1000']])
+  // The rollout without a working directory: unattributed, in words.
+  const codex = csvRecords(toCsv(twoProjectHour(), PROJECT_DAY, projectCfg('basename'), tcfg)).filter((r) => r.source === 'codex')
+  assert.deepEqual(codex.map((r) => r.project), ['(no project)'])
+  // The JSON: the same rows, project the last field of each bucket, the same labels as the CSV.
+  const j = JSON.parse(toJson(twoProjectHour(), PROJECT_DAY, projectCfg('basename'), tcfg, NOW))
+  const csv = csvRecords(toCsv(twoProjectHour(), PROJECT_DAY, projectCfg('basename'), tcfg))
+  assert.equal(j.buckets.length, csv.length - 1)
+  for (const b of j.buckets) assert.equal(Object.keys(b).slice(-1)[0], 'project')
+  assert.deepEqual(j.buckets.map((b: { project: string }) => b.project), csv.slice(0, -1).map((r) => r.project))
+  // A reader of schema 4: dropping what schema 5 added and summing a coordinate's rows gives the none file.
+  const off = JSON.parse(toJson(twoProjectHour('none'), PROJECT_DAY, cfg, tcfg, NOW))
+  const merged = new Map<string, Record<string, number>>()
+  for (const b of j.buckets) {
+    const key = ['day', 'hour', 'source', 'model', 'isSub', 'tier', 'res'].map((k) => String(b[k])).join('|')
+    const m = merged.get(key) ?? {}
+    for (const k of ['input', 'output', 'cacheRead', 'requests']) m[k] = (m[k] ?? 0) + (b[k] as number)
+    merged.set(key, m)
+  }
+  assert.equal(merged.size, off.buckets.length)
+  for (const b of off.buckets) {
+    const key = ['day', 'hour', 'source', 'model', 'isSub', 'tier', 'res'].map((k) => String(b[k])).join('|')
+    for (const k of ['input', 'output', 'cacheRead', 'requests']) assert.equal(merged.get(key)?.[k], b[k], `${key} ${k}`)
+  }
+  assert.deepEqual(j.totals, off.totals)
+})
+
+test('1.14 §0a.7: under basename the files name the folder and never its key beside it; under hash the pseudonym and never the name; the words for no project and other projects stay English; a value that is no key, or a name outside the alphabet, names nothing', () => {
+  const texts = (names: 'hash' | 'basename'): string[] => [
+    toCsv(twoProjectHour(), PROJECT_DAY, projectCfg(names), tcfg), toJson(twoProjectHour(), PROJECT_DAY, projectCfg(names), tcfg, NOW),
+  ]
+  for (const text of texts('basename')) {
+    assert.ok(text.includes('proj-uno') && text.includes('proj-dos'), text.slice(0, 300))
+    // A name and its pseudonym together would link a file shared under hash with its folder.
+    for (const key of [UNO, DOS]) assert.equal(text.includes(key), false, `basename: the file holds the key ${key}`)
+  }
+  for (const text of texts('hash')) {
+    assert.ok(text.includes(`p:${UNO}`) && text.includes(`p:${DOS}`), text.slice(0, 300))
+    // (The salt is privacy.test's: this world's is the word 'salt', which the project note's "salted" holds.)
+    for (const name of ['proj-uno', 'proj-dos', '/home/u']) assert.equal(text.includes(name), false, `hash: the file holds ${name}`)
+  }
+  // The files stay English in every language (i18n.ts): the two words are data, not the dashboard's translation.
+  try {
+    setBundle({ '(no project)': '(kein Projekt)', 'other projects': 'weitere Projekte' })
+    const csv = toCsv(twoProjectHour(), PROJECT_DAY, projectCfg('hash'), tcfg)
+    assert.ok(csv.includes('(no project)') && !csv.includes('kein Projekt'), csv)
+  } finally {
+    setBundle(undefined)
+  }
+  // Whatever a snapshot from elsewhere held: other projects' key in words, a value that is no key unattributed, a name
+  // outside the names' alphabet no name — never a path.
+  const K = '0123456789ab'
+  const hour = Date.UTC(2026, 8, 3, 9) / 3_600_000
+  const odd = (project: string): Bucket => Object.assign(emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'h', hour, TODAY), { input: 10, requests: 1, project })
+  const agg = new Aggregator()
+  agg.all = () => [odd('*'), odd('/home/u/secret-path'), odd(K)]
+  agg.projects = () => ({ [K]: { lastTs: NOW, name: 'bad name/../x' } })
+  const rows = csvRecords(toCsv(agg, PROJECT_DAY, projectCfg('basename'), tcfg)).slice(0, -1)
+  assert.deepEqual(rows.map((r) => r.project).sort(), ['(no project)', 'other projects', `p:${K}`].sort())
+  const json = toJson(agg, PROJECT_DAY, projectCfg('basename'), tcfg, NOW)
+  assert.equal(json.includes('secret-path') || json.includes('bad name'), false, json)
+})
+
+test('1.14 §3 A6 rule 1: sessions[] holds the range\'s sessions only — the overlap rule of agents[] and the Sessions table —, the first to start first, each by its buckets\' label; absent under none', () => {
+  const onCfg = makeConfig({ 'tokenPace.attribution': 'project' })
+  const agg = buildAgg('project')
+  const sessions = (from: string, to: string): Array<{ sessionId: string; project: string; firstTs: string }> =>
+    JSON.parse(toJson(agg, { from, to }, onCfg, tcfg, NOW)).sessions
+  // sess-alpha's lines run from 20 July to 3 September, thread-1's from 2 to 3 September.
+  assert.deepEqual(sessions('2026-07-01', '2026-07-31').map((s) => s.sessionId), ['sess-alpha'])
+  assert.deepEqual(sessions('2026-08-10', '2026-08-20').map((s) => s.sessionId), ['sess-alpha'])
+  assert.deepEqual(sessions('2026-09-02', TODAY).map((s) => s.sessionId), ['sess-alpha', 'thread-1'])
+  assert.deepEqual(sessions('2026-09-04', '2026-09-10'), [])
+  const all = sessions('2026-07-01', TODAY)
+  assert.deepEqual(all.map((s) => s.firstTs), [...all.map((s) => s.firstTs)].sort())
+  // The label the session's buckets carry: the pseudonym under hash.
+  assert.deepEqual(all.map((s) => [s.sessionId, s.project]), [['sess-alpha', `p:${ALPHA}`], ['thread-1', `p:${BETA}`]])
+  const json = JSON.parse(toJson(agg, { from: '2026-07-01', to: TODAY }, onCfg, tcfg, NOW))
+  for (const s of all) {
+    const own = json.buckets.filter((b: { source: string }) => b.source === (s.sessionId === 'thread-1' ? 'codex' : 'claude'))
+    assert.deepEqual([...new Set(own.map((b: { project: string }) => b.project))], [s.project], s.sessionId)
+  }
+  // The shape of 1.0–1.13's rows, unchanged.
+  assert.deepEqual(Object.keys(json.sessions[0]), ['sessionId', 'project', 'source', 'isSub', 'parent', 'firstTs', 'lastTs', 'models', 'input',
+    'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'output', 'reasoning', 'requests', 'outputFinal'])
+  assert.equal('sessions' in JSON.parse(toJson(buildAgg(), range, cfg, tcfg, NOW)), false)
+})
+
+test('1.14 §3 A6 rule 1: the JSON\'s notes — under none the seven of versions 1–4, unchanged; with attribution on the sessions note and then the project note after them', () => {
+  const off = JSON.parse(toJson(buildAgg(), range, cfg, tcfg, NOW)).notes as string[]
+  assert.equal(off.length, 7)
+  assert.equal(off.includes(PROJECT_NOTE) || off.includes(SESSIONS_NOTE), false)
+  const onCfg = makeConfig({ 'tokenPace.attribution': 'session' })
+  const on = JSON.parse(toJson(buildAgg('session'), range, onCfg, tcfg, NOW)).notes as string[]
+  assert.deepEqual(on.slice(0, 7), off)
+  assert.deepEqual(on.slice(7), [SESSIONS_NOTE, PROJECT_NOTE])
+  // §3 A6 rule 1's sentence, word for word.
+  assert.equal(PROJECT_NOTE, 'project is the project\'s label as the dashboard shows it — the folder\'s name with showProjectNames basename, '
+    + 'else a salted pseudonym; buckets of several projects in one hour are separate rows')
+  assert.equal(on.some((n) => n.includes('as stored')), false, 'the note of 1.0–1.13 is still written')
+})
+
+test('1.14 §3 A6 rule 2: the files follow no filter — a pressed project chip, a model chip or the provider switch leaves both exports as they were', () => {
+  const onCfg = projectCfg('hash')
+  const agg = buildAgg('project')
+  const csv = toCsv(agg, range, onCfg, tcfg)
+  const json = toJson(agg, range, onCfg, tcfg, NOW)
+  // The view model follows the chip; the files are built from the aggregator and the range alone.
+  const vm = buildViewModel(makeInput({ cfg: onCfg, agg, ui: { projects: [BETA], providers: ['codex'], models: ['gpt-5.3-codex'] } }))
+  assert.deepEqual(vm.projects.rows.map((r) => r.key), [BETA])
+  assert.equal(toCsv(agg, range, onCfg, tcfg), csv)
+  assert.equal(toJson(agg, range, onCfg, tcfg, NOW).replace(/"generated_at": "[^"]*"/, ''), json.replace(/"generated_at": "[^"]*"/, ''))
+  const labels = new Set(csvRecords(csv).slice(0, -1).map((r) => r.project))
+  assert.deepEqual([...labels].sort(), [`p:${ALPHA}`, `p:${BETA}`].sort())
+})
+
+test('1.14 §3 A6 rule 3: the markdown summary follows the project filter — its heading names it as it names the provider, and it carries the markdown document\'s Projects table, with attribution on only', () => {
+  const onCfg = makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename' })
+  const agg = buildAgg('project')
+  const block = (md: string, lines: string[]): boolean => md.includes(lines.join('\n'))
+  // No chip: every project of the range, the heading without a filter.
+  const whole = buildViewModel(makeInput({ cfg: onCfg, agg }))
+  const md = toMarkdownSummary(whole)
+  const table = projectsTableLines(whole)
+  assert.equal(table[0], '## Projects')
+  assert.equal(table[2], '| Project | Usage | API cost | Requests | Cache hit | Share | Sessions | Last activity |')
+  assert.ok(block(md, table), md)
+  // Word for word the document's lines, so the clipboard and the document cannot differ.
+  assert.ok(block(markdownDocument(whole), table))
+  assert.deepEqual(whole.projects.rows.map((r) => r.project), ['alpha', 'beta'])
+  assert.equal(md.split('\n')[0].includes('project filter'), false, md.split('\n')[0])
+  // A chip pressed: the heading names the filter after the range, the table lists the chosen project alone.
+  const beta = buildViewModel(makeInput({ cfg: onCfg, agg, ui: { projects: [BETA] } }))
+  const heading = toMarkdownSummary(beta).split('\n')[0]
+  assert.ok(heading.endsWith(') · project filter: beta'), heading)
+  assert.ok(block(toMarkdownSummary(beta), projectsTableLines(beta)))
+  assert.deepEqual(beta.projects.rows.map((r) => r.project), ['beta'])
+  // Under one provider, both: the provider as since 1.7, then the filter.
+  const codex = buildViewModel(makeInput({ cfg: onCfg, agg, ui: { projects: [BETA], providers: ['codex'] } }))
+  assert.ok(toMarkdownSummary(codex).split('\n')[0].endsWith(') · Codex only · project filter: beta'), toMarkdownSummary(codex).split('\n')[0])
+  // Under basename the name, never the key beside it; under hash the pseudonym, never the name.
+  assert.equal(md.includes(ALPHA) || md.includes(BETA), false)
+  const hashed = toMarkdownSummary(buildViewModel(makeInput({ cfg: makeConfig({ 'tokenPace.attribution': 'project' }), agg })))
+  assert.ok(hashed.includes(`| p:${ALPHA} |`) && hashed.includes(`| p:${BETA} |`), hashed)
+  assert.equal(/\| (alpha|beta) \|/.test(hashed), false, hashed)
+  // The price date stands once, in the footnotes.
+  assert.equal(md.split('\n').filter((l) => l.includes('Prices as of')).length, 1, md)
+  // Under none: no table, no filter line — a pressed key in the view state names nothing.
+  const none = toMarkdownSummary(buildViewModel(makeInput({ cfg, agg: buildAgg(), ui: { projects: [BETA] } })))
+  assert.equal(none.includes('## Projects') || none.includes('project filter'), false, none)
 })

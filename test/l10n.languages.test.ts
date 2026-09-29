@@ -639,8 +639,12 @@ export const PROJECT_LABEL_FIELDS: ReadonlyArray<readonly [string, boolean, stri
 export const PROJECT_LABEL_SOURCES: ReadonlyArray<readonly [string, string, number]> = [
   // buildForest — a session root's project, the root's `sub` (markup: the page's row, the running list's context line).
   ['src/agentTreeBuild.ts', 'projectLabel', 1],
-  // Aggregator.projectLabelOf — the exports' sessions (P7's), the label as the table holds it.
+  // Aggregator.projectLabelOf — the label as the table holds it (1.14 P7: the tests' reader; the exports name a project
+  // through their own call below).
   ['src/agg.ts', 'projectLabel', 1],
+  // 1.14 P7 (pinned and changed: + exporter.ts): projectNamer — the CSV's column, buckets[].project and sessions[].project
+  // (§0a.7); data of the English files, never a t() slot.
+  ['src/exporter.ts', 'projectLabel', 1],
   // records (the top sessions' detail, the top projects' label), projectRows, sessionRows.
   ['src/stats.ts', 'projectLabel', 4],
   // buildViewModel's project filter line, projectChips' chips.

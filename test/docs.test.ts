@@ -27,7 +27,7 @@ import {
 import { usedThresholds } from '../src/alerts'
 import { readPaceConfig, sanitize } from '../src/config'
 import { disclosure } from '../src/consent'
-import { AGENTS_CSV_COLUMNS, CSV_COLUMNS, EXPORT_SCHEMA_VERSION, toJson } from '../src/exporter'
+import { AGENTS_CSV_COLUMNS, CSV_COLUMNS, EXPORT_SCHEMA_VERSION, PROJECT_NOTE, SESSIONS_NOTE, toJson } from '../src/exporter'
 import { PaceConfig, paceVerdict } from '../src/pace'
 import { LEGACY_CHECKED, OPUS_5_5_CHECKED, PRICES, PRICES_AS_OF, PRICES_CHECKED_LATER, PRICE_SOURCE_PAGES, priceOf } from '../src/prices'
 import { BarGlyphs, BarStyle, renderBar } from '../src/render'
@@ -1914,9 +1914,11 @@ const RELEASED_1_10 = { EXPORT_SCHEMA_VERSION: 3 } as const
 /**
  * 1.14 P4 (§3 A2, pinned and changed): the snapshot version 1.6.0 … 1.13.0 wrote, where 1.14 moved on to 9 — the release
  * notes of those versions say `8`, history now, pinned as a released constant (RELEASED_1_10's pattern). Every release
- * notes test below read the live STATE_VERSION until 1.13.
+ * notes test below read the live STATE_VERSION until 1.13. 1.14 P7 (§3 A6, pinned and changed): the export's schema
+ * version 1.11.0 … 1.13.0 wrote, where 1.14 moved on to 5 — the notes of 1.11.0, 1.12.0 and 1.13.0 say `4`, which the
+ * three tests below read live until 1.13.
  */
-const RELEASED_1_13 = { STATE_VERSION: 8 } as const
+const RELEASED_1_13 = { STATE_VERSION: 8, EXPORT_SCHEMA_VERSION: 4 } as const
 
 /**
  * 1.11 P5 (§3 C5 rule 3): a day of the price table as docs/cost.md writes it — `2026-09-06` → "6 September 2026" —, the
@@ -3822,7 +3824,7 @@ test('the pages carry the sentences of the documentation package, held to the co
 // 1.11 P5 (§3 C4, C5; §0a.5): the exports' price fields and the price table's dates, from the code
 // ---------------------------------------------------------------------------
 
-test('1.11 C4: docs/export.md lists the bucket CSV\'s columns as the code writes them, says what the three price fields are and quotes their note, and states schema 4', () => {
+test('1.11 C4: docs/export.md lists the bucket CSV\'s columns as the code writes them, says what the three price fields are and quotes their note, and states schema 4 — 1.14 P7: as history, after schema 5', () => {
   const flat = flatText(doc.export)
   const block = /```\n(day, hour,[\s\S]*?)```/.exec(doc.export)
   assert.ok(block, 'docs/export.md has no column block for the bucket CSV')
@@ -3836,7 +3838,9 @@ test('1.11 C4: docs/export.md lists the bucket CSV\'s columns as the code writes
   assert.ok(flat.includes(`*${note}.*`), 'docs/export.md does not quote the note on the price fields')
   assert.ok(flat.includes(`as host names: ${j.pricing.sources.map((h) => `\`${h}\``).join(', ')})`), 'docs/export.md does not list the export\'s sources')
   for (const claim of [
-    `\`schema_version\` is \`${EXPORT_SCHEMA_VERSION}\` since 1.11 added \`listCostUsd\`, \`priceFrom\` and \`priceApproximate\` to \`buckets[]\`, \`listCostUsd\` to \`totals\`, and \`checked_later\` and \`sources\` to \`pricing\` (\`3\` added \`agents[]\`, \`2\` the tool table); everything versions 1–3 wrote is still there and still means the same thing`,
+    // 1.14 P7 (pinned and changed: schema 4 is history — "`schema_version` is `4` since 1.11 added …" → "(`4`, 1.11, added …";
+    // the sentence of schema 5 is pinned by the 1.14 test below).
+    `(\`4\`, 1.11, added \`listCostUsd\`, \`priceFrom\` and \`priceApproximate\` to \`buckets[]\`, \`listCostUsd\` to \`totals\`, and \`checked_later\` and \`sources\` to \`pricing\`; \`3\` added \`agents[]\`, \`2\` the tool table); every field versions 1–4 wrote is still there under its name`,
     'listCostUsd, priceFrom, priceApproximate', '`listCostUsd` is the same usage at the published list price — multiplier 1, no custom price —',
     'a discount against a price that was never published would be an invention', '`priceFrom` is the day the price rule used was read',
     'the borrowed model\'s under the family fallback', '`priceApproximate` is `true` where no rule covered the bucket\'s day and the nearest one was used',
@@ -3845,6 +3849,51 @@ test('1.11 C4: docs/export.md lists the bucket CSV\'s columns as the code writes
     'every provider\'s, whatever the dashboard shows', 'the `TOTAL` row\'s `priced` column reads `lowerBound`',
   ]) assert.ok(flat.includes(claim), `docs/export.md does not say: ${claim}`)
   assert.equal(flat.includes('everything versions 1 and 2 wrote'), false, 'docs/export.md still states schema 3\'s history')
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 P7 (§3 A6, §0a.7): the export's schema 5 — the column, the fields, the notes, the dialog, the summary
+// ---------------------------------------------------------------------------
+
+test('1.14 P7: docs/export.md states schema 5 — the CSV\'s last column project and what it holds, sessions[] of the range, both notes word for word, the dialog\'s sentences, the summary\'s project filter; docs/privacy.md says what an export adds in 1.14', () => {
+  const exp = flatText(doc.export)
+  assert.equal(EXPORT_SCHEMA_VERSION, 5)
+  assert.equal(CSV_COLUMNS[CSV_COLUMNS.length - 1], 'project')
+  assert.equal(CSV_COLUMNS.indexOf('project'), 21, 'the column follows the twenty-one of schema 4')
+  // The notes as the export writes them, quoted.
+  const utc: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
+  const j = JSON.parse(toJson(new Aggregator(), { from: '2026-09-01', to: '2026-09-01' }, sanitize({ 'tokenPace.attribution': 'project' }), utc)) as { notes: string[] }
+  assert.deepEqual(j.notes.slice(-2), [SESSIONS_NOTE, PROJECT_NOTE])
+  assert.ok(exp.includes(`*${SESSIONS_NOTE}* and *${PROJECT_NOTE}.*`), 'docs/export.md does not quote the two notes')
+  // The dialog's sentences, as nativeViews.ts writes them.
+  const views = readDoc('src/nativeViews.ts')
+  for (const sentence of ['Includes model names and project labels (salted hashes).', 'Includes model names and project labels (directory basenames).']) {
+    assert.ok(views.includes(`t('${sentence}')`), `src/nativeViews.ts no longer says: ${sentence}`)
+    assert.ok(exp.includes(`*${sentence}*`), `docs/export.md does not quote: ${sentence}`)
+  }
+  for (const claim of [
+    '`schema_version` is `5` since 1.14 added `project` to `buckets[]` and as the CSV\'s last column, and gave `sessions[]` the range\'s sessions named by the dashboard\'s label',
+    'so no pseudonym of 1.14 matches one of an earlier file', 'under `none` a schema 5 JSON file is a schema 4 one with the new number',
+    'The last column (1.14), `project`, names the bucket\'s project while `tokenPace.attribution` is `project` or `session`',
+    'else its pseudonym `p:8f31c0a4e2b1`; `(no project)` for a Codex session without a working directory and `other projects` for the projects folded into it (beyond the 200 kept, or idle longer than `retentionDays`), both in English as the whole file is',
+    'A name never stands beside its pseudonym', 'Buckets of several projects in one hour are separate rows, one per project',
+    'Under `none` the column is there and empty in every row', 'the twenty-one columns before it keep their positions',
+    'The export follows no project filter: every project of the range is in the file, and the column is there to filter by in a spreadsheet',
+    'the session records whose activity touches a day of the range (1.14 — until 1.13 every record)',
+    'the projects (with attribution on)', 'while a project chip is pressed its figures are the chosen projects\' and its heading ends `· project filter: p:8f31c0a4e2b1`',
+    'the exports write every provider\'s and every project\'s rows of the range',
+  ]) assert.ok(exp.includes(claim), `docs/export.md does not say: ${claim}`)
+  // The old claims, gone.
+  assert.equal(exp.includes('project labels are exactly as stored'), false, 'docs/export.md still says the labels are as stored')
+  assert.equal(exp.includes('`schema_version` is `4`'), false, 'docs/export.md still states schema 4')
+  const privacy = flatText(doc.privacy)
+  for (const claim of [
+    '**What an export adds in 1.14.** Only with `tokenPace.attribution` on: per bucket its project — the CSV\'s last column `project`, `buckets[].project` in the JSON —',
+    'which now holds the range\'s sessions only', 'else the salted pseudonym `p:` and twelve hex digits',
+    'Never the key beside a name — a name and its pseudonym together would link a file shared under `hash` with its folder —, never the salt, never a path',
+    'With `none` the column is empty, no bucket carries a project and there is no `sessions[]`',
+    'The files follow no project filter; *Copy Usage Summary*, built from what the dashboard shows, follows it and names it in its heading',
+  ]) assert.ok(privacy.includes(claim), `docs/privacy.md does not say: ${claim}`)
 })
 
 test('1.11 C5: docs/cost.md writes the table\'s three days from the constants, builds its footnote example from them and names every source page; the README names no price date', () => {
@@ -3958,7 +4007,8 @@ test('the 1.11.0 release notes: the newest entry, its date set at publish, every
   const sources = SOURCES.flatMap((s) => PRICE_SOURCE_PAGES[s]).join(', ')
   assert.ok(changed.includes(`*Price sources: ${sources}.*`) && changed.includes(`*Price sources: ${PRICE_SOURCE_PAGES.claude.join(', ')}.*`))
   // The export's columns, as the code writes them, and the manifest's `auto` sentence.
-  assert.deepEqual(CSV_COLUMNS.slice(-3), ['listCostUsd', 'priceFrom', 'priceApproximate'])
+  // 1.14 P7 (pinned and changed: slice(-3) → slice(18, 21) — schema 5 appended `project` after the three).
+  assert.deepEqual(CSV_COLUMNS.slice(18, 21), ['listCostUsd', 'priceFrom', 'priceApproximate'])
   for (const field of ['the CSV gains `listCostUsd`', '`priceFrom`', '`priceApproximate`', '`checked_later`', '`sources`', '`listCostUsd` in `totals`']) assert.ok(changed.includes(field), `the 1.11.0 entry does not name ${field}`)
   assert.ok(changed.includes(`*${nlsEn['config.resetHourCycle.enum.auto']}*`), 'the 1.11.0 entry does not quote the manifest\'s auto sentence')
   // The CJK "both" examples are what each language's manifest quotes of its bar.
@@ -3978,9 +4028,10 @@ test('the 1.11.0 release notes: the newest entry, its date set at publish, every
   assert.ok(privacy.includes('never a path, a URL with a path, or a session or project name the export did not already carry'))
   // The versions it names are the code's.
   const internal = section('### Internal')
-  assert.deepEqual([RELEASED_1_13.STATE_VERSION, EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 4, 10])
+  // 1.14 P7 (pinned and changed: the live EXPORT_SCHEMA_VERSION → RELEASED_1_13's 4, a figure of this release note).
+  assert.deepEqual([RELEASED_1_13.STATE_VERSION, RELEASED_1_13.EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 4, 10])
   assert.ok(internal.includes(`\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION} and \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} are unchanged`))
-  assert.ok(internal.includes(`\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} → ${EXPORT_SCHEMA_VERSION}`))
+  assert.ok(internal.includes(`\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} → ${RELEASED_1_13.EXPORT_SCHEMA_VERSION}`))
   for (const m of flat.matchAll(/`(STATE_VERSION|AGENT_TABLES_REVISION)` (\d+)/g)) {
     assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? RELEASED_1_13.STATE_VERSION : AGENT_TABLES_REVISION, `the 1.11.0 entry says ${m[1]} ${m[2]}`)
   }
@@ -4454,10 +4505,11 @@ test('the 1.12.0 release notes: the newest entry, its date set at publish, every
 
   // Internal: the versions unchanged, the ledger's count (a literal of history since 1.13 P1, below).
   const internal = section('### Internal')
-  assert.deepEqual([RELEASED_1_13.STATE_VERSION, AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION], [8, 10, 4])
-  assert.ok(internal.includes(`\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and \`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION} are unchanged`))
+  // 1.14 P7 (pinned and changed: the live EXPORT_SCHEMA_VERSION → RELEASED_1_13's 4, a figure of this release note).
+  assert.deepEqual([RELEASED_1_13.STATE_VERSION, AGENT_TABLES_REVISION, RELEASED_1_13.EXPORT_SCHEMA_VERSION], [8, 10, 4])
+  assert.ok(internal.includes(`\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and \`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_13.EXPORT_SCHEMA_VERSION} are unchanged`))
   for (const m of flat.matchAll(/`(STATE_VERSION|AGENT_TABLES_REVISION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
-    const want = m[1] === 'STATE_VERSION' ? RELEASED_1_13.STATE_VERSION : m[1] === 'AGENT_TABLES_REVISION' ? AGENT_TABLES_REVISION : EXPORT_SCHEMA_VERSION
+    const want = m[1] === 'STATE_VERSION' ? RELEASED_1_13.STATE_VERSION : m[1] === 'AGENT_TABLES_REVISION' ? AGENT_TABLES_REVISION : RELEASED_1_13.EXPORT_SCHEMA_VERSION
     assert.equal(Number(m[2]), want, `the 1.12.0 entry says ${m[1]} ${m[2]}`)
   }
   // 1.13 P1 (pinned and changed: the base read from l10n/rekey.json as d39c2df, the count from its entries, and no pending
@@ -4876,8 +4928,9 @@ test('the 1.13.0 release notes: the newest entry, its date set at publish, Added
 
   // Internal: the versions, the files, the ledger's count read from l10n/rekey.json, the frame, the lease, the door.
   const internal = section('### Internal')
-  assert.deepEqual([RELEASED_1_13.STATE_VERSION, AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION], [8, 10, 4])
-  assert.ok(internal.includes(`\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and \`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION} are unchanged`))
+  // 1.14 P7 (pinned and changed: the live EXPORT_SCHEMA_VERSION → RELEASED_1_13's 4, a figure of this release note).
+  assert.deepEqual([RELEASED_1_13.STATE_VERSION, AGENT_TABLES_REVISION, RELEASED_1_13.EXPORT_SCHEMA_VERSION], [8, 10, 4])
+  assert.ok(internal.includes(`\`STATE_VERSION\` ${RELEASED_1_13.STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and \`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_13.EXPORT_SCHEMA_VERSION} are unchanged`))
   const bundles = readdirSync(join(ROOT, 'l10n')).filter((f) => /^bundle\.l10n\.[a-z-]+\.json$/.test(f))
   assert.equal(bundles.length, 28)
   assert.ok(internal.includes('The three languages are three more of Token Pace\'s own translation files, twenty-eight in all'))

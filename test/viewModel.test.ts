@@ -10,7 +10,7 @@ import { dayOf, rangeFor } from '../src/time'
 import { SOURCES } from '../src/adapters'
 import { budgetRows } from '../src/budget'
 import { StatsCtx, cacheEconomy, calendar, composition, planFactors, totalsFor } from '../src/stats'
-import { AgentLaunch, AgentRec, MainRec, ProblemKind, QuotaSample, QuotaState, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
+import { AgentLaunch, AgentRec, MainRec, ProblemKind, QuotaSample, QuotaState, QuotaWindow, TOOL_NAME_CAP, emptyBucket } from '../src/types'
 import { paceVerdict, windowElapsed } from '../src/pace'
 import { QuotaHistory, THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
 import { RESET_JITTER_MS } from '../src/resetRule'
@@ -19,7 +19,10 @@ import {
   AGENT_SELECTED_IN, DASHBOARD_SECTION_KEYS, isAgentSelectedIn, MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, problemActions, SOURCE_TITLE, SPARK_DAYS,
   SPARK_SLOTS, SPARK_SLOT_MS, WEBVIEW_COMMANDS, WindowVm, agentShareOf, agentTreeFor, applyMessage, buildViewModel, defaultUiState,
   forecastsFor, SparkVm, parseWebviewMessage, pricingOf, providerViewOf, resetLineOf, retroText, sparkOf, viewSources,
+  PROJECT_FILTER_IGNORED, UiState, restoreProjectFilter,
 } from '../src/viewModel'
+import { projectKeyOf, slugOf } from '../src/project'
+import { setBundle } from '../src/i18n'
 import {
   CLAUDE_FILE, FINGERPRINT, NOW, SHARE_AGENTS, TODAY, addCacheSession, agentShareAgg, buildAgg, daysAgo, fillHistory, makeConfig,
   makeHistory, makeInput, state, timeConfig, win,
@@ -693,8 +696,12 @@ test('parseWebviewMessage accepts exactly the documented shapes', () => {
     { type: 'setRange', from: '2026-01-01', to: '2026-01-31' })
   assert.deepEqual(parseWebviewMessage({ type: 'setSort', key: 'cost', dir: 'asc' }),
     { type: 'setSort', key: 'cost', dir: 'asc' })
+  // 1.14 P5 (pinned and changed: a filter message without the project field reads projects [] — §0a.8, a page that
+  // sends no project filter; with it, the keys as sent, each once).
   assert.deepEqual(parseWebviewMessage({ type: 'setFilter', providers: ['claude'], models: ['a'] }),
-    { type: 'setFilter', providers: ['claude'], models: ['a'] })
+    { type: 'setFilter', providers: ['claude'], models: ['a'], projects: [] })
+  assert.deepEqual(parseWebviewMessage({ type: 'setFilter', providers: ['claude'], models: [], projects: ['0123456789ab', '', '*', '0123456789ab'] }),
+    { type: 'setFilter', providers: ['claude'], models: [], projects: ['0123456789ab', '', '*'] })
   assert.deepEqual(parseWebviewMessage({ type: 'setMetric', metric: 'cacheRead' }),
     { type: 'setMetric', metric: 'cacheRead' })
   assert.deepEqual(parseWebviewMessage({ type: 'setCompositionCache', mode: 'noCache' }),
@@ -828,6 +835,8 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     sort: { key: 'usage', dir: 'desc' },
     providers: ['claude', 'codex'],
     models: [],
+    // 1.14 P5 (pinned and changed: the view state gains the project filter, empty by default — §0a.8).
+    projects: [],
     metric: 'usage',
     compositionCache: 'all',
     heatmapMetric: 'usage',
@@ -857,9 +866,9 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     applyMessage(ui, { type: 'setCompositionCache', mode: 'noCache' }).compositionCache, 'noCache')
   assert.equal(applyMessage(ui, { type: 'setHeatmapMetric', metric: 'cost' }).heatmapMetric, 'cost')
   assert.equal(applyMessage(ui, { type: 'setHourZone', zone: 'utc' }).hourZone, 'utc')
-  assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: ['codex'], models: ['m'] }).providers, ['codex'])
+  assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: ['codex'], models: ['m'], projects: [] }).providers, ['codex'])
   // Switching every provider off would leave a dashboard of dashes: the last one stays.
-  assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: [], models: [] }).providers,
+  assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: [], models: [], projects: [] }).providers,
     ['claude', 'codex'])
   // A refresh and a command change nothing, and say so by identity.
   assert.equal(applyMessage(ui, { type: 'refresh' }), ui)
@@ -1083,11 +1092,13 @@ function withAgents(attribution: 'none' | 'project' = 'project'): { agg: Aggrega
   return { agg, agentKey: 'a:a94f0001' }
 }
 
+// 1.14 P5 (pinned and changed: the world reads folder names — the fixture's hashProjects false —, so its config says
+// showProjectNames basename; under the default hash the tree names the project p:<key> — §3 A4 rule 12).
 test('the view model carries the agent tree of the aggregator, with the selection, the attribution and its clock', () => {
   const { agg, agentKey } = withAgents()
   // The session opened: the page carries a node's children only while it is open (1.6 D3).
   const vm = buildViewModel(makeInput({
-    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: { agentSelected: agentKey, agentsExpanded: ['s:sess-alpha'] },
+    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename' }), ui: { agentSelected: agentKey, agentsExpanded: ['s:sess-alpha'] },
   }))
   const tree = vm.agents
   // The clock is the builder's input, never part of the tree (D12).
@@ -1129,7 +1140,7 @@ test('the view model carries the agent tree of the aggregator, with the selectio
   // Range-free and chip-free: the tree is the Claude sessions of the last days, whatever the
   // table below is filtered to.
   const filtered = buildViewModel(makeInput({
-    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }),
+    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename' }),
     ui: { agentSelected: agentKey, agentsExpanded: ['s:sess-alpha'], providers: ['codex'], models: ['gpt-5.3-codex'], range: '7d' },
   }))
   assert.deepEqual(filtered.agents, tree)
@@ -1137,21 +1148,22 @@ test('the view model carries the agent tree of the aggregator, with the selectio
   // As the tree starts: the session closed, nothing below it in the payload, the same counts —
   // and the running agent's details, since the running list has a row for it.
   const closed = buildViewModel(makeInput({
-    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: { agentSelected: agentKey },
+    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename' }), ui: { agentSelected: agentKey },
   })).agents
   assert.deepEqual([closed.roots[0].children, closed.roots[0].hasChildren, closed.roots[0].childrenTotal, closed.roots[0].agentCount],
     [[], true, 2, 2])
   assert.equal(closed.selected?.key, agentKey)
   assert.deepEqual(closed.runningNow, tree.runningNow)
   // The markdown's tree opens every node, whatever the page has open.
-  const text = agentTreeFor(makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: {} }), 'text')
+  const text = agentTreeFor(makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename' }), ui: {} }), 'text')
   assert.deepEqual(text.roots[0].children.map((c) => c.key), tree.roots[0].children.map((c) => c.key))
 })
 
+// 1.14 P5 (pinned and changed: showProjectNames basename in the config, as the test above — the context names alpha).
 test('the 7-day block is built only while it is open, its costs only while costs are shown, and its message toggles it (1.6 L3)', () => {
   const { agg, agentKey } = withAgents()
   const shown = (over: Record<string, unknown>, ui: Record<string, unknown>) =>
-    buildViewModel(makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', ...over }), ui })).agents
+    buildViewModel(makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename', ...over }), ui })).agents
   // Closed — the default — there is no block, and the page is not burdened with one.
   assert.equal(shown({}, {}).week, null)
   assert.equal(defaultUiState(cfg).agentsWeekOpen, false)
@@ -1173,7 +1185,7 @@ test('the 7-day block is built only while it is open, its costs only while costs
   assert.deepEqual([noCost.rows[0].cost, noCost.top[0].cost, noCost.totalCost], [null, null, null])
   assert.equal(JSON.stringify(noCost).includes('$'), false, JSON.stringify(noCost))
   // The markdown's tree carries the block too, while it is open.
-  const text = agentTreeFor(makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: { agentsWeekOpen: true } }), 'text')
+  const text = agentTreeFor(makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename' }), ui: { agentsWeekOpen: true } }), 'text')
   assert.deepEqual(text.week, open)
   // The disclosure's message carries nothing; it opens a closed block and closes an open one.
   assert.deepEqual(parseWebviewMessage({ type: 'agentsWeek' }), { type: 'agentsWeek' })
@@ -2764,9 +2776,9 @@ test('the switch message names one of its states; a new view shows its sources a
   assert.deepEqual(viewSources('codex'), ['codex'])
   // So the chips' message can store no other subset either: both, in any order, or none, is All.
   for (const providers of [['codex', 'claude'], [], ['claude', 'codex']] as const) {
-    assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: [...providers], models: [] }).providers, ['claude', 'codex'])
+    assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: [...providers], models: [], projects: [] }).providers, ['claude', 'codex'])
   }
-  assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: ['codex'], models: ['m'] }).models, ['m'],
+  assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: ['codex'], models: ['m'], projects: [] }).models, ['m'],
     'the model chips\' own message cleared the models')
 })
 
@@ -3449,4 +3461,153 @@ test('the text views and the summary print nothing of the Prompts section: a tit
   for (const [what, text] of outputs) {
     for (const secret of ['synthetic-prompt-title-123', 'synthetic-prompt-text-456']) assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 §3 A4, §0a.8 (P5): the project filter — the message, the view state, the chips, the sections it does not reach
+// ---------------------------------------------------------------------------
+
+/** buildAgg's two projects: the Claude folder /home/t/alpha and the Codex rollout started in /home/t/beta (salt 'salt'). */
+const ALPHA = projectKeyOf('salt', '-home-t-alpha')
+const BETA = projectKeyOf('salt', slugOf('/home/t/beta'))
+const onCfg = makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename' })
+
+test('1.14 §0a.8: setFilter\'s project keys — a name, a path, 51 keys, a 13-digit key, an upper-case key or no string drop the message whole; the unattributed key \'\' and other projects\' \'*\' pass', () => {
+  const msg = (projects: unknown): unknown => ({ type: 'setFilter', providers: ['claude'], models: [], projects })
+  for (const bad of [
+    ['alpha'], ['VS-Code_Tokens'], ['/home/u/proj'], ['-home-u-proj'], ['p:0123456789ab'],
+    Array.from({ length: 51 }, (_, i) => i.toString(16).padStart(12, '0')),
+    ['0123456789abc'], ['0123456789a'], ['0123456789AB'], [123], [null], 'aaaaaaaaaaaa', {},
+  ]) assert.equal(parseWebviewMessage(msg(bad)), null, JSON.stringify(bad).slice(0, 60))
+  assert.deepEqual(parseWebviewMessage(msg(['', '*', ALPHA])), { type: 'setFilter', providers: ['claude'], models: [], projects: ['', '*', ALPHA] })
+  assert.deepEqual(parseWebviewMessage(msg(Array.from({ length: 50 }, (_, i) => i.toString(16).padStart(12, '0'))))?.type, 'setFilter')
+  // Keys, never names: the view state takes what the message carries.
+  const ui = applyMessage(defaultUiState(cfg), { type: 'setFilter', providers: ['claude', 'codex'], models: [], projects: [ALPHA] })
+  assert.deepEqual(ui.projects, [ALPHA])
+})
+
+test('1.14 §3 A4 rule 11: the provider switch keeps the project chips and clears the model chips; restoreProjectFilter keeps the keys the label table holds, none while attribution is none', () => {
+  const ui = { ...defaultUiState(cfg), models: ['claude-opus-4-6'], projects: [ALPHA, BETA] }
+  const codex = applyMessage(ui, { type: 'setProvider', provider: 'codex' })
+  assert.deepEqual([codex.providers, codex.models, codex.projects], [['codex'], [], [ALPHA, BETA]])
+  assert.deepEqual(applyMessage(codex, { type: 'setProvider', provider: 'all' }).projects, [ALPHA, BETA])
+  const labels = { [ALPHA]: { lastTs: NOW }, '': { lastTs: NOW }, '*': { lastTs: NOW, folded: 2 } }
+  assert.deepEqual(restoreProjectFilter([ALPHA, BETA, '', '*', ALPHA, 'alpha', 7, null], 'project', labels), [ALPHA, '', '*'])
+  assert.deepEqual(restoreProjectFilter([ALPHA], 'session', labels), [ALPHA])
+  assert.deepEqual(restoreProjectFilter([ALPHA], 'none', labels), [])
+  assert.deepEqual(restoreProjectFilter('aaaaaaaaaaaa', 'project', labels), [])
+  assert.deepEqual(restoreProjectFilter(undefined, 'project', labels), [])
+  const many = Array.from({ length: 60 }, (_, i) => i.toString(16).padStart(12, '0'))
+  assert.equal(restoreProjectFilter(many, 'project', Object.fromEntries(many.map((k) => [k, { lastTs: NOW }]))).length, 50)
+})
+
+test('1.14 §3 A4 rule 8 (§7a Q23): while a project chip is pressed exactly quota, agents, context, tools, budget, history, dataQuality and prompts are named as the sections it does not reach — none while no chip is, and none under attribution none', () => {
+  const on = (projects: string[], c = onCfg): ReturnType<typeof buildViewModel> =>
+    buildViewModel(makeInput({ cfg: c, agg: buildAgg(c.attribution), ui: { projects } }))
+  assert.deepEqual(on([BETA]).projectFilterIgnoredBy, ['quota', 'agents', 'context', 'tools', 'budget', 'history', 'dataQuality', 'prompts'])
+  assert.deepEqual([...PROJECT_FILTER_IGNORED], ['quota', 'agents', 'context', 'tools', 'budget', 'history', 'dataQuality', 'prompts'])
+  for (const k of PROJECT_FILTER_IGNORED) assert.ok((DASHBOARD_SECTION_KEYS as readonly string[]).includes(k), k)
+  assert.deepEqual(on([]).projectFilterIgnoredBy, [])
+  // A pressed key the label table does not hold filters nothing, and names nothing.
+  assert.deepEqual(on(['0123456789ab']).projectFilterIgnoredBy, [])
+  const none = buildViewModel(makeInput({ cfg, agg: buildAgg(), ui: { projects: [BETA] } }))
+  assert.deepEqual([none.projectFilterIgnoredBy, none.projectFilter, none.projectFilterText], [[], null, null])
+})
+
+test('1.14 §3 A4 rule 5: the filter row\'s chips — the projects with usage in the range under the provider switch and the model chips, by usage; a pressed key without usage keeps its chip; the filter line names the chosen', () => {
+  const agg = buildAgg('project')
+  const vm = (ui: Partial<UiState>, c = onCfg): ReturnType<typeof buildViewModel> => buildViewModel(makeInput({ cfg: c, agg, ui }))
+  assert.deepEqual(vm({}).projectFilter, { chips: [
+    { key: ALPHA, label: 'alpha', pressed: false }, { key: BETA, label: 'beta', pressed: false },
+  ] })
+  // The chips are the range's under the switch: Codex shows beta alone, and a model chip its project.
+  assert.deepEqual(vm({ providers: ['codex'] }).projectFilter?.chips.map((c) => c.key), [BETA])
+  assert.deepEqual(vm({ models: ['claude-sonnet-4-6'] }).projectFilter?.chips.map((c) => c.key), [ALPHA])
+  // Pressed: the chip says so, and the other chips stay to be pressed.
+  const pressed = vm({ projects: [BETA] })
+  assert.deepEqual(pressed.projectFilter?.chips.map((c) => [c.key, c.pressed]), [[ALPHA, false], [BETA, true]])
+  assert.equal(pressed.projectFilterText, 'project filter: beta')
+  // Beta has no usage under the Claude view — its pressed chip stays, after the ones with usage.
+  assert.deepEqual(vm({ providers: ['claude'], projects: [BETA] }).projectFilter?.chips, [
+    { key: ALPHA, label: 'alpha', pressed: false }, { key: BETA, label: 'beta', pressed: true },
+  ])
+  // Under hash the chips are the pseudonyms, and the line names them so.
+  const hashed = vm({ projects: [ALPHA, BETA] }, makeConfig({ 'tokenPace.attribution': 'project' }))
+  assert.deepEqual(hashed.projectFilter?.chips.map((c) => c.label), [`p:${ALPHA}`, `p:${BETA}`])
+  assert.equal(hashed.projectFilterText, `project filter: p:${ALPHA}, p:${BETA}`)
+  // In German, the ledger's word.
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    assert.equal(vm({ projects: [BETA] }).projectFilterText, 'Projektfilter: beta')
+  } finally {
+    setBundle(undefined)
+  }
+  // Attribution none: no row at all.
+  assert.equal(buildViewModel(makeInput({ cfg, agg: buildAgg() })).projectFilter, null)
+})
+
+test('1.14 §3 A4 rules 1, 2, 6, 7: a project chip filters the sections built from the buckets — the Projects and Sessions tables, the models, the window rows — and leaves the quota cards, the tools, the budgets and the data quality whole', () => {
+  const agg = buildAgg('project')
+  const c = makeConfig({
+    'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename',
+    'tokenPace.budgets': [{ scope: 'total', period: 'month', limit: 1_000_000, unit: 'tokens' }],
+  })
+  const all = buildViewModel(makeInput({ cfg: c, agg }))
+  const beta = buildViewModel(makeInput({ cfg: c, agg, ui: { projects: [BETA] } }))
+  assert.deepEqual(all.projects.rows.map((r) => r.project), ['alpha', 'beta'])
+  assert.deepEqual(beta.projects.rows.map((r) => [r.project, r.share]), [['beta', '100 %']])
+  assert.deepEqual(beta.sessions.rows.map((r) => [r.session, r.project]), [['thread-1', 'beta']])
+  assert.deepEqual(beta.models.rows.map((r) => r.model), ['gpt-5.3-codex'])
+  // The Tokens section's window rows: beta's local usage in the running windows, Claude's rows empty of it.
+  const claude5h = (vm: ReturnType<typeof buildViewModel>): string => String(vm.totals.find((t) => t.source === 'claude')?.rows[0].usage)
+  assert.notEqual(claude5h(all), '–')
+  assert.equal(claude5h(beta), '–')
+  assert.equal(beta.totals.find((t) => t.source === 'codex')?.rows[0].usage, all.totals.find((t) => t.source === 'codex')?.rows[0].usage)
+  // The sections it does not reach: the same as without the chip.
+  for (const k of ['quotas', 'tools', 'budgets', 'allBudgets', 'dataQuality', 'retro', 'context'] as const) {
+    assert.deepEqual(beta[k], all[k], k)
+  }
+  assert.ok(all.budgets.length === 1)
+})
+
+test('1.14 §3 A4 rule 6 (§7a Q11): the Sessions table is the records active in the range and in the project filter, newest first', () => {
+  const agg = buildAgg('project')
+  const week = rangeFor('7d', NOW, tcfg)
+  const july = rangeFor({ from: '2026-07-01', to: '2026-07-25' }, NOW, tcfg)
+  const rows = (range: typeof week, projects: string[] = []): string[] =>
+    buildViewModel(makeInput({ cfg: onCfg, agg, range, ui: { projects } })).sessions.rows.map((r) => r.session)
+  assert.deepEqual(rows(week), ['sess-alpha', 'thread-1'])
+  // July: the Claude session was running (its first line on 20 July), the Codex thread starts in September.
+  assert.deepEqual(rows(july), ['sess-alpha'])
+  assert.deepEqual(rows(week, [BETA]), ['thread-1'])
+})
+
+test('1.14 §3 A3 rule 1: the folded line — the Projects table\'s last line and the data quality\'s, one project in the singular, none without a fold', () => {
+  const folded = (n: number | undefined): Aggregator => Aggregator.fromSnapshot({
+    version: 9, attribution: 'project', cursors: {}, pending: {}, sessions: {},
+    buckets: [{ ...emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'd', null, TODAY), project: '*', input: 100, requests: 1, outputFinal: 1 }],
+    projects: { '*': n === undefined ? { lastTs: NOW } : { lastTs: NOW, folded: n } },
+    rollup: { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 }, firstIngest: NOW - 86_400_000,
+  }, 'project')
+  const three = buildViewModel(makeInput({ cfg: onCfg, agg: folded(3) }))
+  assert.deepEqual(three.projects.folded, { count: 3, cap: 200, text: '3 projects folded into other projects (at most 200 are kept)' })
+  assert.equal(three.dataQuality.projectsFolded, '3 projects folded into other projects (at most 200 are kept)')
+  assert.equal(buildViewModel(makeInput({ cfg: onCfg, agg: folded(1) })).projects.folded?.text, '1 project folded into other projects (at most 200 are kept)')
+  const zero = buildViewModel(makeInput({ cfg: onCfg, agg: folded(undefined) }))
+  assert.deepEqual([zero.projects.folded, zero.dataQuality.projectsFolded], [null, null])
+  // German.
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    assert.equal(buildViewModel(makeInput({ cfg: onCfg, agg: folded(3) })).projects.folded?.text,
+      '3 Projekte unter „weitere Projekte“ zusammengefasst (höchstens 200 werden behalten)')
+  } finally {
+    setBundle(undefined)
+  }
+  // The sessions' lower bound in words, beside a count that is one (a range reaching the records' horizon).
+  const all = buildViewModel(makeInput({ cfg: onCfg, agg: buildAgg('project'), range: rangeFor('all', NOW, tcfg, '2026-07-01') }))
+  assert.equal(all.projects.rows.every((r) => r.sessionsLowerBound), true)
+  assert.equal(all.projects.note, 'at least — session records older than 45 days are not kept')
+  assert.equal(buildViewModel(makeInput({ cfg: onCfg, agg: buildAgg('project') })).projects.note, null)
 })

@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Időszak | Felhasználás | Friss bemenet | Írás 5m | Írás 1h | Gyorsítótár-olvasás | Kimenet | Gondolkodás | Kérés | Gyorsítótár-találat | Kérésenként | API-költség |",
   "| Period | Usage | Output | Cache read | Req. |": "| Időszak | Felhasználás | Kimenet | Gyorsítótár-olvasás | Kérés |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Időszak | Felhasználás | Kimenet | Gyorsítótár-olvasás | Kérés | API-költség |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Projekt | Felhasználás | Kérések | Gyorsítótár-találat | Arány | Munkamenetek |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Szolgáltató | Találati arány | Megvalósult megtakarítás | Átlagár $/1M | Alap |",
   "| Provider | Part | Tokens |": "| Szolgáltató | Rész | Tokenek |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Munkamenet | Projekt | Kezdés | Időtartam | Felhasználás | Kérés | Modellek | Gyorsítótár |",

@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Kỳ | Mức sử dụng | Đầu vào mới | Ghi 5m | Ghi 1h | Đọc bộ nhớ đệm | Đầu ra | Suy luận | Yêu cầu | Trúng bộ nhớ đệm | Mỗi yêu cầu | Chi phí API |",
   "| Period | Usage | Output | Cache read | Req. |": "| Kỳ | Mức sử dụng | Đầu ra | Đọc bộ nhớ đệm | Yêu cầu |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Kỳ | Mức sử dụng | Đầu ra | Đọc bộ nhớ đệm | Yêu cầu | Chi phí API |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Dự án | Mức sử dụng | Yêu cầu | Trúng bộ nhớ đệm | Tỷ trọng | Phiên |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Nhà cung cấp | Tỷ lệ trúng | Tiết kiệm thực tế | Giá gộp $/1M | Cơ sở |",
   "| Provider | Part | Tokens |": "| Nhà cung cấp | Phần | Token |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Phiên | Dự án | Bắt đầu | Thời lượng | Mức sử dụng | Yêu cầu | Mô hình | Bộ nhớ đệm |",

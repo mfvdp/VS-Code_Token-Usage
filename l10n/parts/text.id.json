@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Periode | Penggunaan | Input baru | Tulis 5m | Tulis 1h | Baca cache | Output | Penalaran | Permintaan | Hit cache | Per permintaan | Biaya API |",
   "| Period | Usage | Output | Cache read | Req. |": "| Periode | Penggunaan | Output | Baca cache | Permintaan |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Periode | Penggunaan | Output | Baca cache | Permintaan | Biaya API |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Proyek | Penggunaan | Permintaan | Hit cache | Porsi | Sesi |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Penyedia | Rasio hit | Hemat terealisasi | Harga campuran $/1M | Dasar |",
   "| Provider | Part | Tokens |": "| Penyedia | Bagian | Token |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Sesi | Proyek | Mulai | Durasi | Penggunaan | Permintaan | Model | Cache |",

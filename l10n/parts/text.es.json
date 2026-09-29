@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Período | Uso | Entrada nueva | Escritura 5m | Escritura 1h | Lectura de caché | Salida | Razonamiento | Solic. | Acierto de caché | Por solic. | Coste de API |",
   "| Period | Usage | Output | Cache read | Req. |": "| Período | Uso | Salida | Lectura de caché | Solic. |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Período | Uso | Salida | Lectura de caché | Solic. | Coste de API |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Proyecto | Uso | Solicitudes | Acierto de caché | Proporción | Sesiones |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Proveedor | Tasa de aciertos | Ahorro realizado | Mixto $/1M | Base |",
   "| Provider | Part | Tokens |": "| Proveedor | Parte | Tokens |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Sesión | Proyecto | Inicio | Duración | Uso | Solic. | Modelos | Caché |",

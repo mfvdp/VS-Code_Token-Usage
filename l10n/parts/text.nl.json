@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Periode | Verbruik | Nieuwe invoer | Schrijven 5m | Schrijven 1h | Cache gelezen | Uitvoer | Redenering | Aanvr. | Cachehit | Per aanvr. | API-kosten |",
   "| Period | Usage | Output | Cache read | Req. |": "| Periode | Verbruik | Uitvoer | Cache gelezen | Aanvr. |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Periode | Verbruik | Uitvoer | Cache gelezen | Aanvr. | API-kosten |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Project | Verbruik | Aanvragen | Cachehit | Aandeel | Sessies |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Aanbieder | Hitratio | Gerealiseerde besparing | Mengprijs $/1M | Basis |",
   "| Provider | Part | Tokens |": "| Aanbieder | Deel | Tokens |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Sessie | Project | Gestart | Duur | Verbruik | Aanvr. | Modellen | Cache |",

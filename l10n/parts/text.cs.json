@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Období | Spotřeba | Nový vstup | Zápis 5m | Zápis 1h | Čtení mezipaměti | Výstup | Uvažování | Pož. | Zásah mezipaměti | Na pož. | Náklady API |",
   "| Period | Usage | Output | Cache read | Req. |": "| Období | Spotřeba | Výstup | Čtení mezipaměti | Pož. |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Období | Spotřeba | Výstup | Čtení mezipaměti | Pož. | Náklady API |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Projekt | Spotřeba | Požadavky | Zásah mezipaměti | Podíl | Relace |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Poskytovatel | Míra zásahů | Realizovaná úspora | Smíšená cena $/1M | Základ |",
   "| Provider | Part | Tokens |": "| Poskytovatel | Část | Tokeny |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Relace | Projekt | Začátek | Trvání | Spotřeba | Pož. | Modely | Mezipaměť |",

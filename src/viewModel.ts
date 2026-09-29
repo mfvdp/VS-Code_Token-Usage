@@ -45,6 +45,7 @@ import {
 } from './prompts'
 import { promptCacheText } from './promptCache'
 import { PromptSendBlock, PromptVerdict, promptBlockText } from './promptSend'
+import { MAX_PROJECT_FILTER, OTHER_PROJECTS, PROJECT_CAP, isProjectKey, projectLabel } from './project'
 import { ageMinutes, compact, estimate, extraUsageText, full, originName, percentOf, percentText } from './render'
 import { QuotaHistory } from './quotaHistory'
 import { turnedOver } from './resetRule'
@@ -58,14 +59,14 @@ import {
   SOURCE_TITLE, SessionRecord, SessionRow, StatsCtx, TotalRow, TotalsWindow,
   cacheEconomy, cacheStates, calendar, chart, composition,
   drill as drillStats, filterFor, heatmap, hours, kpis, localBlock, modelTable, planFactors,
-  projectRows, records as recordsOf, sessionRows, totalsFor, totalsWindowSpans,
+  projectRows, projectUsage, records as recordsOf, sessionRows, totalsFor, totalsWindowSpans,
 } from './stats'
 import {
   DayRange, RangePreset, TimeConfig, addDays, ageText, attemptWhen, clockStamp, dayCount, dayOf, formatDay, formatReset,
   formatTime, lastFailureText, rangeFor, isDay, previousRange, refreshWords, resetClock,
 } from './time'
 import {
-  AgentRec, Attribution, Bucket, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaSample,
+  AgentRec, Attribution, Bucket, Forecast, PaceLevel, PaceVerdict, ProblemKind, ProjectLabel, QuotaSample,
   QuotaState, QuotaWindow, Source, TOOL_NAME_CAP, emptyBucket,
 } from './types'
 
@@ -125,6 +126,13 @@ export interface UiState {
   sort: { key: string; dir: 'asc' | 'desc' }
   providers: Source[]
   models: string[]
+  /**
+   * 1.14 §0a.8: the project filter — the keys of the filtered-on projects (project.ts `PROJECT_KEY_RE` or
+   * `OTHER_PROJECTS`), at most MAX_PROJECT_FILTER; keys, never names. Kept across a change of provider (a project spans
+   * both programs, §3 A4 rule 11); a key the label table no longer holds filters nothing (buildViewModel) and is dropped
+   * at the next restore, every key while attribution is none (extension.ts restoreUi).
+   */
+  projects: string[]
   metric: Metric
   /**
    * Whether the composition bar draws the three cache parts. Cache reads dwarf everything
@@ -213,7 +221,7 @@ export type WebviewMessage =
   | { type: 'setRange'; preset: RangePreset }
   | { type: 'setRange'; from: string; to: string }
   | { type: 'setSort'; key: ModelSortKey; dir: 'asc' | 'desc' }
-  | { type: 'setFilter'; providers: Source[]; models: string[] }
+  | { type: 'setFilter'; providers: Source[]; models: string[]; projects: string[] }
   /** 1.7 F1: the provider switch — one provider, or every one. */
   | { type: 'setProvider'; provider: ProviderView }
   | { type: 'setMetric'; metric: Metric }
@@ -303,6 +311,40 @@ function isCalendarDay(v: unknown): v is string {
   return typeof v === 'string' && isDay(v) && addDays(v, 0) === v
 }
 
+/**
+ * 1.14 §0a.8: a message's project keys — at most MAX_PROJECT_FILTER, each `PROJECT_KEY_RE` or `OTHER_PROJECTS` (project.ts
+ * `isProjectKey`), so a name, a path or a key of another length is refused; '' is a key (the unattributed usage's —
+ * `(no project)`), which `strings` would refuse. Null for anything else: the message is dropped whole. Left out (a page
+ * that sends no project filter) it reads [].
+ */
+function projectKeys(v: unknown): string[] | null {
+  if (v === undefined) return []
+  if (!Array.isArray(v) || v.length > MAX_PROJECT_FILTER) return null
+  const out: string[] = []
+  for (const item of v) {
+    if (!isProjectKey(item)) return null
+    if (!out.includes(item)) out.push(item)
+  }
+  return out
+}
+
+/**
+ * 1.14 §0a.8 (§3 A4 rule 11): the project filter of a stored view state (extension.ts restoreUi) — the keys the label
+ * table still holds, each once, at most MAX_PROJECT_FILTER; every key dropped while attribution is none (the label table
+ * is gone then, §3 A7), anything that is no key dropped entry by entry, as the stored model chips are.
+ */
+export function restoreProjectFilter(
+  raw: unknown, attribution: Attribution, labels: Readonly<Record<string, ProjectLabel>>,
+): string[] {
+  if (attribution === 'none' || !Array.isArray(raw)) return []
+  const out: string[] = []
+  for (const k of raw) {
+    if (!isProjectKey(k) || !Object.prototype.hasOwnProperty.call(labels, k) || out.includes(k)) continue
+    out.push(k)
+  }
+  return out.slice(0, MAX_PROJECT_FILTER)
+}
+
 function strings(v: unknown, max: number, maxChars: number): string[] | null {
   if (!Array.isArray(v) || v.length > max) return null
   const out: string[] = []
@@ -355,10 +397,11 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'setFilter': {
       const providers = strings(m.providers, SOURCES.length, 16)
       const models = strings(m.models, MAX_MODEL_FILTER, MAX_MODEL_CHARS)
-      if (!providers || !models) return null
+      const projects = projectKeys(m.projects)
+      if (!providers || !models || !projects) return null
       if (providers.some((p) => !(SOURCES as string[]).includes(p))) return null
       const seen = new Set(providers)
-      return { type: 'setFilter', providers: [...seen] as Source[], models: [...new Set(models)] }
+      return { type: 'setFilter', providers: [...seen] as Source[], models: [...new Set(models)], projects }
     }
     // 1.7 F1: the provider switch names one of its states — `all` or a known source, exactly as
     // written; a list, a case variant or a provider this build does not know drops the message.
@@ -451,6 +494,7 @@ export function defaultUiState(cfg: Config): UiState {
     sort: { key: 'usage', dir: 'desc' },
     providers: [...SOURCES],
     models: [],
+    projects: [],
     metric: 'usage',
     compositionCache: 'all',
     heatmapMetric: 'usage',
@@ -490,12 +534,15 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
         ...ui,
         providers: viewSources(providerViewOf(m.providers)),
         models: m.models,
+        // 1.14 §0a.8: the page sends the project chips with every filter message.
+        projects: m.projects,
       }
     case 'setProvider': {
       // 1.7 F1: the view already shown changes nothing — the same object, nothing to persist.
       // Another one shows its sources and clears the model chips: a chip belongs to its
       // provider's models, and one kept across the change would empty every filtered section
-      // (§7a Q3: a change to All included, one rule).
+      // (§7a Q3: a change to All included, one rule). 1.14 §3 A4 rule 11: the project chips stay — a project is a
+      // folder, and a Claude Code and a Codex session started in it share its key.
       if (!isProviderView(m.provider) || providerViewOf(ui.providers) === m.provider) return ui
       return { ...ui, providers: viewSources(m.provider), models: [] }
     }
@@ -872,7 +919,25 @@ export interface DataQuality {
    * shows another provider.
    */
   agents: { records: string; buckets: string; note: string } | null
+  /**
+   * 1.14 §3 A3 rule 1: "{0} projects folded into other projects (at most {1} are kept)" once a project has folded — the
+   * Projects table's last line, here too; null while none has (and while attribution is none).
+   */
+  projectsFolded: string | null
 }
+
+/**
+ * 1.14 §3 A4 rule 8 (§7a Q23): the sections a project filter does not reach, each for its reason — `quota`: the provider's
+ * window covers every client of the account; `agents`: the tree's own seven-day tables, keyed by transcript (§3.0 c);
+ * `context`: the latest request's context window, a reading; `tools`: the tool table is day × model × name with no project,
+ * and a project split would multiply its cap; `budget`: a budget is about the account's spend, as neither the provider
+ * switch nor a model chip moves it; `history`: the server's readings; `dataQuality`: the machine's roots, files and buckets;
+ * `prompts`: the reader's own list. Every other section is built from the buckets (or the session records) and follows the
+ * filter — the invariant (§3 A2 rule 6) holds it.
+ */
+export const PROJECT_FILTER_IGNORED: readonly DashboardSectionKey[] = [
+  'quota', 'agents', 'context', 'tools', 'budget', 'history', 'dataQuality', 'prompts',
+]
 
 export interface VmInput {
   quotas: QuotaState[]
@@ -1116,7 +1181,33 @@ export interface ViewModel {
    */
   allBudgets: BudgetRow[]
   retro: { source: Source; windowId: string; label: string; retro: Retro; text: string }[]
-  projects: { rows: ProjectRow[]; enabled: boolean }
+  /**
+   * 1.14 §3 A4 rule 2: the Projects table of the range (`projectRows`) — `note` the sessions' lower-bound words while a
+   * row's count is one (the ⚠'s title and the table's footnote, §3 A9), `folded` the line that says the list is short
+   * (§3 A3 rule 1): how many projects folded into other projects and the cap, in words — null while none did.
+   */
+  projects: {
+    rows: ProjectRow[]
+    enabled: boolean
+    note: string | null
+    folded: { count: number; cap: number; text: string } | null
+  }
+  /**
+   * 1.14 §3 A4 rule 5: the Projects row of the filter bar — the projects with usage in the range under the provider switch
+   * and the model chips, by usage, then every pressed key without usage (its chip stays, as a model chip does); each
+   * chip's `key` is what the page sends back (`setFilter.projects`), `label` its words. Null while attribution is none.
+   */
+  projectFilter: { chips: Array<{ key: string; label: string; pressed: boolean }> } | null
+  /**
+   * 1.14 §3 A4 rule 8 (§7a Q23): while a project chip is pressed, the sections the project filter does not reach —
+   * exactly PROJECT_FILTER_IGNORED; each draws a note under its head. Empty while no chip is.
+   */
+  projectFilterIgnoredBy: DashboardSectionKey[]
+  /**
+   * 1.14 §3 A4 rule 10: "project filter: p:8f31c0a4e2b1, B_ro-App" while a chip is pressed — the line the Quick Pick,
+   * the markdown document and the markdown summary state the filter by; null while none is.
+   */
+  projectFilterText: string | null
   sessions: { rows: SessionRow[]; enabled: boolean; cacheStates: { session: string; text: string }[] }
   dataQuality: DataQuality
   unpricedModels: string[]
@@ -2078,10 +2169,11 @@ export function agentTreeFor(
     mains: agg.mains(),
     runs: agg.runs(),
     runLaunches: agg.runLaunches(),
-    // 1.14 P4: the records hold the project key; the tree names a session's project by its label (P5 hands the
-    // tree the label table instead).
-    sessions: agg.sessions().map((s) => ({ ...s, project: agg.projectLabelOf(s.project) })),
+    sessions: agg.sessions(),
     attribution: cfg.attribution,
+    // 1.14 §3 A4 rule 12: a session root names its project by projectLabel — the label table and the label mode.
+    projectLabels: cfg.attribution !== 'none' ? agg.projects() : {},
+    projectNames: cfg.showProjectNames === 'basename',
     selected: ui.agentSelected ?? null,
     expanded: ui.agentsExpanded ?? [],
     more: ui.agentsMore ?? [],
@@ -2133,14 +2225,27 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
   // 1.6 L5 (Review 3): every hour span of this build summed once, and shared by the tables that
   // sum the same one — see `HourSums` and the prefetch below.
   const hourSums = new HourSums(agg, buckets)
+  const attributionOn = cfg.attribution !== 'none'
+  // 1.14 §0a.8: the project filter the view applies — the stored keys the label table still holds (a project folded into
+  // other projects or pruned drops its chip, §3 A3 rule 1), none while attribution is none.
+  const labels: Readonly<Record<string, ProjectLabel>> = attributionOn ? agg.projects() : {}
+  const projectNames = cfg.showProjectNames === 'basename'
+  const projects = attributionOn
+    ? (ui.projects ?? []).filter((k) => Object.prototype.hasOwnProperty.call(labels, k))
+    : []
   const ctx: StatsCtx = {
     agg, tcfg, pricing, now, sources, models: ui.models, showCost: cfg.showCost,
+    // 1.14 §3 A4 rule 1: a bucket predicate beside the models — every section built from the buckets follows it.
+    projects, projectNames, hourRetentionDays: cfg.hourRetentionDays,
     // Stated rather than inferred: with attribution off the session table is empty, and the
     // records must say "switched off" instead of "nothing worth showing".
     attribution: cfg.attribution,
     hours: hourSums,
     buckets,
   }
+  // 1.14 §3 A4 rule 8: the context of the sections a project filter does not reach (PROJECT_FILTER_IGNORED) — the
+  // quota cards, the tools, the budgets and the data quality are the account's and the machine's, whatever the chips.
+  const account: StatsCtx = projects.length > 0 ? { ...ctx, projects: [] } : ctx
   const range = input.range
   const previous = previousRange(range)
   const stats = agg.stats()
@@ -2159,12 +2264,14 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
   // against exactly the bounds the quota card above it draws.
   const windowsOf = (source: Source): TotalsWindow[] =>
     quotas.find((q) => q.source === source)?.windows ?? []
-  // The Tokens section follows no chip. It sits above the filter bar with the quota cards, and
+  // The Tokens section follows no model chip. It sits above the filter bar with the quota cards, and
   // a table up there that quietly narrowed to the range or model picked below would be read as
   // the whole — so its rows are fixed periods (the running windows, today, the last 7 and 30
   // days, this week, this month, all time) of every model, and the composition bars and the
   // cache economy take the last 30 days and say so. 1.7 F1: of the providers the switch shows —
-  // the switch stands above everything, the section included — in registry order.
+  // the switch stands above everything, the section included — in registry order. 1.14 §3 A4
+  // rule 7: the project chips do reach it — a project chip shows that project's local usage in
+  // the running 5 h and 7 d windows (the ticket's window attribution, no table of its own).
   const whole: StatsCtx = { ...ctx, sources: viewSources(view), models: [] }
 
   // 1.6 L5 (Review 3): the hour spans this build sums, in one pass over the buckets — the totals
@@ -2188,7 +2295,7 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
     : []
   // 1.7 F1: the cards of the providers the view shows; a Claude card keeps its prompt-cache line
   // and its subagent shares.
-  const cards = shownQuotas.map((q) => quotaCard(q, input, ctx, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay, agentTokens !== null, watched))
+  const cards = shownQuotas.map((q) => quotaCard(q, input, account, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay, agentTokens !== null, watched))
   const month = rangeFor('30d', now, tcfg)
   const totals = whole.sources.map((source) => ({
     source,
@@ -2207,11 +2314,11 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
   const retroRows = retroList(shownQuotas, history, input.fingerprints)
   // Every budget as it stands (see `ViewModel.budgets`), and the rows the view shows of them:
   // scope `total` and the shown provider's own. Under All the very same list.
-  const allBudgets = budgetRows({ ...ctx, sources: [...SOURCES], models: [] }, cfg.budgets, now)
+  const allBudgets = budgetRows({ ...ctx, sources: [...SOURCES], models: [], projects: [] }, cfg.budgets, now)
   const budgets = view === 'all' ? allBudgets : allBudgets.filter((b) => b.scope === 'total' || sources.includes(b.scope))
 
-  const attributionOn = cfg.attribution !== 'none'
-  const dq = dataQuality(input, ctx, tcfg, costSummary, stats, agentTokens, sources)
+  // The data quality is the machine's (PROJECT_FILTER_IGNORED): its lower-bound share over the view's range unfiltered.
+  const dq = dataQuality(input, account, tcfg, account === ctx ? costSummary : combinedCost(account, range), stats, agentTokens, sources)
   const empty = stats.buckets === 0
   // The first-run box is about the machine, not about the view: "no quota" is every provider's,
   // whichever one the switch shows — the same answer a card-by-card test gave in 1.6.
@@ -2252,16 +2359,23 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
     records: recordsOf(ctx, range, cfg.dashboard.topN, firstDay, input.settled !== false,
       { sessionName: sessionShortName, spanText, hourRetentionDays: cfg.hourRetentionDays }),
     // The same cap the records tables use: two "top n" tables on one page that disagree
-    // about n would look like two different measurements.
-    tools: toolRows(ctx, range, cfg.dashboard.topN),
+    // about n would look like two different measurements. 1.14: no project on a tool row (PROJECT_FILTER_IGNORED).
+    tools: toolRows(account, range, cfg.dashboard.topN),
     // Every provider, no model filter: see `ViewModel.budgets`. The period bounds come from
     // `now`, never from the selected range — a month budget is about the month.
     budgets,
     allBudgets,
     retro: retroRows,
-    projects: { rows: attributionOn ? projectRows(ctx) : [], enabled: attributionOn },
+    projects: attributionOn
+      ? projectsVm(ctx, range, labels)
+      : { rows: [], enabled: false, note: null, folded: null },
+    projectFilter: attributionOn ? { chips: projectChips(ctx, range, labels, projectNames, projects) } : null,
+    projectFilterIgnoredBy: projects.length > 0 ? [...PROJECT_FILTER_IGNORED] : [],
+    projectFilterText: projects.length > 0
+      ? t('project filter: {0}', listOf(projects.map((key) => projectLabel(key, labels, projectNames))))
+      : null,
     sessions: {
-      rows: attributionOn ? sessionRows(ctx) : [],
+      rows: attributionOn ? sessionRows(ctx, range) : [],
       enabled: attributionOn,
       cacheStates: attributionOn ? cacheStates(ctx) : [],
     },
@@ -2290,6 +2404,52 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
   return vm
 }
 
+/**
+ * 1.14 §3 A4 rules 2, 3: the Projects table of the range, the sessions' lower-bound words while a row's count is one, and
+ * the folded line.
+ */
+function projectsVm(ctx: StatsCtx, range: DayRange, labels: Readonly<Record<string, ProjectLabel>>): ViewModel['projects'] {
+  const rows = projectRows(ctx, range)
+  return {
+    rows,
+    enabled: true,
+    note: rows.some((r) => r.sessionsLowerBound)
+      ? t('at least — session records older than {0} days are not kept', ctx.hourRetentionDays ?? '–')
+      : null,
+    folded: foldedOf(labels),
+  }
+}
+
+/**
+ * 1.14 §3 A3 rule 1: how many projects folded into other projects (the count other projects' label keeps), and the cap —
+ * the line that says the list is short, never silent (1.3's rule). Null while none has.
+ */
+function foldedOf(labels: Readonly<Record<string, ProjectLabel>>): { count: number; cap: number; text: string } | null {
+  const other = Object.prototype.hasOwnProperty.call(labels, OTHER_PROJECTS) ? labels[OTHER_PROJECTS] : undefined
+  const count = other && typeof other.folded === 'number' && Number.isFinite(other.folded) ? Math.floor(other.folded) : 0
+  if (count <= 0) return null
+  return {
+    count,
+    cap: PROJECT_CAP,
+    text: count === 1
+      ? t('1 project folded into other projects (at most {0} are kept)', PROJECT_CAP)
+      : t('{0} projects folded into other projects (at most {1} are kept)', count, PROJECT_CAP),
+  }
+}
+
+/**
+ * 1.14 §3 A4 rule 5: the filter row's chips — the projects with usage in the range under the provider switch and the model
+ * chips (not the project chips: an unpressed chip stays to be pressed), by usage, then every pressed key without usage in
+ * the range, in the order it was pressed (its chip stays — code fact 12's rule for the model chips).
+ */
+function projectChips(
+  ctx: StatsCtx, range: DayRange, labels: Readonly<Record<string, ProjectLabel>>, names: boolean, pressed: readonly string[],
+): Array<{ key: string; label: string; pressed: boolean }> {
+  const used = projectUsage({ ...ctx, projects: [] }, range)
+  const keys = [...used.map((u) => u.key), ...pressed.filter((k) => !used.some((u) => u.key === k))]
+  return keys.map((key) => ({ key, label: projectLabel(key, labels, names), pressed: pressed.includes(key) }))
+}
+
 function sortOf(sort: UiState['sort']): ModelSort {
   const key = (MODEL_SORT_KEYS as readonly string[]).includes(sort.key)
     ? (sort.key as ModelSortKey)
@@ -2305,7 +2465,8 @@ function combinedCost(ctx: StatsCtx, range: DayRange) {
   const unpriced = new Set<string>()
   const family = new Set<string>()
   for (const source of ctx.sources) {
-    const c = ctx.agg.cost(range.from, range.to, ctx.tcfg, ctx.pricing, { source, ...(ctx.models.length ? { models: ctx.models } : {}) })
+    // 1.14 §3 A4 rule 1: the context's filter — the models and the projects (`filterFor`).
+    const c = ctx.agg.cost(range.from, range.to, ctx.tcfg, ctx.pricing, filterFor(ctx, source))
     out.usd += c.usd
     out.listUsd += c.listUsd
     out.unpricedTokens += c.unpricedTokens
@@ -2436,6 +2597,7 @@ function dataQuality(
     attribution: cfg.attribution,
     version: typeof __EXT_VERSION__ === 'string' ? __EXT_VERSION__ : '0.0.0',
     agents,
+    projectsFolded: cfg.attribution !== 'none' ? foldedOf(agg.projects())?.text ?? null : null,
   }
 }
 

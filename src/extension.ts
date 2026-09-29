@@ -91,9 +91,10 @@ import {
   PROJECT_SALT_KEY, StoredKey, StoredPaths,
 } from './storage'
 import { DayRange, dayOf, RangePreset, rangeFor } from './time'
-import { Forecast, PaceVerdict, QuotaState, Snapshot, Source } from './types'
+import { Forecast, PaceVerdict, ProjectLabel, QuotaState, Snapshot, Source } from './types'
 import {
   agentTreeFor, applyMessage, buildViewModel, DASHBOARD_SECTION_KEYS, defaultUiState, forecastsFor, isAgentSelectedIn, isChartSplit,
+  restoreProjectFilter,
   MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, providerViewOf, RANGE_PRESETS, UiState, viewSources, ViewModel,
   WebviewMessage,
 } from './viewModel'
@@ -449,7 +450,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   })
   context.subscriptions.push({ dispose: () => notifier.dispose() })
 
-  let ui = restoreUi(context.globalState.get<unknown>(UI_KEY), cfg)
+  let ui = restoreUi(context.globalState.get<unknown>(UI_KEY), cfg, agg.projects())
 
   // --------------------------------------------------------------- mutable state
   let quotas: QuotaState[] = []
@@ -2104,6 +2105,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       } else if (before.attribution !== 'none' && cfg.attribution === 'none') {
         agg.clearSessions()
         dirty = true
+        // 1.14 §0a.8: the project chips go with the label table — a later switch back on starts without a filter.
+        if (ui.projects.length > 0) {
+          ui = { ...ui, projects: [] }
+          void context.globalState.update(UI_KEY, ui)
+        }
       } else if (namesOff) {
         log.info('Project names switched to "hash" — the names are dropped; nothing is re-read.')
         agg.dropProjectNames()
@@ -2633,7 +2639,7 @@ function loadSnapshot(file: string): Snapshot | undefined {
  * A persisted UI state is user data from an older build — every field is checked before it
  * reaches the view model, because a single wrong type there is an empty dashboard.
  */
-function restoreUi(raw: unknown, cfg: Config): UiState {
+function restoreUi(raw: unknown, cfg: Config, labels: Readonly<Record<string, ProjectLabel>>): UiState {
   const base = defaultUiState(cfg)
   if (!isRecord(raw)) return base
   const out: UiState = { ...base }
@@ -2658,6 +2664,8 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
   if (Array.isArray(raw.models)) {
     out.models = raw.models.filter((m): m is string => typeof m === 'string').slice(0, 50)
   }
+  // 1.14 §0a.8: the project chips — keys the label table holds; none while attribution is none.
+  out.projects = restoreProjectFilter(raw.projects, cfg.attribution, labels)
   if (typeof raw.metric === 'string' && (METRICS as string[]).includes(raw.metric)) {
     out.metric = raw.metric as UiState['metric']
   }

@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| अवधि | उपयोग | नया इनपुट | लेखन 5m | लेखन 1h | कैश पठन | आउटपुट | तर्क | अनुरोध | कैश हिट | प्रति अनुरोध | API लागत |",
   "| Period | Usage | Output | Cache read | Req. |": "| अवधि | उपयोग | आउटपुट | कैश पठन | अनुरोध |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| अवधि | उपयोग | आउटपुट | कैश पठन | अनुरोध | API लागत |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| प्रोजेक्ट | उपयोग | अनुरोध | कैश हिट | हिस्सा | सत्र |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| प्रदाता | हिट दर | वास्तविक बचत | मिश्रित दर $/1M | आधार |",
   "| Provider | Part | Tokens |": "| प्रदाता | भाग | टोकन |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| सत्र | प्रोजेक्ट | आरंभ | लगा समय | उपयोग | अनुरोध | मॉडल | कैश |",

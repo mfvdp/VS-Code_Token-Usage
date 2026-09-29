@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| 期間 | 使用量 | 新規入力 | 書き込み 5m | 書き込み 1h | キャッシュ読み取り | 出力 | 推論 | リクエスト | キャッシュヒット | 1 件あたり | API コスト |",
   "| Period | Usage | Output | Cache read | Req. |": "| 期間 | 使用量 | 出力 | キャッシュ読み取り | リクエスト |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| 期間 | 使用量 | 出力 | キャッシュ読み取り | リクエスト | API コスト |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| プロジェクト | 使用量 | リクエスト数 | キャッシュヒット | 割合 | セッション |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| プロバイダー | ヒット率 | 節約実績 | 混合単価 $/1M | 根拠 |",
   "| Provider | Part | Tokens |": "| プロバイダー | 区分 | トークン |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| セッション | プロジェクト | 開始 | 所要時間 | 使用量 | リクエスト | モデル | キャッシュ |",

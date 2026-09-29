@@ -21,9 +21,11 @@ import { PICK_RUNNING_ITEMS, PickItem, markdownDocument, noIcons, quickPickItems
 import { AgentLaunch, AgentRec, MainRec } from '../src/types'
 import { SOURCE_TITLE, ViewModel, agentTreeFor, buildViewModel } from '../src/viewModel'
 import {
-  CLAUDE_FILE, FINGERPRINT, NOW, addCacheSession, agentShareAgg, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
+  CLAUDE_FILE, FINGERPRINT, NOW, addCacheSession, agentShareAgg, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, timeConfig, win,
 } from './fixtures/viewFixtures'
 import { deltaBadge } from '../src/render'
+import { projectKeyOf, slugOf } from '../src/project'
+import { rangeFor } from '../src/time'
 import { bestState } from '../src/quotaSources'
 import {
   LEAK_SESSION_ID, LEAK_STATUS_SECRETS, codexMeta, codexTokenCount, codexTurnContext, ctxFor, scratchDir, writeLeakyMirror,
@@ -1207,8 +1209,10 @@ function agentVm(select = false, over: Record<string, unknown> = {}): { vm: View
   agg.launches = () => [pending]
   const agentKey = 'a:a94f0001'
   const { ui: uiOver, ...cfgOver } = over as { ui?: Record<string, unknown> }
+  // 1.14 P5 (pinned and changed: the world reads folder names — buildAgg's hashProjects false —, so the config says
+  // showProjectNames basename and the tree names the project alpha; under the default hash it reads p:<key>).
   const input = makeInput({
-    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', ...cfgOver }),
+    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename', ...cfgOver }),
     ui: { ...(select ? { agentSelected: agentKey } : {}), ...(uiOver ?? {}) },
   })
   const vm = buildViewModel(input)
@@ -2486,4 +2490,76 @@ test('1.11 B7: in German the four tables\' lines, header rows and notes are Germ
   assert.ok(part.includes('_⚠ = Untergrenze: Der Tag oder die Stunde enthält Verbrauch ohne hinterlegten Preis, oder an dem Tag beginnen die Transkripte auf dem Datenträger._'))
   assert.ok(part.some((l) => l.startsWith('_Claude-Code-Sitzungen der letzten 7 Tage, die nicht mehr aktiv sind')), part.join('\n'))
   assert.ok(part.some((l) => l.startsWith('_Ein großes Cache-Schreiben ist meist ein Kaltstart')), part.join('\n'))
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 §3 A4 rule 10 (P5): the native views' parity — the Projects columns, the project filter's line
+// ---------------------------------------------------------------------------
+
+test('1.14 §3 A4 rule 10: the Quick Pick\'s project rows and the markdown\'s Projects table carry the page\'s columns — usage, the cost with its mark, requests, share, sessions, cache hit, last activity — in both languages', () => {
+  const cfgOn = makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename' })
+  const vm = buildViewModel(makeInput({ cfg: cfgOn, agg: buildAgg('project') }))
+  assert.deepEqual(vm.projects.rows.map((r) => r.project), ['alpha', 'beta'])
+  const items = quickPickItems(vm)
+  const rows = items.filter((i) => i.label.startsWith('Project '))
+  assert.equal(rows.length, 2)
+  for (const [i, p] of vm.projects.rows.entries()) {
+    assert.equal(rows[i].label, `Project ${p.project}: ${p.usage}`)
+    const cost = p.cost === '–' ? [] : [`${p.cost}${p.costLowerBound || p.costFamily ? ' ⚠' : ''}`]
+    assert.equal(rows[i].description, [...cost, `${p.requests} req`, `${p.share} of usage`, `${p.sessions} session(s) · hit ${p.cacheHit}`].join(' · '))
+    assert.equal(rows[i].detail, `Last activity: ${p.lastActive}`)
+  }
+  // Alpha's unpriced bucket makes its cost a lower bound: the figure with ⚠.
+  assert.ok(vm.projects.rows[0].costLowerBound)
+  assert.match(String(rows[0].description), /^~\$[0-9.,]+ ⚠ · /)
+  const md = markdownDocument(vm)
+  const lines = md.split('\n')
+  const head = lines.indexOf('| Project | Usage | API cost | Requests | Cache hit | Share | Sessions | Last activity |')
+  assert.ok(head > 0, md)
+  assert.equal(lines[head + 1], '|---|---|---|---|---|---|---|---|')
+  assert.deepEqual(rowsOf(md, '## Projects'), vm.projects.rows.map((p) =>
+    `| ${p.project} | ${p.usage} | ${p.cost}${p.costLowerBound || p.costFamily ? ' ⚠' : ''} | ${p.requests} | ${p.cacheHit} | ${p.share} | ${p.sessions} | ${p.lastActive} |`))
+  // Costs off: the column stays in the document (as in every table of it) with a dash, the Quick Pick drops the part.
+  const off = buildViewModel(makeInput({ cfg: makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showCost': false }), agg: buildAgg('project') }))
+  assert.ok(rowsOf(markdownDocument(off), '## Projects').every((l) => l.split(' | ')[2] === '–'))
+  assert.ok(quickPickItems(off).filter((i) => i.label.startsWith('Project ')).every((i) => i.description?.split(' · ')[0].endsWith(' req')))
+  // German: the header and the detail.
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    const de = buildViewModel(makeInput({ cfg: cfgOn, agg: buildAgg('project') }))
+    assert.ok(markdownDocument(de).includes('| Projekt | Verbrauch | API-Kosten | Anfragen | Cache-Treffer | Anteil | Sitzungen | Letzte Aktivität |'))
+    assert.equal(quickPickItems(de).find((i) => i.label.startsWith('Projekt '))?.detail, `Letzte Aktivität: ${de.projects.rows[0].lastActive}`)
+  } finally {
+    setBundle(undefined)
+  }
+})
+
+test('1.14 §3 A4 rule 10: the project filter is one line of both text views while a chip is pressed — under the Quick Pick\'s first line and the markdown\'s range line —, and the sessions\' lower bound and the folded line follow the Projects rows', () => {
+  const cfgOn = makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename' })
+  const beta = projectKeyOf('salt', slugOf('/home/t/beta'))
+  const vm = buildViewModel(makeInput({ cfg: cfgOn, agg: buildAgg('project'), ui: { projects: [beta] } }))
+  assert.equal(vm.projectFilterText, 'project filter: beta')
+  const items = quickPickItems(vm)
+  assert.equal(items[0].label, 'Open dashboard')
+  assert.deepEqual(items[1], { label: 'project filter: beta' })
+  const md = markdownDocument(vm).split('\n')
+  assert.ok(md[2].startsWith('*Last 30 days · '), md[2])
+  assert.deepEqual(md.slice(3, 5), ['', '*project filter: beta*'])
+  // No chip: no line.
+  const plain = buildViewModel(makeInput({ cfg: cfgOn, agg: buildAgg('project') }))
+  assert.equal(quickPickItems(plain).some((i) => i.label.startsWith('project filter')), false)
+  assert.equal(markdownDocument(plain).includes('project filter'), false)
+  // The notes: the sessions' lower bound (a range reaching the records' horizon) and a fold, after the rows.
+  const all = buildViewModel(makeInput({ cfg: cfgOn, agg: buildAgg('project'), range: rangeFor('all', NOW, timeConfig(cfgOn), '2026-07-01') }))
+  const withFold = { ...all, projects: { ...all.projects, folded: { count: 3, cap: 200, text: '3 projects folded into other projects (at most 200 are kept)' } } }
+  const labels = quickPickItems(withFold).map((i) => i.label)
+  const last = labels.lastIndexOf(`Project ${all.projects.rows[all.projects.rows.length - 1].project}: ${all.projects.rows[all.projects.rows.length - 1].usage}`)
+  assert.deepEqual(labels.slice(last + 1, last + 3), ['⚠ at least — session records older than 45 days are not kept', '3 projects folded into other projects (at most 200 are kept)'])
+  const doc = markdownDocument(withFold)
+  assert.ok(doc.includes('_⚠ at least — session records older than 45 days are not kept_\n\n_3 projects folded into other projects (at most 200 are kept)_'), doc)
+  // The data quality's folded line, in both views alike.
+  const dq = { ...plain, dataQuality: { ...plain.dataQuality, projectsFolded: '3 projects folded into other projects (at most 200 are kept)' } }
+  assert.ok(quickPickItems(dq).some((i) => i.label === '3 projects folded into other projects (at most 200 are kept)'))
+  assert.ok(markdownDocument(dq).includes('- 3 projects folded into other projects (at most 200 are kept)'))
 })

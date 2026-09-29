@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| 期間 | 用量 | 新輸入 | 寫入 5m | 寫入 1h | 快取讀取 | 輸出 | 推理 | 要求 | 快取命中 | 每次要求 | API 費用 |",
   "| Period | Usage | Output | Cache read | Req. |": "| 期間 | 用量 | 輸出 | 快取讀取 | 要求 |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| 期間 | 用量 | 輸出 | 快取讀取 | 要求 | API 費用 |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| 專案 | 用量 | 要求 | 快取命中 | 占比 | 工作階段 |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| 供應商 | 命中率 | 實際節省 | 綜合單價 $/1M | 依據 |",
   "| Provider | Part | Tokens |": "| 供應商 | 部分 | 權杖 |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| 工作階段 | 專案 | 開始時間 | 持續時間 | 用量 | 要求 | 模型 | 快取 |",

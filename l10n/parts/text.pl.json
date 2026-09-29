@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Okres | Zużycie | Świeże wejście | Zapis 5m | Zapis 1h | Odczyt cache | Wyjście | Rozumowanie | Żąd. | Trafienia cache | Na żąd. | Koszt API |",
   "| Period | Usage | Output | Cache read | Req. |": "| Okres | Zużycie | Wyjście | Odczyt cache | Żąd. |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Okres | Zużycie | Wyjście | Odczyt cache | Żąd. | Koszt API |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Projekt | Zużycie | Żądania | Trafienia cache | Udział | Sesje |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Dostawca | Trafialność | Zrealizowana oszczędność | Cena śr. $/1M | Podstawa |",
   "| Provider | Part | Tokens |": "| Dostawca | Część | Tokeny |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Sesja | Projekt | Początek | Czas trwania | Zużycie | Żąd. | Modele | Cache |",

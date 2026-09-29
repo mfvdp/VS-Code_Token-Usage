@@ -35,6 +35,10 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | Subagent share of a Claude window (`Subagents 4.7M of 5.5M counted here (86 %)`) | the hour buckets of the local Claude transcripts over the window's own bounds — its reset minus its length, up to now — the subagent transcripts' against all; for a model window (`7 d Opus`) both figures of that window's models only — the Claude models of its family | **exact** for what was counted on this machine; `≈` on both figures once the window reaches below the hour buckets' roll-up. A share of tokens, **never of the quota**: it is not multiplied into the window's percentage, which covers every client of the account. Claude only, and on no card while the last seven days hold no agent record and no subagent hour bucket | on file change |
 | Agent entries against subagent hour buckets (data quality) | the agents' entries of the last seven days, each at its whole usage, and the subagent hour buckets of the same seven days | **exact**, both — the buckets' figure `≈` once those seven days reach below the hour buckets' roll-up; they differ by construction — an agent entry keeps a whole agent, a bucket the hour of each reply — and neither corrects the other | on file change |
 | Prompt cache of a Claude Code session — cooling, cold since, what a cold start would re-write (`prompt cache cools in 4 m 10 s`) | the status-line bridge's `prompt_cache` for that session; where it does not describe the session's newest request, the transcript's newest cache request plus the one-hour lifetime | **exact** from the bridge; **estimate** from the transcript — `~` on every figure and *estimated from the transcript* in words; the money beside it always `~` — see [Prompt cache](prompt-cache.md) | every rebuild of the dashboard |
+| A project's usage, requests, cache hit and share (the `projects` section, with `tokenPace.attribution` on — 1.14) | the range's hour, day and month buckets, each carrying the key of its project since 1.14 — the Claude Code folder the transcript lies under, a Codex rollout's working directory by the same rule | **exact** for what was counted on this machine; the share is of the range's usage in the view (under a project chip, of the chosen projects') | on file change |
+| A project's API cost | the same buckets × the dated price table | **estimate** (`~`); `⚠` where a bucket of the project has no price on file — the figure is its priced part, a lower bound —, the models table's mark where one was priced from a related model | the same |
+| A project's sessions | the main session records (one per transcript, subagents not counted) whose activity overlaps the range | **exact** while the range starts after the records' horizon; **at least** (`⚠ 12`) once it reaches the day `tokenPace.hourRetentionDays` falls on — older records are not kept — or the oldest record kept at the cap of 2000 | the same |
+| A project's last activity | its newest counted line, whatever the range | **exact** | the same |
 | API cost | token counts × a dated price table | **estimate** (`~`) | every rule dated and sourced — the check days and the pages stand in [The “API cost” column](cost.md) and in the dashboard's footnote (`Prices as of <day>; checked later: <model> (<day>).`, then `Price sources: …`), never on this page, so a re-check changes the table and that page only |
 | Burn rate, ETA, end-of-window, reset retrospective | the stored quota history | **estimate**, with a stated confidence and “based on *N* readings” | needs several readings |
 | Tokens per percentage point (calibration) | quota history ÷ local tokens | **observation about your data**, off by default | – |
@@ -47,6 +51,13 @@ fields: only there do the model-scoped quotas appear (`kind: "weekly_scoped"` wi
 The percentages come from each provider's server and cover **all** clients — desktop app and
 browser included. They cannot be derived from the local token counts, and the extension
 never suggests otherwise.
+
+**Whole hours** (1.14 names the figure). A window's local usage — the `Current 5 h window` and `Current
+7 d window` rows, a Claude window's subagent share, a project's local usage in a window under a project chip —
+is summed over whole hour buckets: the hour the window starts in is counted whole, so up to 60 minutes before
+the window's start are counted in, never more (the seven-day window: at most one hour in 168). The rows carry
+no mark for it: `≈` on such a row says that the oldest hours of the span are already rolled up into day totals
+(a lower bound), and the rounding is the same with or without a filter.
 
 “Usage” means fresh input + cache write + output. Cache reads are listed separately because
 they would otherwise dominate the total by a factor of ~1000.

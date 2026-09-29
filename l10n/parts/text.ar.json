@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| الفترة | الاستخدام | الإدخال الجديد | كتابة 5m | كتابة 1h | قراءة الذاكرة المؤقتة | الإخراج | الاستدلال | طلبات | إصابة الذاكرة المؤقتة | لكل طلب | تكلفة API |",
   "| Period | Usage | Output | Cache read | Req. |": "| الفترة | الاستخدام | الإخراج | قراءة الذاكرة المؤقتة | طلبات |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| الفترة | الاستخدام | الإخراج | قراءة الذاكرة المؤقتة | طلبات | تكلفة API |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| المشروع | الاستخدام | الطلبات | إصابة الذاكرة المؤقتة | النسبة | الجلسات |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| المزود | معدل الإصابة | التوفير المحقق | السعر المختلط $/1M | الأساس |",
   "| Provider | Part | Tokens |": "| المزود | الجزء | الرموز |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| الجلسة | المشروع | البداية | المدة | الاستخدام | طلبات | النماذج | الذاكرة المؤقتة |",

@@ -226,6 +226,8 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     detail: t('generated {0}', vm.generatedAt),
     command: 'tokenPace.showDashboard',
   })
+  // 1.14 §3 A4 rule 10: while a project chip is pressed, the line that says which projects the figures below are of.
+  if (vm.projectFilterText) add({ label: vm.projectFilterText })
 
   group(t('Quota'))
   for (const q of vm.quotas) {
@@ -380,13 +382,23 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
   group(t('Budgets'))
   for (const row of budgetLines(vm)) add(row)
 
+  // 1.14 §3 A4 rule 10 (1.3's parity rule): the page's columns — usage, the cost with its mark, requests, share, the
+  // sessions and cache hit, the last activity —, then the sessions' lower-bound words and the folded line.
   group(t('Projects'))
   for (const p of vm.projects.rows) {
     add({
       label: t('Project {0}: {1}', p.project, p.usage),
-      description: t('{0} session(s) · hit {1}', p.sessions, p.cacheHit),
+      description: [
+        p.cost === '–' ? null : `${p.cost}${p.costLowerBound || p.costFamily ? ' ⚠' : ''}`,
+        t('{0} req', p.requests),
+        t('{0} of usage', p.share),
+        t('{0} session(s) · hit {1}', p.sessions, p.cacheHit),
+      ].filter(Boolean).join(' · '),
+      detail: t('Last activity: {0}', p.lastActive),
     })
   }
+  if (vm.projects.rows.length > 0 && vm.projects.note) add({ label: `⚠ ${vm.projects.note}` })
+  if (vm.projects.rows.length > 0 && vm.projects.folded) add({ label: vm.projects.folded.text })
   group(t('Sessions'))
   for (const s of vm.sessions.rows) {
     add({
@@ -656,6 +668,8 @@ function dataQualityLines(vm: ViewModel): string[] {
       d.history.samples, Math.round(d.history.bytes / 1024), d.history.oldest ?? '–'),
     t('Consent: {0} · {1} · attribution {2} · v{3}', d.consent, d.leader, d.attribution, d.version),
   ]
+  // 1.14 §3 A3 rule 1: the projects folded into other projects, said where the machine's figures are.
+  if (d.projectsFolded) out.push(d.projectsFolded)
   // 1.6 N7: the subagent tokens of the last seven days counted two ways — after the lower-bound
   // line, where the dashboard's list has them — and the note on why the two differ, a line of its own.
   if (d.agents) {
@@ -943,6 +957,8 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
   const shown = viewTitle(vm)
   L.push(`*${vm.range.label} · ${vm.range.from} → ${vm.range.to} · ${t('generated {0}', vm.generatedAt)}`
     + `${shown !== null ? ` · ${t('{0} only', shown)}` : ''}*`)
+  // 1.14 §3 A4 rule 10: the project filter, one line under the range's.
+  if (vm.projectFilterText) L.push('', `*${vm.projectFilterText}*`)
   if (vm.preview) L.push('', `> **${t('Preview data — not a reading.')}**`)
   L.push('')
 
@@ -1226,14 +1242,17 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
   }
 
   if (vm.projects.enabled && vm.projects.rows.length > 0) {
+    // 1.14 §3 A4 rule 10: the page's columns, the cost always (a dash with costs off, as every table of the document).
     L.push(`## ${t('Projects')}`, '')
-    L.push(t('| Project | Usage | Requests | Cache hit | Share | Sessions |'))
-    L.push('|---|---|---|---|---|---|')
+    L.push(t('| Project | Usage | API cost | Requests | Cache hit | Share | Sessions | Last activity |'))
+    L.push('|---|---|---|---|---|---|---|---|')
     for (const p of vm.projects.rows) {
-      L.push(`| ${cell(p.project)} | ${cell(p.usage)} | ${cell(p.requests)} | ${cell(p.cacheHit)} | `
-        + `${cell(p.share)} | ${p.sessions} |`)
+      L.push(`| ${cell(p.project)} | ${cell(p.usage)} | ${cell(p.cost)}${p.costLowerBound || p.costFamily ? ' ⚠' : ''} | `
+        + `${cell(p.requests)} | ${cell(p.cacheHit)} | ${cell(p.share)} | ${cell(p.sessions)} | ${cell(p.lastActive)} |`)
     }
     L.push('')
+    if (vm.projects.note) L.push(`_⚠ ${vm.projects.note}_`, '')
+    if (vm.projects.folded) L.push(`_${vm.projects.folded.text}_`, '')
   }
   if (vm.sessions.enabled && vm.sessions.rows.length > 0) {
     L.push(`## ${t('Sessions')}`, '')

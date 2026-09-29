@@ -31,6 +31,7 @@ import { TimeConfig, clockStamp } from '../src/time'
 import { AgentLaunch, AgentRec, JournalAgent, MainRec, RunLaunch, RunRec, SessionRec } from '../src/types'
 import { durationText } from '../src/stats'
 import { MAX_AGENT_KEY_CHARS } from '../src/viewModel'
+import { AGENT_TABLES_REVISION } from '../src/agg'
 import { ROOT } from './helpers/nls'
 
 /** 2026-09-22 12:00 UTC, a Tuesday. */
@@ -113,9 +114,15 @@ function launch(id: string, over: Partial<AgentLaunch> = {}): AgentLaunch {
   }
 }
 
+/**
+ * 1.14 P5 (pinned and changed: a session record holds its project's key, the tree names it by the label table —
+ * §3 A4 rule 12): the key of the fixture's project, whose label table (`input`'s default) names it `alpha`.
+ */
+const ALPHA_KEY = 'a1a1a1a1a1a1'
+
 function sessionRec(over: Partial<SessionRec> = {}): SessionRec {
   return {
-    source: 'claude', sessionId: S1, project: 'alpha', isSub: false, parent: null,
+    source: 'claude', sessionId: S1, project: ALPHA_KEY, isSub: false, parent: null,
     firstTs: NOW - 2 * HOUR, lastTs: NOW - 2 * MIN, models: ['claude-opus-5'],
     input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0, requests: 0, outputFinal: 0,
     lastCacheTtl: null, lastCacheWriteTs: null, turnGapsMs: [],
@@ -132,6 +139,8 @@ function sessionRec(over: Partial<SessionRec> = {}): SessionRec {
 function input(over: Partial<AgentTreeInput> = {}): AgentTreeInput {
   return {
     agents: [], launches: [], mains: [main()], sessions: [], attribution: 'none', selected: null, mode: 'text', tcfg,
+    // 1.14 P5: the label table and the label mode (names on) — the fixture's project reads `alpha`.
+    projectLabels: { [ALPHA_KEY]: { lastTs: NOW, name: 'alpha' } }, projectNames: true,
     ...over,
   }
 }
@@ -1325,7 +1334,7 @@ test('a session carries its project label only while attribution is on and the t
   // A subagent's row or another provider's session with the same id is not this session.
   const others = rowsOf({
     attribution: 'session',
-    sessions: [sessionRec({ isSub: true, project: 'sub' }), sessionRec({ source: 'codex', project: 'codex' })],
+    sessions: [sessionRec({ isSub: true, project: 'b2b2b2b2b2b2' }), sessionRec({ source: 'codex', project: 'c3c3c3c3c3c3' })],
   })
   assert.equal(others.sub, null)
   assert.deepEqual(others.rows.find((r) => r.label === 'Project'), { label: 'Project', value: '–' })
@@ -4031,4 +4040,24 @@ test('1.7 F2: the export reads the forest — the same agents with and without t
   const views = agentRecordViews(input(over), NOW)
   assert.deepEqual(views, agentRecordViews(input({ ...over, split: false }), NOW))
   assert.deepEqual(views.map((v) => v.agentId).sort(), ['aaaa0001', 'bbbb0001', 'cccc0001', 'dddd0001'])
+})
+
+test('1.14 §3 A4 rule 12: a session root names its project by projectLabel of its record\'s key — the folder\'s name with names on, the pseudonym without, (no project) for the unattributed key; a record holding anything but a key names none; no agent table changes', () => {
+  const subOf = (over: Partial<AgentTreeInput>): string | null => build({ attribution: 'project', ...over }).roots[0].sub
+  assert.equal(subOf({ sessions: [sessionRec()] }), 'alpha')
+  assert.equal(subOf({ sessions: [sessionRec()], projectNames: false }), `p:${ALPHA_KEY}`)
+  // A name in the table is shown only with names on; a key the table does not hold is its pseudonym.
+  assert.equal(subOf({ sessions: [sessionRec()], projectLabels: {} }), `p:${ALPHA_KEY}`)
+  assert.equal(subOf({ sessions: [sessionRec({ project: '' })] }), '(no project)')
+  assert.equal(subOf({ sessions: [sessionRec({ project: '*' })] }), 'other projects')
+  // A record from before 1.14 (a basename, a hash of another shape) or anything else is no key: no project.
+  for (const junk of ['alpha', '/home/t/alpha', 'p:a1a1a1a1a1a1', 'A1A1A1A1A1A1', 42]) {
+    assert.equal(subOf({ sessions: [sessionRec({ project: junk as string })] }), null, String(junk))
+  }
+  // The details' Project row says the same; attribution none names nothing, a label table or not.
+  const rows = agentDetails(input({ attribution: 'project', sessions: [sessionRec()], projectNames: false }), NOW, build({ attribution: 'project', sessions: [sessionRec()] }).roots[0].key)?.rows ?? []
+  assert.deepEqual(rows.find((r) => r.label === 'Project'), { label: 'Project', value: `p:${ALPHA_KEY}` })
+  assert.equal(subOf({ attribution: 'none', sessions: [sessionRec()] }), null)
+  // The tree reads the label table through its input: its own tables are 1.13's.
+  assert.equal(AGENT_TABLES_REVISION, 10)
 })

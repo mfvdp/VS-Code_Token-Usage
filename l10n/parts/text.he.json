@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| תקופה | שימוש | קלט חדש | כתיבה 5m | כתיבה 1h | קריאה מהמטמון | פלט | חשיבה | בקש׳ | פגיעה במטמון | לבקשה | עלות API |",
   "| Period | Usage | Output | Cache read | Req. |": "| תקופה | שימוש | פלט | קריאה מהמטמון | בקש׳ |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| תקופה | שימוש | פלט | קריאה מהמטמון | בקש׳ | עלות API |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| פרויקט | שימוש | בקשות | פגיעה במטמון | חלק | סשנים |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| ספק | שיעור פגיעה | חיסכון בפועל | מחיר משוקלל $/1M | בסיס |",
   "| Provider | Part | Tokens |": "| ספק | חלק | טוקנים |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| סשן | פרויקט | התחלה | משך | שימוש | בקש׳ | מודלים | מטמון |",

@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Περίοδος | Χρήση | Νέα είσοδος | Εγγραφή 5m | Εγγραφή 1h | Ανάγνωση cache | Έξοδος | Συλλογισμός | Αιτ. | Επιτυχία cache | Ανά αίτ. | Κόστος API |",
   "| Period | Usage | Output | Cache read | Req. |": "| Περίοδος | Χρήση | Έξοδος | Ανάγνωση cache | Αιτ. |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Περίοδος | Χρήση | Έξοδος | Ανάγνωση cache | Αιτ. | Κόστος API |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Έργο | Χρήση | Αιτήματα | Επιτυχία cache | Μερίδιο | Συνεδρίες |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Πάροχος | Ποσοστό επιτυχίας | Πραγματοποιημένη εξοικονόμηση | Μικτή τιμή $/1M | Βάση |",
   "| Provider | Part | Tokens |": "| Πάροχος | Μέρος | Tokens |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Συνεδρία | Έργο | Έναρξη | Διάρκεια | Χρήση | Αιτ. | Μοντέλα | Cache |",

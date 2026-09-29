@@ -514,8 +514,16 @@ key on the list, then `node scripts/merge-l10n.mjs`, `node scripts/nls-sources.m
    (`VS-Code_Tokens`) or a pseudonym (`p:8f31c0a4e2b1`) —, never translated, inflected or declined; write the sentence
    around it so that it reads with either, as with a session's name
    ([the section on names](#session-names-and-product-names-in-placeholders-112)). The keys whose placeholder receives a
-   label are `PROJECT_LABEL_KEYS` in `test/l10n.languages.test.ts`; the package that adds them lists them here. Your words
-   for project, session, filter and chip stay the ones of 1.11–1.13, and `projects ({0}) ▾` takes your form of
+   label are `PROJECT_LABEL_KEYS` in `test/l10n.languages.test.ts`, which a scan of every `t()` and `tr()` call holds to the
+   code: the slot holds a folder's name as written (Latin letters, digits, `_ . : @ -`) or `p:8f31c0a4e2b1` — or the two
+   labels of 1.14, `(no project)` and `other projects`, your words for them — write a form that reads with both (a label,
+   a colon, brackets); never inflect it, never translate it:
+   * `Project {0}: {1}` ({0}) — the Quick Pick's project row
+   * `Top project {0}: {1}` ({0}) — the Records' top projects in the Quick Pick
+   * `project filter: {0}` ({0}) — the line that states the project filter; the slot holds the chosen projects' labels
+     joined by your `{0}, {1}`
+
+   Your words for project, session, filter and chip stay the ones of 1.11–1.13, and `projects ({0}) ▾` takes your form of
    `models ({0}) ▾`.
 3. **The list separator** (`{0}, {1}`, `translate`): the comma your language writes between the items of a list of names:
    Arabic and Persian `،`, Chinese and Japanese `、` or `,` — your choice, named in your report. Never a direction mark
@@ -588,6 +596,8 @@ that reads with both: a label (`Recorded: {0}`), a colon or brackets; never a pr
 * the page's words a screen reader gets for a row's clock:
   * `silent since {0}` ({0})
   * `since {0}` ({0})
+* a project's last activity — the Quick Pick's project row:
+  * `Last activity: {0}` ({0})
 
 A key that takes a clock of today alone is not one — `{0} finished a turn at {1}`, `This channel works: Token Pace can
 reach it. Sent at {0}.` —: its slot never holds a date.

@@ -34,6 +34,12 @@ export interface BucketFilter {
   models?: string[]
   isSub?: boolean
   tier?: Tier
+  /**
+   * 1.14 §3 A4 rule 1 (§0a.8): the project filter — project keys (project.ts `PROJECT_KEY_RE` or `OTHER_PROJECTS`).
+   * Empty or left out passes every bucket, a none bucket too; a non-empty filter passes the buckets whose `project` is
+   * in it, so a bucket without one (attribution none) passes an empty filter only.
+   */
+  projects?: string[]
 }
 
 /** One sum of hour buckets over `[fromMs, toMs)`, as `Aggregator.sumHours` takes it — a query of `sumHoursMany`. */
@@ -3512,6 +3518,7 @@ export class Aggregator {
     if (f.isSub !== undefined && b.isSub !== f.isSub) return false
     if (f.tier && b.tier !== f.tier) return false
     if (f.models && f.models.length && !f.models.includes(b.model)) return false
+    if (f.projects && f.projects.length && (b.project === undefined || !f.projects.includes(b.project))) return false
     return true
   }
 

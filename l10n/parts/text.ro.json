@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Perioadă | Utilizare | Intrare nouă | Scriere 5m | Scriere 1h | Citire din cache | Ieșire | Raționament | Cer. | Reușită cache | Per cer. | Cost API |",
   "| Period | Usage | Output | Cache read | Req. |": "| Perioadă | Utilizare | Ieșire | Citire din cache | Cer. |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Perioadă | Utilizare | Ieșire | Citire din cache | Cer. | Cost API |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Proiect | Utilizare | Cereri | Reușită cache | Pondere | Sesiuni |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Furnizor | Rată de reușită | Economie realizată | Preț mixt $/1M | Bază |",
   "| Provider | Part | Tokens |": "| Furnizor | Parte | Tokenuri |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Sesiune | Proiect | Început | Durată | Utilizare | Cer. | Modele | Cache |",

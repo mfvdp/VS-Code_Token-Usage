@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Jakso | Käyttö | Uusi syöte | Kirjoitus 5m | Kirjoitus 1h | Välimuistiluku | Tuloste | Päättely | Pyynnöt | Välimuistiosuma | Per pyyntö | API-kustannus |",
   "| Period | Usage | Output | Cache read | Req. |": "| Jakso | Käyttö | Tuloste | Välimuistiluku | Pyynnöt |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Jakso | Käyttö | Tuloste | Välimuistiluku | Pyynnöt | API-kustannus |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Projekti | Käyttö | Pyynnöt | Välimuistiosuma | Osuus | Istunnot |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Palveluntarjoaja | Osumaprosentti | Toteutunut säästö | Keskihinta $/1M | Peruste |",
   "| Provider | Part | Tokens |": "| Palveluntarjoaja | Osa | Tokenit |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Istunto | Projekti | Alkoi | Kesto | Käyttö | Pyynnöt | Mallit | Välimuisti |",

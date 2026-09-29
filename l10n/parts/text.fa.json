@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| دوره | مصرف | ورودی تازه | نوشتن 5m | نوشتن 1h | خواندن کش | خروجی | استدلال | درخواست | اصابت کش | هر درخواست | هزینهٔ API |",
   "| Period | Usage | Output | Cache read | Req. |": "| دوره | مصرف | خروجی | خواندن کش | درخواست |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| دوره | مصرف | خروجی | خواندن کش | درخواست | هزینهٔ API |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| پروژه | مصرف | درخواست‌ها | اصابت کش | سهم | جلسه‌ها |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| ارائه‌دهنده | نرخ اصابت | صرفه‌جویی تحقق‌یافته | ترکیبی $/1M | مبنا |",
   "| Provider | Part | Tokens |": "| ارائه‌دهنده | بخش | توکن‌ها |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| جلسه | پروژه | آغاز | مدت | مصرف | درخواست | مدل‌ها | کش |",

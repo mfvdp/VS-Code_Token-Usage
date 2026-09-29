@@ -18,6 +18,7 @@ import { costOfBucket } from '../src/prices'
 import { LOCAL_BLOCK_HOURS, RecordsWords, StatsCtx, localBlock, records } from '../src/stats'
 import { markdownDocument, quickPickItems } from '../src/textViews'
 import { DayRange, rangeFor } from '../src/time'
+import { projectKeyOf, slugOf } from '../src/project'
 import { AgentRec, Bucket, MainRec, SessionRec, Snapshot, emptyBucket } from '../src/types'
 import { buildViewModel } from '../src/viewModel'
 import { NOW, TODAY, buildAgg, makeConfig, makeInput, timeConfig } from './fixtures/viewFixtures'
@@ -192,13 +193,19 @@ test('projects and sessions stay empty while attribution is off', () => {
   const inferred = records(ctxOf(buildAgg()), range('30d'), 5, '2026-07-01')
   assert.equal(inferred.attributionOn, false)
   assert.deepEqual(inferred.topSessions, [])
-  // And with attribution on there are rows, each with the caveat that they are lifetimes.
-  const on = records(ctxOf(buildAgg('project'), { attribution: 'project' }), range('30d'), 5, '2026-07-01')
+  // And with attribution on there are rows, the sessions with the caveat that they are lifetimes. 1.14 P5 (pinned and
+  // changed: the top projects are the range's buckets — no session count beside them, §3 A4 rule 4 —, named by their
+  // label: the folder's name with names on, the pseudonym without; the note speaks of sessions only).
+  const on = records(ctxOf(buildAgg('project'), { attribution: 'project', projectNames: true }), range('30d'), 5, '2026-07-01')
   assert.equal(on.attributionOn, true)
   assert.deepEqual(on.topProjects.map((p) => p.label), ['alpha', 'beta'])
-  assert.deepEqual(on.topProjects.map((p) => p.detail), ['1 session', '1 session'])
+  assert.deepEqual(on.topProjects.map((p) => p.detail), [null, null])
   assert.deepEqual(on.topSessions.map((s) => [s.label, s.detail]), [['sess-alpha', 'alpha'], ['thread-1', 'beta']])
-  assert.match(String(on.sessionNote), /whole lifetime/)
+  assert.match(String(on.sessionNote), /^sessions count each session’s whole lifetime/)
+  const hashed = records(ctxOf(buildAgg('project'), { attribution: 'project' }), range('30d'), 5, '2026-07-01')
+  for (const e of [...hashed.topProjects.map((p) => p.label), ...hashed.topSessions.map((s) => String(s.detail))]) {
+    assert.match(e, /^p:[0-9a-f]{12}$/)
+  }
 })
 
 /** Two session records, enough to prove the attribution gate is the setting and not the data. */
@@ -630,4 +637,57 @@ test('1.11 B1/B3 (Review 2 F4): the ⚠ legend stands whenever an hour is a floo
   const plain = records(ctxOf(fromBuckets([written(2, 500_000)]), { sources: ['claude'] }), range('30d'), 5, '2026-07-01', true, WORDS)
   assert.equal(plain.cacheHours[0].floor, false)
   assert.equal(plain.recordNotes.some((n) => n.startsWith('⚠ = a lower bound')), false, plain.recordNotes.join('\n'))
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 §3 A4 rule 4 (P5): the top projects from the range's buckets, the sessions of the project filter
+// ---------------------------------------------------------------------------
+
+/** buildAgg's two projects: the Claude folder /home/t/alpha and the Codex rollout started in /home/t/beta (salt 'salt'). */
+const ALPHA = projectKeyOf('salt', '-home-t-alpha')
+const BETA = projectKeyOf('salt', slugOf('/home/t/beta'))
+
+test('1.14 §3 A4 rule 4: the top projects are the range\'s buckets — the usage and share of the range, the priced cost by the models\' rule —, and a project chip narrows every table of the records to it', () => {
+  const agg = buildAgg('project')
+  const ctx = ctxOf(agg, { attribution: 'project', projectNames: true })
+  const all = records(ctx, range('30d'), 5, '2026-07-01')
+  const byLabel = new Map(all.topModels.map((m) => [m.label, m]))
+  assert.ok(byLabel.size > 0)
+  // Alpha is Claude's usage of the range, beta Codex's: the same figures the top models add up to per provider.
+  assert.deepEqual(all.topProjects.map((p) => p.label), ['alpha', 'beta'])
+  const shareSum = all.topProjects.reduce((n, p) => n + parseInt(p.share, 10), 0)
+  assert.ok(shareSum >= 99 && shareSum <= 101, String(shareSum))
+  // Alpha has a bucket with no price (claude-experimental-x): a dash, as its top model has; beta's cost is priced.
+  assert.equal(all.topProjects[0].cost, '–')
+  assert.match(all.topProjects[1].cost, /^~\$/)
+  assert.equal(all.topProjects[1].cost, all.topModels.find((m) => m.label === 'gpt-5.3-codex')?.cost)
+  // Under beta's chip: its buckets only — top models, peak day, top projects, top sessions.
+  const beta = records(ctxOf(agg, { attribution: 'project', projectNames: true, projects: [BETA] }), range('30d'), 5, '2026-07-01')
+  assert.deepEqual(beta.topProjects.map((p) => [p.label, p.share]), [['beta', '100 %']])
+  assert.deepEqual(beta.topModels.map((m) => m.label), ['gpt-5.3-codex'])
+  assert.deepEqual(beta.topSessions.map((s) => [s.label, s.detail]), [['thread-1', 'beta']])
+  // The peak day is Codex's larger day (2 September: 3K fresh + 3K output), not Claude's today.
+  assert.deepEqual([beta.peakDay?.day, beta.peakDay?.usage], ['2026-09-02', '6K'])
+  assert.notEqual(all.peakDay?.day, '2026-09-02')
+  // Both chips: the two again; a chip of a project without usage: nothing.
+  assert.deepEqual(records(ctxOf(agg, { attribution: 'project', projects: [ALPHA, BETA] }), range('30d'), 5, '2026-07-01').topProjects.length, 2)
+  const none = records(ctxOf(agg, { attribution: 'project', projects: ['0123456789ab'] }), range('30d'), 5, '2026-07-01')
+  assert.deepEqual([none.peakDay, none.topModels, none.topProjects, none.topSessions, none.sessionNote], [null, [], [], [], null])
+})
+
+test('1.14 §3 A4 rule 4: under a project chip the longest and largest sessions are the chosen project\'s — an Agents-table session by its main transcript\'s record; one without a record is in no project', () => {
+  const base = sessionWorld()
+  const rec = (sessionId: string, project: string): SessionRec => ({
+    source: 'claude', sessionId, project, isSub: false, parent: null, firstTs: NOW - H, lastTs: NOW, models: ['claude-opus-4-6'],
+    input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0, requests: 0, outputFinal: 0,
+    lastCacheTtl: null, lastCacheWriteTs: null, turnGapsMs: [],
+  })
+  const agg = Object.create(base) as Aggregator
+  agg.sessions = () => [rec('aaaa1111-0000', ALPHA), rec('bbbb2222-0000', BETA), rec('dddd4444-0000', ALPHA)]
+  const ids = (projects: string[]): string[] => records(ctxOf(agg, { sources: ['claude'], attribution: 'project', projects }),
+    custom('2026-08-31', TODAY), 5, '2026-07-01', true, WORDS).longestSessions.map((s) => s.sessionId).sort()
+  assert.deepEqual(ids([]), ['aaaa1111-0000', 'bbbb2222-0000', 'dddd4444-0000'])
+  assert.deepEqual(ids([ALPHA]), ['aaaa1111-0000', 'dddd4444-0000'])
+  assert.deepEqual(ids([BETA]), ['bbbb2222-0000'])
+  assert.deepEqual(ids(['0123456789ab']), [])
 })

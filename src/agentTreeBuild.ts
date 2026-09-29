@@ -41,13 +41,14 @@ import {
 import { billable, outcomeOfStatus } from './agg'
 import { listOf, t } from './i18n'
 import { PricingOptions, costOfBucket, normalizeModel } from './prices'
+import { isProjectKey, projectLabel } from './project'
 import { compact, full } from './render'
 import { cleanRunRecord } from './runRecord'
 import { costText, durationText, freshInput, tokens } from './stats'
 import { TimeConfig, ageText, calendarDayOf, calendarWeekdayOf, clockStamp, dayOf, formatTime, weekdayWords } from './time'
 import {
-  AgentLaunch, AgentRec, Attribution, Bucket, CompactionRec, Effort, JournalAgent, LaunchStatus, MainRec, RecordedOutcome,
-  RejectedRequest, RunLaunch, RunRec, RunRecordFields, SessionRec, emptyBucket,
+  AgentLaunch, AgentRec, Attribution, Bucket, CompactionRec, Effort, JournalAgent, LaunchStatus, MainRec, ProjectLabel,
+  RecordedOutcome, RejectedRequest, RunLaunch, RunRec, RunRecordFields, SessionRec, emptyBucket,
 } from './types'
 
 /** Everything the tree is built from. The view model fills it from the aggregator. */
@@ -55,9 +56,16 @@ export interface AgentTreeInput {
   agents: readonly AgentRec[]
   launches: readonly AgentLaunch[]
   mains: readonly MainRec[]
-  /** The attribution table — the only place a session's project label comes from. */
+  /** The attribution table — the only place a session's project comes from (its record's key, 1.14 §0a.6). */
   sessions: readonly SessionRec[]
   attribution: Attribution
+  /**
+   * 1.14 §3 A4 rule 12: the label table (`Aggregator.projects()`) and the label mode (`showProjectNames: basename`) — a
+   * session root names its project by `projectLabel` of its record's key: the folder's name with names on, else the
+   * pseudonym `p:` + the key. Absent: no names, the pseudonym. No agent table changes (AGENT_TABLES_REVISION stays 10).
+   */
+  projectLabels?: Readonly<Record<string, ProjectLabel>>
+  projectNames?: boolean
   /**
    * The workflow runs as their journals record them (1.6 D2, D7): which agents each started, and
    * what the journal says of their ends. Absent means none.
@@ -1810,10 +1818,13 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
 
   const projects = new Map<string, string>()
   if (input.attribution !== 'none') {
+    const labels = input.projectLabels ?? {}
+    const names = input.projectNames === true
     for (const s of input.sessions ?? []) {
       if (!s || s.source !== 'claude' || s.isSub) continue
       const id = text(s.sessionId)
-      const project = text(s.project)
+      // A record's key is '' (unattributed), twelve hex digits or other projects' '*' — never a name (1.14 §0a.6).
+      const project = isProjectKey(s.project) ? projectLabel(s.project, labels, names) : null
       if (id !== null && project !== null && !projects.has(id)) projects.set(id, project)
     }
   }

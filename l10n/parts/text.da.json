@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Periode | Forbrug | Ny input | Skrivning 5m | Skrivning 1h | Cache læst | Output | Ræsonnement | Foresp. | Cache-hit | Pr. foresp. | API-omkostninger |",
   "| Period | Usage | Output | Cache read | Req. |": "| Periode | Forbrug | Output | Cache læst | Foresp. |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Periode | Forbrug | Output | Cache læst | Foresp. | API-omkostninger |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Projekt | Forbrug | Forespørgsler | Cache-hit | Andel | Sessioner |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Udbyder | Hitrate | Realiseret besparelse | Blandingspris $/1M | Grundlag |",
   "| Provider | Part | Tokens |": "| Udbyder | Del | Tokens |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Session | Projekt | Startet | Varighed | Forbrug | Foresp. | Modeller | Cache |",

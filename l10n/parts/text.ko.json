@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| 기간 | 사용량 | 새 입력 | 쓰기 5m | 쓰기 1h | 캐시 읽기 | 출력 | 추론 | 요청 | 캐시 적중 | 요청당 | API 비용 |",
   "| Period | Usage | Output | Cache read | Req. |": "| 기간 | 사용량 | 출력 | 캐시 읽기 | 요청 |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| 기간 | 사용량 | 출력 | 캐시 읽기 | 요청 | API 비용 |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| 프로젝트 | 사용량 | 요청 | 캐시 적중 | 비중 | 세션 |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| 공급자 | 적중률 | 실현 절감액 | 혼합 단가 $/1M | 근거 |",
   "| Provider | Part | Tokens |": "| 공급자 | 부분 | 토큰 |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| 세션 | 프로젝트 | 시작 | 소요 시간 | 사용량 | 요청 | 모델 | 캐시 |",

@@ -17,18 +17,19 @@
 
 import { SOURCES, SOURCE_TITLE, maybeAdapterFor } from './adapters'
 import { AGENT_RETENTION_DAYS, SESSION_ACTIVE_MS } from './agentTree'
-import { Aggregator, BucketFilter, HourQuery, Metric, billable } from './agg'
+import { Aggregator, BucketFilter, HourQuery, Metric, SESSION_CAP, billable } from './agg'
 import { rangeArrow } from './bidi'
 import { listOf, locale, t } from './i18n'
 // Type only: the chart carries the setting's value, not the module that reads settings.
 import type { ChartModelStyle } from './config'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, isCustomPricing, priceOf } from './prices'
+import { OTHER_PROJECTS, UNATTRIBUTED, projectLabel } from './project'
 import { Provenance, compact, decimalText, deltaBadge, estimate, full, percentOf, usd } from './render'
 import {
   DayRange, TimeConfig, Zone, addDays, calendarDayOf, clockStamp, dayCount, dayOf, dayOfHour, daysBetween, formatTime,
   localHourOfDay, weekdayOf,
 } from './time'
-import { AgentRec, Attribution, Bucket, MainRec, SessionRec, Source, Tier, emptyBucket } from './types'
+import { AgentRec, Attribution, Bucket, MainRec, ProjectLabel, SessionRec, Source, Tier, emptyBucket } from './types'
 
 // ---------------------------------------------------------------------------
 // Shapes the view model hands on unchanged (it re-exports these types).
@@ -159,15 +160,35 @@ export interface ModelRow {
   turnP90: string | null
 }
 
+/**
+ * 1.14 §3 A4 rule 2: one row of the Projects table — the range's buckets of one project key, under the provider switch,
+ * the model chips and the project chips.
+ */
 export interface ProjectRow {
+  /** The project key (project.ts `PROJECT_KEY_RE` or `OTHER_PROJECTS`): the chip's `data-project`, the row's identity — never shown. */
+  key: string
+  /** `projectLabel`: the folder's name under `showProjectNames: basename`, else `p:` + the key; `(no project)`, `other projects`. */
   project: string
   usage: string
+  /** The priced sum of the buckets (`costOfBucketOn`) with `showCost`, else '–'. */
   cost: string
+  /**
+   * A bucket of the project has no price on file (none, or a fast rate unknown): `cost` is the priced part, a lower bound
+   * (⚠ and the footnote). Only beside a figure — a dash already says no cost is known.
+   */
+  costLowerBound: boolean
+  /** A bucket was priced from a related model (the family fallback) — the models table's mark; only beside a figure. */
+  costFamily: boolean
   requests: string
   cacheHit: string
-  /** Already formatted ("42 %"), and '–' when there is no denominator to divide by. */
+  /** Already formatted ("42 %") — of the range's usage in the view —, and '–' when there is no denominator to divide by. */
   share: string
-  sessions: number
+  /** The main sessions whose activity overlaps the range (§3 A4 rule 3): a count, or '⚠ 12' when it is a lower bound. */
+  sessions: string
+  /** The range starts on or before the day the session records' horizon falls on: `sessions` is at least that many. */
+  sessionsLowerBound: boolean
+  /** `clockStamp` of the project's newest counted line ever (§7a Q22: a fact of the project, not of the range), or '–'. */
+  lastActive: string
 }
 
 export interface SessionRow {
@@ -485,6 +506,23 @@ export interface StatsCtx {
   sources: Source[]
   /** Model filter; empty means every model. */
   models: string[]
+  /**
+   * 1.14 §3 A4 rule 1 (§0a.8): the project filter — project keys; empty or left out means every project. A bucket
+   * predicate beside `models`: every bucket sum of the context follows it (`filterFor`, `bucketsIn`, the hour spans), and
+   * so do the session records the context reads (by their key). The sections a project does not reach are handed a
+   * context without it (viewModel.ts `projectFilterIgnoredBy`).
+   */
+  projects?: string[]
+  /**
+   * 1.14 §3 A1 rule 4: whether a project is shown by its folder's name — `showProjectNames: basename`. Left out, by its
+   * pseudonym: the label table holds a name only under basename (§3 A7), and this is the second lock (`projectLabel`).
+   */
+  projectNames?: boolean
+  /**
+   * 1.14 §3 A4 rule 3: `tokenPace.hourRetentionDays`, the session records' horizon (§3 A3 rule 3). Left out, a session
+   * count is not called a lower bound for the horizon (the record cap still makes one).
+   */
+  hourRetentionDays?: number
   showCost: boolean
   /**
    * The attribution setting, when the caller states it. Left out it is inferred from the
@@ -567,7 +605,9 @@ export class HourSums {
 function hourQueryKey(q: HourQuery): string {
   const f = q.filter ?? {}
   const models = f.models && f.models.length > 0 ? f.models.join('\u0001') : ''
-  return `${q.fromMs}|${q.toMs}|${f.source ?? ''}|${f.isSub === undefined ? '' : String(f.isSub)}|${f.tier ?? ''}|${models}`
+  // 1.14 §3 A4 rule 1: two project filters are two sums — the memo tells them apart.
+  const projects = f.projects && f.projects.length > 0 ? f.projects.join('\u0001') : ''
+  return `${q.fromMs}|${q.toMs}|${f.source ?? ''}|${f.isSub === undefined ? '' : String(f.isSub)}|${f.tier ?? ''}|${models}|${projects}`
 }
 
 /** An hour sum through the build's shared sums when the context has them, else on its own. */
@@ -624,7 +664,28 @@ export function filterFor(ctx: StatsCtx, source?: Source): BucketFilter {
   const f: BucketFilter = {}
   if (source) f.source = source
   if (ctx.models.length > 0) f.models = ctx.models
+  if (ctx.projects && ctx.projects.length > 0) f.projects = ctx.projects
   return f
+}
+
+/** 1.14 §3 A4 rule 1: the context's project filter as a set, or null for every project. */
+function projectSet(ctx: StatsCtx): Set<string> | null {
+  return ctx.projects && ctx.projects.length > 0 ? new Set(ctx.projects) : null
+}
+
+/**
+ * 1.14 §3 A4 rule 1: a bucket or a session record in the project filter — every one while the filter is empty (a none
+ * bucket too), else those whose key is in it; a bucket without a key (attribution none) is in no non-empty filter.
+ */
+function inProjects(set: Set<string> | null, key: string | undefined): boolean {
+  return set === null || (key !== undefined && set.has(key))
+}
+
+/** 1.14: the session records of the context's project filter. */
+function sessionsIn(ctx: StatsCtx): SessionRec[] {
+  const set = projectSet(ctx)
+  const all = ctx.agg.sessions()
+  return set === null ? all : all.filter((s) => inProjects(set, s.project))
 }
 
 /**
@@ -677,9 +738,11 @@ function monthLast(month: string): string {
 export function bucketsIn(ctx: StatsCtx, from: string, to: string, source?: Source): Bucket[] {
   const out: Bucket[] = []
   const models = ctx.models.length > 0 ? new Set(ctx.models) : null
+  const projects = projectSet(ctx)
   for (const b of ctx.buckets ?? ctx.agg.all()) {
     if (source ? b.source !== source : !ctx.sources.includes(b.source)) continue
     if (models && !models.has(b.model)) continue
+    if (!inProjects(projects, b.project)) continue
     if (b.res === 'm') {
       if (`${b.day}-01` < from || monthLast(b.day) > to) continue
     } else {
@@ -1680,7 +1743,8 @@ export function modelTable(
   showListPrice = false,
 ): { rows: ModelRow[]; total: number; hidden: number; sort: ModelSort } {
   const list = bucketsIn(ctx, range.from, range.to)
-  const sessions = ctx.agg.sessions()
+  // 1.14: the turn figures of the project filter's sessions, as the buckets are the filter's.
+  const sessions = sessionsIn(ctx)
   const groups = new Map<string, {
     model: string; source: Source; isSub: boolean; tier: Tier
     usage: number; fresh: number; cacheWrite: number; cacheWrite1h: number; cacheRead: number
@@ -2167,6 +2231,12 @@ export function records(
   const models = new Map<string, { label: string; detail: string | null; usage: number; cost: number; unpriced: boolean }>()
   /** 1.11 B3: the range's hour buckets that wrote to the cache, by their UTC hour. */
   const cacheHourAcc = new Map<number, CacheHourAcc>()
+  const on = attributionOn(ctx)
+  /**
+   * 1.14 §3 A4 rule 4: with attribution on, the range's buckets by project — usage and the priced cost by the models'
+   * rule below (a bucket without a price makes the group's cost a dash). No longer the sessions' lifetime sums.
+   */
+  const projectGroups = new Map<string, { usage: number; cost: number; unpriced: boolean }>()
   let totalUsage = 0
   let excluded = 0
   for (const b of bucketsIn(ctx, range.from, range.to)) {
@@ -2197,6 +2267,17 @@ export function records(
     g.usage += use
     if (c && !c.unpriced) g.cost += c.usd
     else g.unpriced = true
+    if (on) {
+      const key = b.project ?? UNATTRIBUTED
+      let p = projectGroups.get(key)
+      if (!p) {
+        p = { usage: 0, cost: 0, unpriced: false }
+        projectGroups.set(key, p)
+      }
+      p.usage += use
+      if (c && !c.unpriced) p.cost += c.usd
+      else p.unpriced = true
+    }
   }
 
   let peakDay: RecordsData['peakDay'] = null
@@ -2244,28 +2325,27 @@ export function records(
     cap(models.size),
   )
 
-  const on = attributionOn(ctx)
-  const projects = new Map<string, { usage: number; sessions: number }>()
   const sessions: { label: string; detail: string | null; usage: number; cost: string }[] = []
   let sessionTotal = 0
+  // 1.14 §3 A1 rule 4: a project by its label — its folder's name only under basename.
+  const labels: Readonly<Record<string, ProjectLabel>> = on ? ctx.agg.projects() : {}
+  const names = ctx.projectNames === true
   if (on) {
     const filter = ctx.models.length > 0 ? new Set(ctx.models) : null
+    const inFilter = projectSet(ctx)
     for (const rec of ctx.agg.sessions()) {
       if (!ctx.sources.includes(rec.source)) continue
       if (filter && !rec.models.some((m) => filter.has(m))) continue
+      // 1.14 §3 A4 rule 4: the sessions of the project filter.
+      if (!inProjects(inFilter, rec.project)) continue
       // A session is in the range when it was running in it. Its counters are lifetime
-      // counters — the only per-hour slices it keeps are pruned to about a week — so the
-      // row is stated as a lifetime total rather than sliced into a number nobody measured.
+      // counters — a session record keeps no per-hour slice — so the row is stated as a
+      // lifetime total rather than sliced into a number nobody measured.
       if (dayOf(rec.lastTs, ctx.tcfg) < range.from || dayOf(rec.firstTs, ctx.tcfg) > range.to) continue
       const use = billable(emptySession(rec))
       if (use <= 0) continue
-      // 1.14 P4: the record holds the project key; the rows show its label (P5 builds them from the buckets).
-      const g = projects.get(rec.project) ?? { usage: 0, sessions: 0 }
-      g.usage += use
-      g.sessions++
-      projects.set(rec.project, g)
       // No per-day model split on a session record, so a per-session cost would be a guess.
-      sessions.push({ label: rec.sessionId, detail: ctx.agg.projectLabelOf(rec.project), usage: use, cost: '–' })
+      sessions.push({ label: rec.sessionId, detail: projectLabel(rec.project, labels, names), usage: use, cost: '–' })
       sessionTotal += use
     }
   }
@@ -2279,24 +2359,26 @@ export function records(
     peakDay,
     streak,
     topModels,
-    // The shares below are shares of the listed sessions, never of the bucket total: session
+    // 1.14 §3 A4 rule 4: the projects are the range's buckets, as the models are — their shares of the same total,
+    // their cost priced by the same rule; the Projects table has their sessions.
+    topProjects: topOf(
+      [...projectGroups.entries()].map(([key, g]) => ({
+        label: projectLabel(key, labels, names),
+        detail: null,
+        usage: g.usage,
+        cost: ctx.showCost && !g.unpriced ? costText(g.cost) : '–',
+      })),
+      totalUsage,
+      cap(projectGroups.size),
+    ),
+    // The sessions' shares are shares of the listed sessions, never of the bucket total: session
     // counters run over a lifetime and bucket sums over the range, and dividing one by the
     // other would invent a percentage of two different things.
-    topProjects: topOf(
-      [...projects.entries()].map(([key, g]) => ({
-        label: ctx.agg.projectLabelOf(key),
-        detail: g.sessions === 1 ? t('{0} session', g.sessions) : t('{0} sessions', g.sessions),
-        usage: g.usage,
-        cost: '–',
-      })),
-      sessionTotal,
-      cap(projects.size),
-    ),
     topSessions: topOf(sessions, sessionTotal, cap(sessions.length)),
     attributionOn: on,
     note,
     sessionNote: sessions.length > 0
-      ? t('projects and sessions count each session’s whole lifetime, which can reach outside this range')
+      ? t('sessions count each session’s whole lifetime, which can reach outside this range')
       : null,
     ...newRecords(ctx, range, cap, words, {
       watched: (day) => !(day > today || (coverage !== null && day < coverage)),
@@ -2405,12 +2487,24 @@ function endedSessions(ctx: StatsCtx, range: DayRange): { ended: EndedSession[];
   }
 
   const filter = ctx.models.length > 0 ? new Set(ctx.models) : null
+  // 1.14 §3 A4 rule 4: under a project filter, the sessions of the chosen projects — an agent-table session has no key
+  // of its own; its main transcript's session record has (a project filter exists only with attribution on, and the
+  // records outlive the agent tables: hourRetentionDays against AGENT_RETENTION_DAYS). A session without a record is
+  // in no project the filter names.
+  const inFilter = projectSet(ctx)
+  const projectOf = new Map<string, string>()
+  if (inFilter !== null) {
+    for (const s of ctx.agg.sessions()) {
+      if (s.source === 'claude' && !s.isSub && !projectOf.has(s.sessionId)) projectOf.set(s.sessionId, s.project)
+    }
+  }
   const ended: EndedSession[] = []
   let active = 0
   for (const m of byId.values()) {
     if (m.lastTs < since || !isStamp(m.firstTs) || m.firstTs > m.lastTs) continue
     if (dayOf(m.lastTs, ctx.tcfg) < range.from || dayOf(m.firstTs, ctx.tcfg) > range.to) continue
     if (filter && !(Array.isArray(m.models) && m.models.some((x) => filter.has(x)))) continue
+    if (!inProjects(inFilter, projectOf.get(m.sessionId))) continue
     // Its time and its tokens are still growing: ranked once it is idle (B2 rule 2) — its own transcript
     // and its agents' too, whose usage the row adds to its own.
     if (ctx.now - Math.max(m.lastTs, agentLast.get(m.sessionId) ?? 0) <= SESSION_ACTIVE_MS) {
@@ -2657,10 +2751,12 @@ function hourSpanCost(
   let usd = 0
   let listUsd = 0
   let partial = false
+  const projects = projectSet(ctx)
   for (const one of ctx.buckets ?? ctx.agg.all()) {
     if (one.res !== 'h' || one.hour === null || one.source !== source) continue
     if (one.hour < fromHour || one.hour >= toHour) continue
     if (ctx.models.length > 0 && !ctx.models.includes(one.model)) continue
+    if (!inProjects(projects, one.project)) continue
     const c = costOfBucketOn(one, ctx)
     if (!c || c.unpriced) {
       if (allTokens(one) > 0) partial = true
@@ -2679,10 +2775,12 @@ function costOfHourSpan(ctx: StatsCtx, source: Source, fromHour: number, toHour:
 /** The earliest hour bucket with billable tokens in a half-open hour range, or null. */
 function firstUsedHour(ctx: StatsCtx, source: Source, fromHour: number, toHour: number): number | null {
   let first: number | null = null
+  const projects = projectSet(ctx)
   for (const one of ctx.buckets ?? ctx.agg.all()) {
     if (one.res !== 'h' || one.hour === null || one.source !== source) continue
     if (one.hour < fromHour || one.hour >= toHour) continue
     if (ctx.models.length > 0 && !ctx.models.includes(one.model)) continue
+    if (!inProjects(projects, one.project)) continue
     if (billable(one) <= 0) continue
     if (first === null || one.hour < first) first = one.hour
   }
@@ -2745,46 +2843,136 @@ function emptySession(s: SessionRec): Bucket {
 // Projects and sessions (attribution opt-in)
 // ---------------------------------------------------------------------------
 
-export function projectRows(ctx: StatsCtx): ProjectRow[] {
-  const groups = new Map<string, { usage: number; requests: number; hit: { num: number; den: number }; sessions: number }>()
+/**
+ * 1.14 §3 A4 rule 3: the main session records (`isSub` false) per project key whose activity overlaps the range — under
+ * the provider switch, the model chips (a session that used a chosen model) and the project filter. Exact while the range
+ * starts after the day the records' horizon falls on: records whose last line is older than `hourRetentionDays` are
+ * pruned at the roll-up and at most SESSION_CAP are kept, the newest (§3 A3 rule 3) — a range reaching that day or
+ * earlier counts at least what it shows (`lowerBound`).
+ */
+function projectSessions(ctx: StatsCtx, range: DayRange): { counts: Map<string, number>; lowerBound: boolean } {
+  const counts = new Map<string, number>()
+  const models = ctx.models.length > 0 ? new Set(ctx.models) : null
+  const inFilter = projectSet(ctx)
+  const all = ctx.agg.sessions()
+  let oldest = Infinity
+  for (const s of all) {
+    if (Number.isFinite(s.lastTs) && s.lastTs < oldest) oldest = s.lastTs
+    if (s.isSub || !ctx.sources.includes(s.source)) continue
+    if (models && !s.models.some((m) => models.has(m))) continue
+    if (!inProjects(inFilter, s.project)) continue
+    if (dayOf(s.lastTs, ctx.tcfg) < range.from || dayOf(s.firstTs, ctx.tcfg) > range.to) continue
+    counts.set(s.project, (counts.get(s.project) ?? 0) + 1)
+  }
+  const kept = ctx.hourRetentionDays
+  let horizon: number | null = typeof kept === 'number' && Number.isFinite(kept)
+    ? ctx.now - Math.max(0, Math.floor(kept)) * MS_DAY
+    : null
+  // At the cap the records older than the oldest kept one may be gone too.
+  if (all.length >= SESSION_CAP && Number.isFinite(oldest)) horizon = horizon === null ? oldest : Math.max(horizon, oldest)
+  return { counts, lowerBound: horizon !== null && range.from <= dayOf(horizon, ctx.tcfg) }
+}
+
+/**
+ * 1.14 §3 A4 rule 5: the project keys of the range's buckets under the context's filters, by usage (highest first, then
+ * by key) — the filter row's chips (viewModel.ts, with a context without the project chips).
+ */
+export function projectUsage(ctx: StatsCtx, range: DayRange): Array<{ key: string; usage: number }> {
+  const usage = new Map<string, number>()
+  for (const b of bucketsIn(ctx, range.from, range.to)) {
+    const key = b.project ?? UNATTRIBUTED
+    usage.set(key, (usage.get(key) ?? 0) + billable(b))
+  }
+  return [...usage.entries()]
+    .map(([key, n]) => ({ key, usage: n }))
+    .sort((a, b) => b.usage - a.usage || byCodeUnits(a.key, b.key))
+}
+
+/** '(no project)' and 'other projects' come after the named projects, whatever their usage (§3 A4 rule 2). */
+function unnamedLast(key: string): number {
+  return key === UNATTRIBUTED || key === OTHER_PROJECTS ? 1 : 0
+}
+
+/**
+ * 1.14 §3 A4 rule 2: the Projects table — the range's buckets (`bucketsIn`: the provider switch, the model chips and the
+ * project chips applied, as to every table) grouped by their project key; code fact 3's lifetime session sums are gone.
+ * Usage, the priced cost (with `showCost`; a bucket without a price makes it a lower bound, a family-priced one carries
+ * the models table's mark), requests, cache hit, the share of the range's usage in the view, the sessions (rule 3) and
+ * the project's last activity. By usage, highest first; '(no project)' and 'other projects' after the named ones.
+ */
+export function projectRows(ctx: StatsCtx, range: DayRange): ProjectRow[] {
+  const groups = new Map<string, {
+    usage: number; requests: number; hit: { num: number; den: number }; usd: number; unpriced: boolean; family: boolean
+  }>()
   let total = 0
-  for (const s of ctx.agg.sessions()) {
-    if (!ctx.sources.includes(s.source)) continue
-    let g = groups.get(s.project)
+  for (const b of bucketsIn(ctx, range.from, range.to)) {
+    const key = b.project ?? UNATTRIBUTED
+    let g = groups.get(key)
     if (!g) {
-      g = { usage: 0, requests: 0, hit: { num: 0, den: 0 }, sessions: 0 }
-      groups.set(s.project, g)
+      g = { usage: 0, requests: 0, hit: { num: 0, den: 0 }, usd: 0, unpriced: false, family: false }
+      groups.set(key, g)
     }
-    const b = emptySession(s)
     const use = billable(b)
     const parts = cacheHitParts(b)
     g.usage += use
-    g.requests += s.requests
+    g.requests += b.requests
     g.hit.num += parts.num
     g.hit.den += parts.den
-    g.sessions++
+    const c = costOfBucketOn(b, ctx)
+    // The models table's rule: no price on file, or a fast rate unknown, leaves the sum a floor — a bucket with
+    // nothing in it is missing nothing.
+    if (!c || c.unpriced) {
+      if (allTokens(b) > 0) g.unpriced = true
+    } else {
+      g.usd += c.usd
+      if (c.confidence === 'family') g.family = true
+    }
     total += use
   }
-  return [...groups.entries()]
-    .sort((a, b) => b[1].usage - a[1].usage)
-    .map(([key, g]) => ({
-      // 1.14 P4: grouped by the project key, shown by its label (P5 rebuilds the table from the range's buckets).
-      project: ctx.agg.projectLabelOf(key),
-      usage: tokens(g.usage),
-      // Sessions carry no per-day model split, so a per-project cost would be a guess.
-      cost: '–',
-      requests: tokens(g.requests),
-      cacheHit: percentOf(g.hit.num, g.hit.den),
-      // No billable tokens anywhere means no denominator — a dash, like every column
-      // beside it. A rendered "0 %" would claim a measured share of nothing.
-      share: percentOf(g.usage, total),
-      sessions: g.sessions,
-    }))
+  const labels = ctx.agg.projects()
+  const names = ctx.projectNames === true
+  const { counts, lowerBound } = projectSessions(ctx, range)
+  const rows = [...groups.entries()].map(([key, g]): { usage: number; row: ProjectRow } => {
+    const n = counts.get(key) ?? 0
+    const last = Object.prototype.hasOwnProperty.call(labels, key) ? labels[key].lastTs : NaN
+    const cost = ctx.showCost ? costText(g.usd) : '–'
+    return {
+      usage: g.usage,
+      row: {
+        key,
+        project: projectLabel(key, labels, names),
+        usage: tokens(g.usage),
+        cost,
+        // A dash already says "no cost known"; the marks only qualify a figure that is shown (the records' rule).
+        costLowerBound: cost !== '–' && g.unpriced,
+        costFamily: cost !== '–' && g.family,
+        requests: tokens(g.requests),
+        cacheHit: percentOf(g.hit.num, g.hit.den),
+        // No billable tokens anywhere means no denominator — a dash, like every column
+        // beside it. A rendered "0 %" would claim a measured share of nothing.
+        share: percentOf(g.usage, total),
+        sessions: lowerBound ? `⚠ ${n}` : String(n),
+        sessionsLowerBound: lowerBound,
+        lastActive: isStamp(last) ? clockStamp(last, ctx.now, ctx.tcfg) : '–',
+      },
+    }
+  })
+  return rows
+    .sort((a, b) => unnamedLast(a.row.key) - unnamedLast(b.row.key) || b.usage - a.usage
+      || byCodeUnits(a.row.project, b.row.project) || byCodeUnits(a.row.key, b.row.key))
+    .map((x) => x.row)
 }
 
-export function sessionRows(ctx: StatsCtx, limit = 50): SessionRow[] {
-  const list = ctx.agg.sessions()
+/**
+ * 1.14 §3 A4 rule 6 (§7a Q11): the session records active in the range — their activity overlaps its days, the records'
+ * overlap rule — under the provider switch and the project filter, newest first; lifetime counters, as the note says.
+ */
+export function sessionRows(ctx: StatsCtx, range: DayRange, limit = 50): SessionRow[] {
+  const labels = ctx.agg.projects()
+  const names = ctx.projectNames === true
+  const list = sessionsIn(ctx)
     .filter((s) => ctx.sources.includes(s.source))
+    .filter((s) => dayOf(s.lastTs, ctx.tcfg) >= range.from && dayOf(s.firstTs, ctx.tcfg) <= range.to)
     .sort((a, b) => b.lastTs - a.lastTs)
     .slice(0, Math.max(0, limit))
   return list.map((s) => {
@@ -2792,7 +2980,7 @@ export function sessionRows(ctx: StatsCtx, limit = 50): SessionRow[] {
     const parts = cacheHitParts(b)
     return {
       session: s.sessionId,
-      project: ctx.agg.projectLabelOf(s.project),
+      project: projectLabel(s.project, labels, names),
       source: s.source,
       isSub: s.isSub,
       // The configured calendar, not UTC: `drill` files this session under `dayOf(firstTs)`,
@@ -2828,7 +3016,7 @@ export function cacheStateOf(s: SessionRec, now: number): string | null {
 
 export function cacheStates(ctx: StatsCtx): { session: string; text: string }[] {
   const out: { session: string; text: string }[] = []
-  for (const s of ctx.agg.sessions()) {
+  for (const s of sessionsIn(ctx)) {
     if (!ctx.sources.includes(s.source)) continue
     const text = cacheStateOf(s, ctx.now)
     if (text) out.push({ session: s.sessionId, text })
@@ -2844,11 +3032,6 @@ export function drill(ctx: StatsCtx, day: string, sort: ModelSort, limit: number
   const range: DayRange = { from: day, to: day, label: day, preset: 'custom' }
   const models = modelTable(ctx, range, sort, limit).rows
   // A session belongs to the day when it was running on it — its span is compared in the
-  // configured zone, the same calendar the buckets were placed with.
-  const onDay = new Set(
-    ctx.agg.sessions()
-      .filter((s) => dayOf(s.firstTs, ctx.tcfg) <= day && dayOf(s.lastTs, ctx.tcfg) >= day)
-      .map((s) => s.sessionId),
-  )
-  return { day, models, sessions: sessionRows(ctx, 500).filter((s) => onDay.has(s.session)) }
+  // configured zone, the same calendar the buckets were placed with (sessionRows' overlap rule, the day its range).
+  return { day, models, sessions: sessionRows(ctx, range, 500) }
 }

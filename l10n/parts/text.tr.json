@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Dönem | Kullanım | Yeni girdi | Yazma 5m | Yazma 1h | Önbellek okuma | Çıktı | Akıl yürütme | İst. | Önbellek isabeti | İst. başı | API maliyeti |",
   "| Period | Usage | Output | Cache read | Req. |": "| Dönem | Kullanım | Çıktı | Önbellek okuma | İst. |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Dönem | Kullanım | Çıktı | Önbellek okuma | İst. | API maliyeti |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Proje | Kullanım | İstekler | Önbellek isabeti | Pay | Oturumlar |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Sağlayıcı | İsabet oranı | Gerçekleşen tasarruf | Karma $/1M | Dayanak |",
   "| Provider | Part | Tokens |": "| Sağlayıcı | Bölüm | Token |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Oturum | Proje | Başlangıç | Süre | Kullanım | İst. | Modeller | Önbellek |",

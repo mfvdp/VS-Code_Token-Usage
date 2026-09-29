@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| 期间 | 用量 | 新输入 | 写入 5m | 写入 1h | 缓存读取 | 输出 | 推理 | 请求 | 缓存命中 | 每请求 | API 费用 |",
   "| Period | Usage | Output | Cache read | Req. |": "| 期间 | 用量 | 输出 | 缓存读取 | 请求 |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| 期间 | 用量 | 输出 | 缓存读取 | 请求 | API 费用 |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| 项目 | 用量 | 请求 | 缓存命中 | 占比 | 会话 |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| 提供商 | 命中率 | 实际节省 | 综合单价 $/1M | 依据 |",
   "| Provider | Part | Tokens |": "| 提供商 | 部分 | Token |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| 会话 | 项目 | 开始 | 时长 | 用量 | 请求 | 模型 | 缓存 |",

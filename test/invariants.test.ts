@@ -19,7 +19,8 @@ import { StatsCtx, calendar, heatmap, totalRow } from '../src/stats'
 import { markdownDocument, quickPickItems } from '../src/textViews'
 import { readTimeConfig } from '../src/config'
 import { Attribution, Snapshot } from '../src/types'
-import { UiState, ViewModel, agentTreeFor, buildViewModel, defaultUiState } from '../src/viewModel'
+import { PROJECT_FILTER_IGNORED, UiState, ViewModel, agentTreeFor, buildViewModel, defaultUiState } from '../src/viewModel'
+import { rangeFor } from '../src/time'
 import { QuotaHistory } from '../src/quotaHistory'
 import {
   AGENT_CONTENT, AGENT_WORLD, agentNode, agentWorld, agentWorldFile, everyParent, treeNodes,
@@ -529,7 +530,9 @@ function agentsVm(o: { attribution?: Attribution; agg?: Aggregator; select?: (ro
   week?: boolean } = {}): ViewModel {
   const attribution = o.attribution ?? 'none'
   const agg = o.agg ?? agentWorld(attribution).agg
-  const config = makeConfig({ 'tokenPace.attribution': attribution })
+  // 1.14 P5 (pinned and changed: the agent world reads folder names, so the config says showProjectNames basename — the
+  // tree names a session's project by projectLabel of its record's key, §3 A4 rule 12; under hash it reads p:<key>).
+  const config = makeConfig({ 'tokenPace.attribution': attribution, 'tokenPace.showProjectNames': 'basename' })
   const agentsExpanded = o.closed === true ? [] : everyParent(agg, config, NOW)
   // 1.6 L3: the 7-day block open, where a test asks for it.
   const agentsWeekOpen = o.week === true
@@ -1199,4 +1202,69 @@ test('1.14 §3 A2 rule 6: three projects under project give every bucket-built f
   }
   assert.deepEqual(figures(on), figures(off))
   for (const range of ['7d', 'thisMonth', '90d', 'today', 'all'] as const) assert.deepEqual(figures(on, range), figures(off, range), range)
+})
+
+/**
+ * 1.14 §3 A2 rule 6, the chip half (P5 — §3 A4 rule 1): the same world of three Claude folders and a Codex rollout of a
+ * fourth, read under project. With the chip of one project on, every section built from the buckets (and the session
+ * records) is the view model of a world holding only that project's lines, and every section the filter does not reach
+ * (PROJECT_FILTER_IGNORED — the quota cards, the agents, the context, the tools, the budgets, the history, the data quality,
+ * the prompts) is the whole world's. The chosen project holds the world's oldest line, so the coverage — the machine's,
+ * not a project's — is the same in both worlds. Every field of the view model is in one of the lists, so a field added
+ * later is placed by whoever adds it.
+ */
+test('1.14 §3 A2 rule 6, A4 rule 1: with a project chip on, every bucket-built section is the view model of a world of that project\'s lines alone, and every section the filter does not reach is the whole world\'s', () => {
+  const slugs = ['-home-t-alpha', '-home-t-beta', '-home-t-gamma']
+  const read = (only: number | null): Aggregator => {
+    const agg = new Aggregator()
+    agg.attribution = 'project'
+    let n = 0
+    const days = [0, 0, 1, 2, 6, 12, 40]
+    for (const [i, back] of days.entries()) {
+      for (const [j, slug] of slugs.entries()) {
+        n++
+        if (only !== null && only !== j) continue
+        const file = path.join(CLAUDE_ROOT, slug, `s${j}.jsonl`)
+        const ts = NOW - back * 86_400_000 - (i * 3 + j) * 900_000
+        agg.addClaudeLine(claudeLine({
+          id: `m-${n}`, ts, model: j === 1 ? 'claude-sonnet-4-6' : j === 2 && i % 2 === 0 ? 'claude-experimental-x' : 'claude-opus-4-6', final: true,
+          cwd: `/home/t/${slug.slice(8)}`, sessionId: `s${j}`,
+          usage: { input: 100 * (j + 1) + i, cacheWrite: 40 + i, cacheWrite1h: j === 0 ? 10 : 0, cacheRead: 900 + 10 * j, output: 30 + i + j, thinking: 3 },
+        }), { isSub: false, file, attribution: 'project', projectSalt: 'salt', hashProjects: false })
+      }
+    }
+    if (only === null) {
+      const cur = { offset: 0, size: 0, ino: 9, dev: 1 }
+      const x = { isSub: false, file: path.join('/virtual', 'codex', 'sessions', 'rollout-p.jsonl'), attribution: 'project' as const, projectSalt: 'salt', hashProjects: false }
+      agg.addCodexLine(codexMeta({ ts: NOW - 3_600_000, id: 'thread-p', cwd: '/home/t/delta' }), cur, x)
+      agg.addCodexLine(codexTurnContext(NOW - 3_600_000, 'gpt-5.3-codex'), cur, x)
+      agg.addCodexLine(codexTokenCount({ ts: NOW - 3_000_000, total: { total: 900, input: 700, cached: 300, output: 200, reasoning: 50 } }), cur, x)
+    }
+    return agg
+  }
+  const whole = read(null)
+  const gamma = read(2)
+  assert.equal(whole.firstIngest, gamma.firstIngest, 'the chosen project holds the oldest line')
+  const key = gamma.all()[0].project as string
+  assert.ok(/^[0-9a-f]{12}$/.test(key) && gamma.all().every((b) => b.project === key))
+  const cfg = makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename', 'tokenPace.showCost': true })
+  const FILTERED = ['digest', 'kpis', 'composition', 'totals', 'cacheEconomy', 'calendar', 'planFactor', 'chart', 'models', 'heatmap',
+    'hours', 'records', 'projects', 'sessions', 'unpricedModels', 'familyPriced', 'lowerBound', 'footnotes', 'drill']
+  const IGNORED = ['quotas', 'agents', 'context', 'tools', 'budgets', 'allBudgets', 'retro', 'dataQuality', 'prompts']
+  const FIXED = ['generatedAt', 'now', 'sections', 'showCost', 'pricing', 'range', 'provider', 'claudeOnly', 'firstRun', 'preview', 'language']
+  const VIEW = ['ui', 'projectFilter', 'projectFilterIgnoredBy', 'projectFilterText']
+  for (const preset of ['30d', '7d', 'all'] as const) {
+    const range = rangeFor(preset, NOW, tcfg, whole.stats().oldestDay ?? TODAY)
+    const vmOf = (agg: Aggregator, projects: string[] = []): Record<string, unknown> =>
+      JSON.parse(JSON.stringify(buildViewModel(makeInput({ agg, cfg, range, ui: { projects, drillDay: TODAY } })))) as Record<string, unknown>
+    const chip = vmOf(whole, [key])
+    const alone = vmOf(gamma)
+    const all = vmOf(whole)
+    assert.deepEqual(Object.keys(chip).sort(), [...FILTERED, ...IGNORED, ...FIXED, ...VIEW].sort(), 'a field of the view model is in no list')
+    for (const k of FILTERED) assert.deepEqual(chip[k], alone[k], `${preset}: ${k} is not the chosen project's alone`)
+    for (const k of [...IGNORED, ...FIXED]) assert.deepEqual(chip[k], all[k], `${preset}: ${k} moved with the project chip`)
+    // The chip did filter something: the whole world's figures are not the project's.
+    assert.notDeepEqual(all.models, alone.models)
+    assert.deepEqual((chip.projectFilterIgnoredBy as string[]), [...PROJECT_FILTER_IGNORED])
+  }
 })

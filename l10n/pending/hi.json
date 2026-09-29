@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 54,
+  "applied": 63,
   "bundle": {
     "• Codex — the local \"codex app-server\" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.": {
       "parts": [
@@ -345,6 +345,55 @@
       ],
       "state": "translate",
       "why": "1.14 A3 (§7a Q12): a new key, the label of the projects folded together — beyond the 200 most recently active, or idle longer than retentionDays —, shown where a project's name stands (a table cell, a list, a filter chip) — lower case as the English, a label and no sentence, German weitere Projekte"
+    },
+    "project filter: {0}": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "1.14 A4 rule 10 (§0a.8): a new key, the one line that states the project filter while a project chip is pressed — the Quick Pick's line under Open dashboard, the markdown document's line under the range, the markdown summary's (Copy Usage Summary) — the slot holds the chosen projects' labels joined by your '{0}, {1}' (a folder's name as written, or the pseudonym p:8f31c0a4e2b1, or (no project), other projects): a label form with a colon, lower case as the English, German Projektfilter: {0}"
+    },
+    "at least — session records older than {0} days are not kept": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "1.14 A4 rule 3 (§3 A9): a new key, the words of the lower-bound mark ⚠ beside the Projects table's session count (its title, and the table's footnote) when the range reaches back to the day the session records' horizon falls on — {0} is tokenPace.hourRetentionDays (45 by default) — at least in front, the reason after the dash, lower case as the English, German mindestens — Sitzungsdatensätze älter als {0} Tage werden nicht behalten"
+    },
+    "{0} projects folded into other projects (at most {1} are kept)": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "1.14 A3 rule 1 (§7a Q12): a new key, the line under the Projects table and in the data quality once projects have folded into other projects — the least recently active beyond the cap, or idle longer than retentionDays — {0} the count (2 or more), {1} the cap (200) — other projects is the label of n=54 (keep your word for it, quoted as your language quotes a label), German {0} Projekte unter „weitere Projekte“ zusammengefasst (höchstens {1} werden behalten)"
+    },
+    "1 project folded into other projects (at most {0} are kept)": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "1.14 A3 rule 1: a new key, the singular of n=57 — one project folded into other projects, {0} the cap (200) — the same words as n=57 in the singular, German 1 Projekt unter „weitere Projekte“ zusammengefasst (höchstens {0} werden behalten)"
+    },
+    "sessions count each session’s whole lifetime, which can reach outside this range": {
+      "parts": [
+        "model"
+      ],
+      "state": "review",
+      "why": "1.14 A4 rule 4: the Records' top projects are the range's buckets now (usage and priced cost), so the note under the top sessions speaks of sessions only — projects and dropped from the front, the rest word for word — review and drop your word for projects"
+    },
+    "| Project | Usage | API cost | Requests | Cache hit | Share | Sessions | Last activity |": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "1.14 A4 rule 10 (1.3's parity rule): the markdown document's Projects table carries the page's columns — API cost after Usage (the words of your other headers, | API cost |) and Last activity at the end (your word of the Agents details' row Last activity) — eight cells, nine pipes, translate anew"
+    },
+    "Last activity: {0}": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "1.14 A4 rule 10: a new key, the Quick Pick's detail of a project row — {0} is a clock stamp (14:20 today, 2026-09-26 14:20 another day — CLOCK_STAMP_KEYS), the project's newest counted line: the label form with a colon, never a preposition that takes a clock hour only, German Letzte Aktivität: {0}"
     }
   },
   "nls": {

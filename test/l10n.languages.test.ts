@@ -85,6 +85,8 @@
  * (the ledger's first entries), exempt from T17 while listed and held to it at the join. CLOCK_STAMP_KEYS lists the keys
  * whose placeholder receives a clock stamp that may carry a date (`2026-09-26 14:20`), held to the code by the reset-clock
  * scan, now one scan with a spec per kind of clock (CLOCK_SCAN) that also follows a clock into a function's parameter.
+ * 1.14 A4 (P5): PROJECT_LABEL_KEYS lists the keys whose placeholder receives a project's label — a folder's name or the
+ * pseudonym `p:8f31c0a4e2b1` —, held to the code by the same scan with the label's spec and the fields it is written into.
  *
  * Every rule is a function over the files of one language, so it runs over the repository's files
  * and — each once with the mutation it exists to catch — over a synthetic language written into a
@@ -539,6 +541,9 @@ export const CLOCK_STAMP_KEYS: ReadonlyArray<readonly [string, string]> = [
   // 1.14 B1 rule 2 (P2, §7a Q8): paceExplain.ts explainWindow — a stated reset that has passed, through the explanation
   // input's `stamp` (viewModel.ts quotaCard: clockStamp(ms, now, tcfg)); a reading days old names the reset's day.
   ['The stated reset ({0}) has passed and no reading since has caught up: the {1} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.', '{0}'],
+  // 1.14 A4 rule 10 (P5): textViews.ts, the Quick Pick's project row — its last activity (ProjectRow.lastActive, stats.ts
+  // projectRows: clockStamp of the project's newest counted line).
+  ['Last activity: {0}', '{0}'],
 ]
 
 /**
@@ -560,8 +565,9 @@ export const CLOCK_STAMP_SOURCES: ReadonlyArray<readonly [string, string, number
   ['src/cacheWatch.ts', 'clockStamp', 5],
   // Two English log lines of the keep-warm host (the Output channel's data, never translated) — no t() slot.
   ['src/keepWarmHost.ts', 'clockStamp', 2],
-  // The records' sessions: a session's start, a table cell shown as it is (CLOCK_STAMP_FIELDS `start`).
-  ['src/stats.ts', 'clockStamp', 1],
+  // The records' sessions: a session's start, a table cell shown as it is (CLOCK_STAMP_FIELDS `start`); 1.14 P5: a project's
+  // last activity (CLOCK_STAMP_FIELDS `lastActive`).
+  ['src/stats.ts', 'clockStamp', 2],
   // The failed quota attempt's sentence.
   ['src/time.ts', 'clockStamp', 1],
   // 1.14 B1 rule 2 (P2): the explanation input's `stamp` — the passed reset's "The stated reset ({0}) has passed …".
@@ -576,11 +582,69 @@ export const CLOCK_STAMP_SOURCES: ReadonlyArray<readonly [string, string, number
  * exactly these.
  */
 export const CLOCK_STAMP_FIELDS: ReadonlyArray<readonly [string, boolean, string]> = [
+  ['lastActive', true, 'stats.ts projectRows (1.14 P5) — a project\'s last activity, ProjectRow.lastActive: the Quick Pick\'s "Last activity: {0}", the page\'s and the markdown\'s table cell'],
   ['lastClock', true, 'agentTreeBuild.ts clockOf — the view model\'s clock of a node\'s last line; the page words it "silent since {0}"'],
   ['startClock', true, 'agentTreeBuild.ts clockOf — the view model\'s clock of a node\'s start; the page words it "since {0}"'],
   ['stamp', true, 'viewModel.ts quotaCard — the explanation input\'s formatter (ExplainInput.stamp, a function field — 1.14 P2), called by paceExplain.ts for the passed reset "The stated reset ({0}) has passed …"'],
   ['start', false, 'stats.ts, the records\' longest and largest sessions — a table cell (the page\'s recordFigure, the markdown table) and the Quick Pick\'s description joined with " · " (textViews.ts rest), never a t() placeholder'],
   ['value', false, 'agentTreeBuild.ts, a details row\'s value (Started, Since first line, Last activity) — printed beside its label (the page\'s details panel, the markdown table\'s cell), never a t() placeholder'],
+]
+
+/**
+ * 1.14 A4 rule 9 (P5): the t() keys with a placeholder that receives a project's label — `[key, placeholder]`: a value of
+ * `projectLabel(…)` (src/project.ts), which is a folder's name as written (Latin letters, digits and `_ . : @ -`, at most 64
+ * characters), the pseudonym `p:8f31c0a4e2b1`, `(no project)` or `other projects`. The slot holds any of them, so a
+ * translation writes a form that reads with each — a label, a colon, brackets — and never inflects or translates it. The
+ * brief names every key ("1.14: your pending list", the project words); a test finds them by the clock scan (CLOCK_SCAN)
+ * with the label's spec (PROJECT_LABEL_SPEC) — the value followed through variables, functions, parameters and function
+ * arguments into a t() or tr() argument — and by the fields it is written into, which the scan does not follow
+ * (PROJECT_LABEL_FIELDS: `project`, `label` and `detail` are fields of many objects — a bucket's key is its `project`),
+ * each key reached so named in PROJECT_LABEL_BY_FIELD with its field and the call that reads it. The page draws a label as
+ * markup (the table's cells, the chips, a session root's `sub`), never as a tr() argument at 1.14 P5.
+ */
+export const PROJECT_LABEL_KEYS: ReadonlyArray<readonly [string, string]> = [
+  // textViews.ts quickPickItems — the Quick Pick's project row, a ProjectRow's `project` (PROJECT_LABEL_BY_FIELD).
+  ['Project {0}: {1}', '{0}'],
+  // textViews.ts recordLines — the Records' top projects, a RecordEntry's `label` (PROJECT_LABEL_BY_FIELD).
+  ['Top project {0}: {1}', '{0}'],
+  // viewModel.ts buildViewModel — the project filter's line: the chosen projects' labels joined by listOf (found by the scan).
+  ['project filter: {0}', '{0}'],
+]
+
+/**
+ * 1.14 A4 rule 9: the keys a label reaches through a field the scan does not follow — `[key, placeholder, field, the call's
+ * text in the file, file]`; the test holds that the call stands in its file as written and that the field is one of
+ * PROJECT_LABEL_FIELDS.
+ */
+export const PROJECT_LABEL_BY_FIELD: ReadonlyArray<readonly [string, string, string, string, string]> = [
+  ['Project {0}: {1}', '{0}', 'project', "t('Project {0}: {1}', p.project, p.usage)", 'src/textViews.ts'],
+  ['Top project {0}: {1}', '{0}', 'label', "table((row, usage) => t('Top project {0}: {1}', row, usage), r.topProjects)", 'src/textViews.ts'],
+]
+
+/**
+ * 1.14 A4 rule 9: the object fields a project's label is written into — `[field, followed, reason]`. None is followed: each
+ * is a field of many objects (the scan would take every `.project` of a bucket — a key — for a label), so each is named
+ * with where its value goes. The scan finds every field a label is written into; the test asks for exactly these.
+ */
+export const PROJECT_LABEL_FIELDS: ReadonlyArray<readonly [string, boolean, string]> = [
+  ['detail', false, 'stats.ts records — a top session\'s RecordEntry.detail, its project: the Quick Pick\'s item detail, the page\'s and the markdown\'s cell — never a t() placeholder'],
+  ['label', false, 'stats.ts records — a top project\'s RecordEntry.label ("Top project {0}: {1}", PROJECT_LABEL_BY_FIELD) —, and viewModel.ts projectChips — a filter chip\'s text, markup on the page'],
+  ['project', false, 'stats.ts projectRows and sessionRows — ProjectRow.project ("Project {0}: {1}", PROJECT_LABEL_BY_FIELD), SessionRow.project (the Quick Pick\'s description joined with " · "), the page\'s and the markdown\'s cells'],
+]
+
+/**
+ * 1.14 A4 rule 9: the calls of `projectLabel` in src/ — `[file, callee, count]`, the definition not counted. Each call's value
+ * goes where the scan follows it or PROJECT_LABEL_FIELDS names; a new call is a label to trace.
+ */
+export const PROJECT_LABEL_SOURCES: ReadonlyArray<readonly [string, string, number]> = [
+  // buildForest — a session root's project, the root's `sub` (markup: the page's row, the running list's context line).
+  ['src/agentTreeBuild.ts', 'projectLabel', 1],
+  // Aggregator.projectLabelOf — the exports' sessions (P7's), the label as the table holds it.
+  ['src/agg.ts', 'projectLabel', 1],
+  // records (the top sessions' detail, the top projects' label), projectRows, sessionRows.
+  ['src/stats.ts', 'projectLabel', 4],
+  // buildViewModel's project filter line, projectChips' chips.
+  ['src/viewModel.ts', 'projectLabel', 2],
 ]
 
 // ---------------------------------------------------------------------------
@@ -3429,6 +3493,14 @@ function clockScan(spec: ClockScanSpec, ...dirs: string[]): ClockScan {
 const resetClockScan = (...dirs: string[]): ClockScan => clockScan(RESET_CLOCK_SPEC, ...dirs)
 /** 1.14 B2 rule 1: the clock-stamp scan. */
 const clockStampScan = (...dirs: string[]): ClockScan => clockScan(CLOCK_STAMP_SPEC, ...dirs)
+/**
+ * 1.14 A4 rule 9: the project label — `projectLabel` is its one source (a "clock" of the scan: a value that reaches a slot);
+ * no field is followed (PROJECT_LABEL_FIELDS).
+ */
+const PROJECT_LABEL_SPEC: ClockScanSpec = {
+  sources: { projectLabel: 'clock' }, counted: ['projectLabel'], follow: PROJECT_LABEL_FIELDS.filter(([, f]) => f).map(([n]) => n), params: true,
+}
+const projectLabelScan = (...dirs: string[]): ClockScan => clockScan(PROJECT_LABEL_SPEC, ...dirs)
 /** The scan's slots, `key\u0000{n}`, sorted and each once. */
 const slotsOf = (scan: ClockScan): string[] => [...new Set(scan.found.map((f) => `${f.key}\u0000${f.ph}`))].sort()
 
@@ -3572,8 +3644,9 @@ test('CLOCK_STAMP_KEYS: every key a t() or tr() key that holds its placeholder, 
     assert.ok(/^\{\d\}$/.test(ph) && key.includes(ph), `${J(key)} does not hold ${ph}`)
   }
   // 1.14 P1: 36 slots in 34 keys, none excepted. 1.14 P2 (pinned and changed: [36, 34, 0] → [37, 35, 0] — B1 rule 2,
-  // §7a Q8: the passed reset's key).
-  assert.deepEqual([CLOCK_STAMP_KEYS.length, new Set(CLOCK_STAMP_KEYS.map(([k]) => k)).size, CLOCK_STAMP_EXCEPTED.length], [37, 35, 0])
+  // §7a Q8: the passed reset's key). 1.14 P5 (pinned and changed: [37, 35, 0] → [38, 36, 0] — A4 rule 10: the Quick Pick's
+  // "Last activity: {0}").
+  assert.deepEqual([CLOCK_STAMP_KEYS.length, new Set(CLOCK_STAMP_KEYS.map(([k]) => k)).size, CLOCK_STAMP_EXCEPTED.length], [38, 36, 0])
   for (const [key, , why] of CLOCK_STAMP_EXCEPTED) assert.ok(why.length > 20 && !listed.some((x) => x.startsWith(`${key}\u0000`)), `${J(key)}: no reason, or listed too`)
   const fields = CLOCK_STAMP_FIELDS.map(([f]) => f)
   assert.equal(new Set(fields).size, fields.length, 'a field stands twice in CLOCK_STAMP_FIELDS')
@@ -3644,6 +3717,8 @@ test('the German clock stamps: no German value of a CLOCK_STAMP_KEYS key writes 
     ['silent since {0}', '{0}', 'still seit {0}'],
     ['since {0}', '{0}', 'seit {0}'],
     ['The stated reset ({0}) has passed and no reading since has caught up: the {1} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.', '{0}', 'Der angegebene Reset ({0}) ist vorbei und kein Messwert seither hat aufgeholt: Die {1} % gehören zum Fenster davor, daher bleibt der Balken neutral, bis ein neuerer Messwert eintrifft.'],
+    // 1.14 P5 (pinned and changed: the Quick Pick's project row, the label form).
+    ['Last activity: {0}', '{0}', 'Letzte Aktivität: {0}'],
   ])
   // A clock of today keeps its „um" — never a date in the slot: the turn's end, the test message's sending.
   assert.equal(german['{0} finished a turn at {1}, after at least {2}.'], '{0} hat um {1} einen Turn beendet, nach mindestens {2}.')
@@ -3753,6 +3828,67 @@ test('the brief\'s 1.13 sections: right to left — the isolates the code\'s, lo
   assert.ok(flat.includes('A key that names a setting\'s fields by their ids writes them as code (1.13): the e-mail channel\'s setup hint has `host`, `user`, `from` and `to` in backticks — keep each in its backticks as it is (T5), and T9 takes the code out before it compares; bare, the four are English words it catches.'))
   assert.equal(flat.includes('P6 empties this list'), false, 'the brief still announces P6')
   assert.equal(flat.includes('FIELD_IDS_OF_A_KEY'), false, 'the brief still names the retired list')
+})
+
+test('PROJECT_LABEL_KEYS: every key a t() key that holds its placeholder, and exactly the slots a project\'s label reaches — found by the clock scan with the label\'s spec over every t() call of src/ and tr() call of the page, and through the fields it is written into, each named; projectLabel\'s calls pinned; the German keeps the slot as a label; the brief names every key (1.14 A4 rule 9)', () => {
+  const s = src()
+  const listed = PROJECT_LABEL_KEYS.map(([k, ph]) => `${k}\u0000${ph}`)
+  assert.equal(new Set(listed).size, listed.length, 'a slot stands twice in PROJECT_LABEL_KEYS')
+  for (const [key, ph] of PROJECT_LABEL_KEYS) {
+    assert.ok(s.keys.includes(key), `${J(key)} is no t() key of src/ (any more)`)
+    assert.ok(/^\{\d\}$/.test(ph) && key.includes(ph), `${J(key)} does not hold ${ph}`)
+  }
+  assert.deepEqual([PROJECT_LABEL_KEYS.length, PROJECT_LABEL_BY_FIELD.length], [3, 2])
+  const fields = PROJECT_LABEL_FIELDS.map(([f]) => f)
+  assert.equal(new Set(fields).size, fields.length, 'a field stands twice in PROJECT_LABEL_FIELDS')
+  for (const [field, , why] of PROJECT_LABEL_FIELDS) assert.ok(why.length > 20, `${field}: no reason`)
+  const scan = projectLabelScan()
+  assert.ok(scan.calls.t >= 1000 && scan.calls.tr >= 300, `the scan read ${scan.calls.t} t() and ${scan.calls.tr} tr() calls`)
+  // The scan's slots and the ones reached through a named field: the list, no more, no less.
+  const byField = PROJECT_LABEL_BY_FIELD.map(([k, ph]) => `${k}\u0000${ph}`)
+  assert.deepEqual([...new Set([...slotsOf(scan), ...byField])].sort(), [...listed].sort())
+  assert.deepEqual(slotsOf(scan).filter((x) => byField.includes(x)), [], 'a key the scan finds is named by a field too')
+  for (const [key, ph, field, call, file] of PROJECT_LABEL_BY_FIELD) {
+    assert.ok(fields.includes(field), `${J(key)}: ${field} is no field of PROJECT_LABEL_FIELDS`)
+    assert.ok(readFileSync(join(ROOT, file), 'utf8').includes(call), `${file} no longer reads ${J(key)} ${ph} so: ${call}`)
+  }
+  // Every field a label is written into, each named with where its value goes.
+  assert.deepEqual(scan.fields, PROJECT_LABEL_FIELDS.filter(([, f]) => f).map(([n]) => n).sort())
+  assert.deepEqual(Object.keys(scan.unfollowed), PROJECT_LABEL_FIELDS.filter(([, f]) => !f).map(([n]) => n).sort())
+  // Where projectLabel is called.
+  const counts = new Map<string, number>()
+  for (const x of scan.sources) counts.set(`${x.file} ${x.callee}`, (counts.get(`${x.file} ${x.callee}`) ?? 0) + 1)
+  assert.deepEqual([...counts.entries()].sort(), PROJECT_LABEL_SOURCES.map(([f, c, n]): [string, number] => [`${f} ${c}`, n]).sort())
+  // The German: the slot as a label, never inflected — the value holds the slot beside a colon or a bracket.
+  const german = readTable(join(ROOT, 'l10n', 'bundle.l10n.de.json'))
+  assert.deepEqual(PROJECT_LABEL_KEYS.map(([key]) => german[key]), ['Projekt {0}: {1}', 'Top-Projekt {0}: {1}', 'Projektfilter: {0}'])
+  // The brief: the paragraph and every key, in backticks.
+  const brief = readFileSync(join(ROOT, 'l10n', 'TRANSLATING.md'), 'utf8').replace(/\s+/g, ' ')
+  const list = brief.slice(brief.indexOf('## 1.14: your pending list'), brief.indexOf('## 1.14: clock stamps'))
+  for (const needed of [
+    'the slot holds a folder\'s name as written (Latin letters, digits, `_ . : @ -`) or `p:8f31c0a4e2b1`',
+    'write a form that reads with both (a label, a colon, brackets); never inflect it, never translate it', '`(no project)`', '`other projects`',
+  ]) assert.ok(list.includes(needed), `the brief's project words do not say: ${needed}`)
+  for (const [key, ph] of PROJECT_LABEL_KEYS) assert.ok(list.includes(`\`${key}\` (${ph})`), `the brief does not name the slot ${ph} of ${J(key)}`)
+})
+
+test('PROJECT_LABEL_KEYS\' scan finds a new t(…, projectLabel(…)) beside src/ as a slot the list lacks, and a label through a local variable and a function\'s parameter (1.14 A4 rule 9\'s mutation)', () => {
+  const more = tempDir()
+  writeFileSync(join(more, 'mutation.ts'), [
+    "import { t } from './i18n'",
+    "import { projectLabel } from './project'",
+    "export const direct = (k: string): string => t('Folder {0}', projectLabel(k, {}, false))",
+    "export function viaVar(k: string): string { const name = projectLabel(k, {}, false); return t('In {0} today', name) }",
+    "function say(label: string): string { return t('Chosen: {0}', label) }",
+    "export const viaParam = (k: string): string => say(projectLabel(k, {}, false))",
+    '',
+  ].join('\n'))
+  const listed = PROJECT_LABEL_KEYS.map(([k, ph]) => `${k}\u0000${ph}`)
+  const byField = PROJECT_LABEL_BY_FIELD.map(([k, ph]) => `${k}\u0000${ph}`)
+  const mutated = projectLabelScan(join(ROOT, 'src'), more)
+  assert.deepEqual(slotsOf(mutated).filter((x) => !listed.includes(x)),
+    ['Chosen: {0}\u0000{0}', 'Folder {0}\u0000{0}', 'In {0} today\u0000{0}'])
+  assert.deepEqual([...new Set([...slotsOf(projectLabelScan(join(ROOT, 'src'))), ...byField])].sort(), [...listed].sort())
 })
 
 test('the brief\'s 1.14 sections: your pending list — the ledger\'s start, the twenty-seven, the hard wraps, the project words, the list separator, the clock stamps, the reset in the explanation, the bar\'s sentences, the report; clock stamps — every key of CLOCK_STAMP_KEYS with its slot; hard wraps — T17\'s three kinds (1.14 E1 rule 4, B2 rule 2, B3 rule 1)', () => {

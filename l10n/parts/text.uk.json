@@ -377,7 +377,6 @@
   "| Period | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output | Reasoning | Req. | Cache hit | Per req. | API cost |": "| Період | Використання | Нові вхідні | Запис 5m | Запис 1h | Читання з кешу | Вихідні | Міркування | Зап. | Влучання в кеш | На запит | Вартість API |",
   "| Period | Usage | Output | Cache read | Req. |": "| Період | Використання | Вихідні | Читання з кешу | Зап. |",
   "| Period | Usage | Output | Cache read | Req. | API cost |": "| Період | Використання | Вихідні | Читання з кешу | Зап. | Вартість API |",
-  "| Project | Usage | Requests | Cache hit | Share | Sessions |": "| Проєкт | Використання | Запити | Влучання в кеш | Частка | Сеанси |",
   "| Provider | Hit rate | Realised saving | Blended $/1M | Basis |": "| Постачальник | Частка влучань | Фактична економія | Змішана ціна $/1M | Основа |",
   "| Provider | Part | Tokens |": "| Постачальник | Частина | Токени |",
   "| Session | Project | Started | Duration | Usage | Req. | Models | Cache |": "| Сеанс | Проєкт | Початок | Тривалість | Використання | Зап. | Моделі | Кеш |",

@@ -11,11 +11,12 @@ import { intlTag, LANGUAGES } from '../src/languages'
 import { usd } from '../src/render'
 import {
   CHART_MODEL_SERIES_PER_PROVIDER, HourSums, MIN_P90_SAMPLES, StatsCtx, bucketsIn, cacheEconomy, cacheHitParts,
-  cacheStateOf, calendar, chart, dayOfBucket, drill, heatmap, hours, kpis, localBlock, modelTable,
-  niceCeil, planFactors, projectPeriod, projectRows, sessionRows, totalRow, totalsFor,
+  cacheStateOf, calendar, chart, costOfBucketOn, costText, dayOfBucket, drill, filterFor, heatmap, hours, kpis, localBlock, modelTable,
+  niceCeil, planFactors, projectPeriod, projectRows, projectUsage, sessionRows, totalRow, totalsFor,
   durationText,
 } from '../src/stats'
-import { DayRange, TimeConfig, addDays, dayOf, dayOfHour, daysBetween, previousRange, rangeFor, resetTimeMemos } from '../src/time'
+import { SESSION_CAP } from '../src/agg'
+import { DayRange, TimeConfig, addDays, clockStamp, dayOf, dayOfHour, daysBetween, previousRange, rangeFor, resetTimeMemos } from '../src/time'
 import { Bucket, SessionRec, Snapshot, Source, emptyBucket } from '../src/types'
 import { NOW, TODAY, buildAgg, makeConfig, timeConfig } from './fixtures/viewFixtures'
 import { ROOT } from './helpers/nls'
@@ -89,6 +90,18 @@ function session(over: Partial<SessionRec>): SessionRec {
     output: 0, reasoning: 0, requests: 0, outputFinal: 0, lastCacheTtl: null,
     lastCacheWriteTs: null, turnGapsMs: [], ...over,
   }
+}
+
+/**
+ * 1.14: a hand-built aggregator of per-project buckets and a label table, read as a version 9 snapshot under `project`
+ * (the store's road — fromSnapshot checks every key); `names` restores the label table's names (showProjectNames basename).
+ */
+function projectAgg(buckets: Bucket[], projects: Record<string, { lastTs: number; name?: string; folded?: number }>, names = false): Aggregator {
+  return Aggregator.fromSnapshot({
+    version: 9, buckets, cursors: {}, pending: {}, sessions: {}, attribution: 'project', projects,
+    rollup: { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 },
+    firstIngest: NOW - 90 * 86_400_000,
+  }, 'project', names)
 }
 
 /** An aggregator whose session table is handed in verbatim. */
@@ -1228,7 +1241,8 @@ test('a session start is printed in the calendar the session is filed under', ()
     sessionId: 'night', project: 'alpha', firstTs, lastTs: firstTs + 60_000,
   })])
   const ctx = ctxOf(agg, { tcfg: berlin })
-  const row = sessionRows(ctx).find((r) => r.session === 'night')
+  // 1.14 P5 (pinned and changed: sessionRows takes the range — the records active in it, §3 A4 rule 6).
+  const row = sessionRows(ctx, range('30d')).find((r) => r.session === 'night')
   assert.equal(row?.started, '2026-09-03 01:30')
   // The same calendar the drill-down files the row under — one day, not two.
   const onDay = drill(ctx, '2026-09-03', { key: 'usage', dir: 'desc' }, 0).sessions
@@ -1253,14 +1267,18 @@ test('the weekday grid reads the same clock as the hour axis', () => {
   assert.deepEqual(filled('utc'), [{ weekday: 0, block: 5 }])
 })
 
+// 1.14 P5 (pinned and changed: the Projects table is the range's buckets, not the sessions' lifetime sums — §3 A4 rule 2;
+// the session count is a string, '1', of the main records whose activity overlaps the range — rule 3).
 test('a project share without a denominator is a dash, not a zero', () => {
-  // A session that was opened but produced no counted turn: no billable tokens anywhere.
-  const agg = withSessions(new Aggregator(), [session({ project: 'myproject', requests: 3 })])
-  const rows = projectRows(ctxOf(agg))
+  // A bucket of three requests that produced no billable token: no denominator anywhere.
+  const key = '0123456789ab'
+  const agg = withSessions(projectAgg([{ ...emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'd', null, TODAY), project: key, requests: 3 }],
+    { [key]: { lastTs: NOW } }), [session({ project: key, requests: 3 })])
+  const rows = projectRows(ctxOf(agg), range('30d'))
   assert.equal(rows.length, 1)
   assert.equal(rows[0].usage, '–')
   assert.equal(rows[0].share, '–')
-  assert.equal(rows[0].sessions, 1)
+  assert.equal(rows[0].sessions, '1')
 })
 
 test('a duration rounds to the unit it prints before it splits — "20 min 00 s", never "19 min 60 s"', () => {
@@ -1363,4 +1381,172 @@ test('1.11 C3 (Review 2 F2): the API equivalent tile explains itself at list pri
   assert.ok(list.includes('What the same tokens would have cost through the API at list prices') && !list.includes('your configured rates'), list)
   const custom = at({ overrides: {}, multiplier: 0.9, unknownModel: 'strict' })
   assert.ok(custom.includes('What the same tokens would have cost through the API at your configured rates') && !custom.includes('at list prices'), custom)
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 §3 A4 (P5): the project filter through the bucket readers, the Projects table from the range
+// ---------------------------------------------------------------------------
+
+const KA = 'aaaaaaaaaaaa'
+const KB = 'bbbbbbbbbbbb'
+const KC = 'cccccccccccc'
+
+/** A day bucket of one project — `project` the key, the counters given. */
+function pday(project: string, model: string, over: Partial<Bucket> = {}, day = TODAY, source: Source = 'claude'): Bucket {
+  return { ...emptyBucket(source, model, false, 'standard', 'd', null, day), project, ...over }
+}
+
+/**
+ * Three named projects — alpha on a priced model, beta on a model with no price, gamma on one priced from its family —, a
+ * Codex rollout without a working directory (the unattributed key '') with the most usage, and other projects' fold.
+ */
+function threeProjects(names = true): Aggregator {
+  return projectAgg([
+    pday(KA, 'claude-opus-4-6', { input: 1000, cacheRead: 3000, output: 500, requests: 2, outputFinal: 2 }),
+    pday(KB, 'claude-experimental-x', { input: 3000, output: 1000, requests: 1, outputFinal: 1 }),
+    pday(KB, 'claude-opus-4-6', { input: 100, output: 100, requests: 1, outputFinal: 1 }, addDays(TODAY, -1)),
+    pday(KC, 'claude-opus-4-9', { input: 200, output: 100, requests: 1, outputFinal: 1 }),
+    pday('', 'gpt-5.3-codex', { input: 9000, cacheRead: 6000, output: 3000, requests: 1, outputFinal: 1 }, TODAY, 'codex'),
+    pday('*', 'claude-opus-4-6', { input: 50, output: 50, requests: 1, outputFinal: 1 }),
+  ], {
+    [KA]: { lastTs: NOW - 3_600_000, name: 'alpha' },
+    [KB]: { lastTs: NOW - 86_400_000, name: 'beta' },
+    [KC]: { lastTs: NOW - 2 * 86_400_000, name: 'gamma' },
+    '': { lastTs: NOW - 7_200_000 },
+    '*': { lastTs: NOW - 5 * 86_400_000, folded: 3 },
+  }, names)
+}
+
+test('1.14 §3 A4 rule 2: the Projects table of a three-project world — its columns, the cost of a priced, an unpriced and a family-priced model, the order with (no project) and other projects last, the last activity', () => {
+  const agg = withSessions(threeProjects(), [
+    session({ sessionId: 'a1', project: KA, firstTs: NOW - 2 * 3_600_000, lastTs: NOW - 3_600_000 }),
+    session({ sessionId: 'a2', project: KA, firstTs: NOW - 86_400_000, lastTs: NOW - 86_000_000 }),
+    // A subagent's record is no session of its own; a session of last month is outside the range.
+    session({ sessionId: 'a3', project: KA, isSub: true }),
+    session({ sessionId: 'b1', project: KB, firstTs: NOW - 40 * 86_400_000, lastTs: NOW - 39 * 86_400_000 }),
+  ])
+  const ctx = ctxOf(agg, { pricing: { unknownModel: 'family' }, projectNames: true })
+  const rows = projectRows(ctx, range('30d'))
+  assert.deepEqual(rows.map((r) => r.key), [KB, KA, KC, '', '*'])
+  assert.deepEqual(rows.map((r) => r.project), ['beta', 'alpha', 'gamma', '(no project)', 'other projects'])
+  const cost = (b: Bucket[]): string => costText(b.reduce((sum, x) => {
+    const c = costOfBucketOn(x, ctx)
+    return sum + (c && !c.unpriced ? c.usd : 0)
+  }, 0))
+  const [beta, alpha, gamma, none, other] = rows
+  assert.deepEqual(alpha, {
+    key: KA, project: 'alpha', usage: '1.5K',
+    cost: cost([pday(KA, 'claude-opus-4-6', { input: 1000, cacheRead: 3000, output: 500 })]),
+    costLowerBound: false, costFamily: false, requests: '2', cacheHit: '75 %', share: '12 %',
+    sessions: '2', sessionsLowerBound: false, lastActive: '11:00',
+  })
+  // beta: its priced day is a figure and its unpriced one makes it a lower bound (⚠); gamma priced from its family.
+  assert.equal(beta.cost, cost([pday(KB, 'claude-opus-4-6', { input: 100, output: 100 }, addDays(TODAY, -1))]))
+  assert.deepEqual([beta.costLowerBound, beta.costFamily, beta.sessions, beta.lastActive], [true, false, '0', '2026-09-02 12:00'])
+  assert.deepEqual([gamma.costLowerBound, gamma.costFamily], [false, true])
+  assert.match(gamma.cost, /^~<?\$/)
+  // The unattributed usage is the largest and still after the named projects; its share of the whole.
+  assert.deepEqual([none.usage, none.share, none.lastActive], ['6K', '50 %', '10:00'])
+  assert.deepEqual([other.usage, other.lastActive], ['100', '2026-08-29 12:00'])
+  // The shares are of the range's usage in the view — together about the whole.
+  assert.equal(rows.reduce((sum, r) => sum + parseInt(r.share, 10), 0), 100)
+  // The names are the table's under basename only: without them every project is its pseudonym.
+  assert.deepEqual(projectRows(ctxOf(agg, { projectNames: false }), range('30d')).map((r) => r.project),
+    [`p:${KB}`, `p:${KA}`, `p:${KC}`, '(no project)', 'other projects'])
+  // With costs off no cost and no mark.
+  assert.deepEqual(projectRows(ctxOf(agg, { showCost: false }), range('30d')).map((r) => [r.cost, r.costLowerBound, r.costFamily]),
+    rows.map(() => ['–', false, false]))
+  // A project without a label (none restored) has no last activity: a dash, never a zero.
+  const bare = projectAgg([pday(KA, 'claude-opus-4-6', { input: 10, requests: 1 })], {})
+  assert.equal(projectRows(ctxOf(bare), range('30d'))[0].lastActive, '–')
+  assert.equal(clockStamp(NOW - 3_600_000, NOW, tcfg), '11:00')
+})
+
+test('1.14 §3 A4 rule 2: the Projects table follows the range — a project active only last month is absent from this week, and its session record does not bring it back', () => {
+  const agg = withSessions(projectAgg([
+    pday(KA, 'claude-opus-4-6', { input: 1000, requests: 1 }),
+    pday(KC, 'claude-opus-4-6', { input: 5000, requests: 3 }, '2026-08-10'),
+  ], { [KA]: { lastTs: NOW }, [KC]: { lastTs: Date.UTC(2026, 7, 10, 12) } }),
+  // A lifetime session record of gamma that reaches into this week: the table is the range's buckets, never a session's sums.
+  [session({ project: KC, firstTs: Date.UTC(2026, 7, 10, 12), lastTs: NOW, input: 9000, requests: 9 })])
+  const week = rangeFor('thisWeek', NOW, tcfg, '2026-07-01')
+  assert.deepEqual(projectRows(ctxOf(agg), week).map((r) => r.key), [KA])
+  assert.deepEqual(projectRows(ctxOf(agg), range('30d')).map((r) => [r.key, r.usage, r.requests]), [[KC, '5K', '3'], [KA, '1K', '1']])
+  // The chips' list (viewModel.ts): the projects with usage in the range.
+  assert.deepEqual(projectUsage(ctxOf(agg), week).map((u) => u.key), [KA])
+})
+
+test('1.14 §3 A4 rule 2: the share is of the range\'s usage in the view — the chosen projects under a chip, a dash without any usage', () => {
+  const agg = threeProjects()
+  const chip = projectRows(ctxOf(agg, { projects: [KA] }), range('30d'))
+  assert.deepEqual(chip.map((r) => [r.key, r.share]), [[KA, '100 %']])
+  const two = projectRows(ctxOf(agg, { projects: [KA, KC] }), range('30d'))
+  assert.deepEqual(two.map((r) => [r.key, r.share]), [[KA, '83 %'], [KC, '17 %']])
+  // A range without any bucket: no row, no denominator.
+  assert.deepEqual(projectRows(ctxOf(agg), { from: '2026-01-01', to: '2026-01-02', label: 'jan', preset: 'custom' }), [])
+})
+
+test('1.14 §3 A4 rule 3: the sessions per project are exact while the range starts inside the records\' horizon — a lower bound ⚠ from the day the horizon falls on, and from the oldest kept record at the cap', () => {
+  const agg = withSessions(projectAgg([pday(KA, 'claude-opus-4-6', { input: 1000, requests: 1 })], { [KA]: { lastTs: NOW } }),
+    [session({ project: KA, firstTs: NOW - 3 * 86_400_000, lastTs: NOW })])
+  const back = (days: number): DayRange => ({ from: addDays(TODAY, -days), to: TODAY, label: `${days}`, preset: 'custom' })
+  const at = (days: number, kept = 45): [string, boolean] => {
+    const r = projectRows(ctxOf(agg, { hourRetentionDays: kept }), back(days))[0]
+    return [r.sessions, r.sessionsLowerBound]
+  }
+  assert.deepEqual(at(44), ['1', false])
+  assert.deepEqual(at(45), ['⚠ 1', true], 'the horizon\'s own day may have lost a record')
+  assert.deepEqual(at(46), ['⚠ 1', true])
+  assert.deepEqual(at(46, 60), ['1', false])
+  // Without a stated horizon a count is not called a lower bound.
+  assert.equal(projectRows(ctxOf(agg), back(400))[0].sessions, '1')
+  // At SESSION_CAP records (2000, built as objects — no file) the oldest kept one is the horizon.
+  const many = Array.from({ length: SESSION_CAP }, (_, i) => session({
+    sessionId: `s${i}`, project: KA, firstTs: NOW - 10 * 86_400_000, lastTs: NOW - 10 * 86_400_000 + i * 1000,
+  }))
+  const capped = withSessions(agg, many)
+  const r = projectRows(ctxOf(capped, { hourRetentionDays: 45 }), back(20))[0]
+  assert.deepEqual([r.sessions, r.sessionsLowerBound], ['⚠ 2000', true])
+  assert.equal(projectRows(ctxOf(capped, { hourRetentionDays: 45 }), back(5))[0].sessionsLowerBound, false)
+})
+
+test('1.14 §3 A4 rule 1: the project filter is one conjunction with the provider and the models — bucketsIn, filterFor and the aggregator\'s sums answer alike, and an empty filter passes a none bucket', () => {
+  const agg = projectAgg([
+    pday(KA, 'claude-opus-4-6', { input: 100, requests: 1 }),
+    pday(KA, 'claude-sonnet-4-6', { input: 200, requests: 1 }),
+    pday(KB, 'claude-opus-4-6', { input: 400, requests: 1 }),
+    pday(KA, 'gpt-5.3-codex', { input: 800, requests: 1 }, TODAY, 'codex'),
+  ], { [KA]: { lastTs: NOW }, [KB]: { lastTs: NOW } })
+  const ctx = ctxOf(agg, { sources: ['claude'], models: ['claude-opus-4-6'], projects: [KA] })
+  assert.deepEqual(bucketsIn(ctx, TODAY, TODAY).map((b) => [b.source, b.model, b.project]), [['claude', 'claude-opus-4-6', KA]])
+  assert.deepEqual(filterFor(ctx, 'claude'), { source: 'claude', models: ['claude-opus-4-6'], projects: [KA] })
+  assert.equal(billable(agg.sum(TODAY, TODAY, tcfg, filterFor(ctx, 'claude'))), 100)
+  assert.equal(billable(agg.sum(TODAY, TODAY, tcfg, { projects: [KA] })), 100 + 200 + 800)
+  assert.deepEqual(agg.series([TODAY], tcfg, { projects: [KB] }), [400])
+  assert.deepEqual(projectRows(ctx, range('30d')).map((r) => [r.key, r.usage]), [[KA, '100']])
+  // A none bucket carries no project: it passes an empty filter and no other.
+  const none = fromBuckets([pday(KA, 'claude-opus-4-6', { input: 100, requests: 1 })])
+  assert.equal(none.all()[0].project, undefined)
+  assert.equal(billable(none.sum(TODAY, TODAY, tcfg, { projects: [] })), 100)
+  assert.equal(billable(none.sum(TODAY, TODAY, tcfg, { projects: [KA] })), 0)
+  assert.equal(bucketsIn(ctxOf(none, { projects: [] }), TODAY, TODAY).length, 1)
+})
+
+test('1.14 §3 A4 rule 1: the hour sums tell two project filters apart — each span summed once per filter, the window rows filtered', () => {
+  const hour = Math.floor((NOW - 3_600_000) / 3_600_000)
+  const hb = (project: string, input: number): Bucket => ({
+    ...emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'h', hour, dayOf(hour * 3_600_000, tcfg)), project, input, requests: 1, outputFinal: 1,
+  })
+  const agg = projectAgg([hb(KA, 100), hb(KB, 400)], { [KA]: { lastTs: NOW }, [KB]: { lastTs: NOW } })
+  const hours = new HourSums(agg)
+  const from = NOW - 5 * 3_600_000
+  hours.prefetch([{ fromMs: from, toMs: NOW, filter: { source: 'claude', projects: [KA] } }])
+  assert.equal(billable(hours.get(from, NOW, { source: 'claude', projects: [KA] }).bucket), 100)
+  assert.equal(billable(hours.get(from, NOW, { source: 'claude', projects: [KB] }).bucket), 400)
+  assert.equal(billable(hours.get(from, NOW, { source: 'claude' }).bucket), 500)
+  // The totals table's 5 h row of a context with the chip: that project's local usage in the window.
+  const windows = [{ id: 'session:300', label: '5 h', resetsAt: NOW + 3_600_000, windowMinutes: 300 }]
+  const five = (projects: string[]): string =>
+    totalsFor(ctxOf(agg, { projects, hours: new HourSums(agg) }), 'claude', null, null, TODAY, false, windows)[0].usage
+  assert.deepEqual([five([KA]), five([KB]), five([])], ['100', '400', '500'])
 })

@@ -1750,7 +1750,10 @@ test('the cache entry counts down a session\'s cooling one-hour cache estimated 
   assert.equal(item.name, 'Token Pace — prompt cache')
   assert.equal(item.color, undefined)
   assert.equal(item.backgroundColor, undefined)
-  assert.match(String(item.tooltip?.value), /^\*\*Prompt cache cooling\*\*\n\n\$\(watch\) `Session .+ · c0c0a1a1` · prompt cache cools in ~(?:[123] m )?\d+ s \(1 h TTL, estimated from the transcript\)\n\n_A cold start after ~\d\d:\d\d(?: [AP]M)? re-writes ~152\.3K tokens/)
+  // 1.13 lead fix after P7 (b) (pinned and changed: the cold-start clock — now + about three minutes — falls on the next day in the
+  // three minutes before midnight UTC and prints the ISO day before the clock, "~2026-09-29 12:01 AM"; the stress run of
+  // P7 (b) hit it twice at 23:59 UTC. The regex takes the optional day; the clock itself is not pinned.)
+  assert.match(String(item.tooltip?.value), /^\*\*Prompt cache cooling\*\*\n\n\$\(watch\) `Session .+ · c0c0a1a1` · prompt cache cools in ~(?:[123] m )?\d+ s \(1 h TTL, estimated from the transcript\)\n\n_A cold start after ~(?:\d{4}-\d{2}-\d{2} )?\d\d:\d\d(?: [AP]M)? re-writes ~152\.3K tokens/)
   // The Claude quota item's tooltip lists the session as the card does; every other item is read by its text.
   const quota = state.live().find((i) => i.id.startsWith('tokenPace.quota.claude.'))
   assert.ok(quota, state.live().map((i) => i.id).join())

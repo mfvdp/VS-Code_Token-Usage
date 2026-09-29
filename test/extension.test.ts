@@ -5618,6 +5618,61 @@ test('1.14 §3 A7: switched off, the per-project split folds back without a re-r
   assert.deepEqual(total(off), total(on))
 })
 
+// 1.14 fix pass after Review 2 (F5): two rows of §3 A7's table had no test — M22 (none → project re-reading nothing) and
+// M23 (project ↔ session re-reading) left this file green.
+test('1.14 §3 A7 (Review 2 F5): none → project re-reads once — the log says so, the salt is made, the Projects table names the folder by its pseudonym; project → session re-reads nothing — no line, no cold start, the same label table', async () => {
+  const fx = makeFixture()
+  addSyntheticProject(fx)
+  const host = await activateHost(fx, REPO, { settings: { ...PROJECT_SECTIONS } })
+  await waitOwnColdStart(state)
+  assert.equal(host.ctx.globalState.get('tokenPace.projectSalt'), undefined)
+  const page = openDashboard()
+  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+  // The Projects table as the page has it last: [key, label] per row, from a whole push or a section's.
+  const shown = (): Array<[string, string]> | null => {
+    for (let i = page.sent.length - 1; i >= 0; i--) {
+      const p = (page.sent[i] as { payload?: { projects?: { rows?: Array<{ key: string; project: string }> } } }).payload
+      if (p && p.projects && Array.isArray(p.projects.rows)) return p.projects.rows.map((r) => [r.key, r.project])
+    }
+    return null
+  }
+  assert.deepEqual(shown(), [])
+  const WORDS = 'Attribution switched to "project" — re-reading the transcripts.'
+  const cold = coldStartLines(state)
+  const logAt = state.log.length
+  state.set('tokenPace.attribution', 'project')
+  state.fireConfigChange(['tokenPace.attribution'])
+  await waitColdStartLine(state, cold, 'the re-read for the attribution')
+  const salt = String(host.ctx.globalState.get('tokenPace.projectSalt'))
+  assert.match(salt, /^[0-9a-f]{32}$/)
+  const { projectKeyOf } = require('../src/project') as typeof import('../src/project')
+  const key = projectKeyOf(salt, SYN_SLUG)
+  await waitFor('the pseudonym in the Projects table', () => (shown() ?? []).some(([k, l]) => k === key && l === `p:${key}`))
+  await sleep(300)
+  assert.equal(coldStartLines(state), cold + 1, 'one cold start')
+  assert.equal(state.log.slice(logAt).filter((l) => l.message.includes(WORDS)).length, 1)
+  const before = shown()
+  assert.ok(before && before.length > 0)
+
+  // project → session: one record shape — nothing is read again, and the page keeps its table.
+  const cold2 = coldStartLines(state)
+  const logAt2 = state.log.length
+  state.set('tokenPace.attribution', 'session')
+  state.fireConfigChange(['tokenPace.attribution'])
+  await sleep(1000)
+  assert.equal(coldStartLines(state), cold2, 'project → session read the transcripts again')
+  assert.deepEqual(state.log.slice(logAt2).filter((l) => /re-reading the transcripts/.test(l.message)).map((l) => l.message), [])
+  assert.deepEqual(shown(), before)
+  assert.equal(host.ctx.globalState.get('tokenPace.projectSalt'), salt)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  const snap = JSON.parse(fs.readFileSync(fx.stateFile, 'utf8')) as Snapshot
+  // One record shape: the snapshot states the setting its records were collected under (project, until a new record is
+  // made under session) — never none, and the label table as it was.
+  assert.ok(snap.attribution === 'project' || snap.attribution === 'session', String(snap.attribution))
+  for (const [k] of before!) assert.ok(Object.prototype.hasOwnProperty.call(snap.projects ?? {}, k), `the label table lost ${k}`)
+  assert.equal(JSON.stringify(snap.projects).includes('"name"'), false)
+})
+
 test('1.14 §3 A2 rule 4: a 1.13 snapshot (version 8) under session is read again, and the log says why once', async () => {
   const fx = makeFixture()
   const seeded = await seedSnapshot(fx, 8)

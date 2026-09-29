@@ -979,6 +979,11 @@ test('1.14 leak test (§0a.1–§0a.6): under hash no store, view or export of t
     agg.attribution = attribution
     const ctx = (file: string, isSub = false) => ({ isSub, file, attribution, projectSalt: SALT, hashProjects })
     agg.cursors.set(main, { offset: 0, size: 0, ino: 1, dev: 1 })
+    // 1.14 fix pass after Review 2 (F11): the main transcript's first counted line was written in a worktree of the folder —
+    // its cwd is no project folder and names nothing (§0a.2 rule 1's slug equality); without that rule the worktree would
+    // name the project, and this test, not only project.test, fails (§0a.2 rule 5).
+    agg.addClaudeLine(claudeLine({ id: 'p0', ts: NOW - 3_700_000, cwd: `${CWD}/.claude/worktrees/synthetic-worktree-456`, sessionId: 'sess-syn',
+      usage: { input: 20, output: 2 }, final: true }), ctx(main))
     agg.addClaudeLine(claudeLine({ id: 'p1', ts: NOW - 3_600_000, cwd: CWD, sessionId: 'sess-syn', usage: { input: 70, output: 7 }, final: true }), ctx(main))
     agg.addClaudeLine(claudeLine({ id: 'p2', ts: NOW - 3_000_000, agentId: 'b6b6b6', sessionId: 'sess-syn', usage: { input: 30, output: 3 }, final: true,
       cwd: '/home/u/synthetic-project-123/.claude/worktrees/synthetic-worktree-456' }), ctx(sub, true))

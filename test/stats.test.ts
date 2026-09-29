@@ -1510,6 +1510,24 @@ test('1.14 §3 A4 rule 3: the sessions per project are exact while the range sta
   assert.equal(projectRows(ctxOf(capped, { hourRetentionDays: 45 }), back(5))[0].sessionsLowerBound, false)
 })
 
+// 1.14 fix pass after Review 2 (F4): "⚠ 0" — at least none — was drawn for a project with no main session record once the
+// range reached the records' horizon (the harness's agent-only project); §0 anti-fake: nothing known is absence.
+test('1.14 §3 A4 rule 3 (Review 2 F4): a lower bound of no session record is absence — "–" and no lower bound, never "⚠ 0"; an exact 0 stays 0', () => {
+  const agg = withSessions(projectAgg([
+    pday(KA, 'claude-opus-4-6', { input: 1000, requests: 1 }),
+    pday(KB, 'claude-opus-4-6', { input: 500, requests: 1 }),
+  ], { [KA]: { lastTs: NOW }, [KB]: { lastTs: NOW } }), [
+    session({ sessionId: 'a1', project: KA, firstTs: NOW - 3 * 86_400_000, lastTs: NOW }),
+    // KB: an agent's record alone — its session's own transcript is not on disk, so no main session of it is known.
+    session({ sessionId: 'b-sub', project: KB, isSub: true, firstTs: NOW - 86_400_000, lastTs: NOW }),
+  ])
+  const back = (days: number): DayRange => ({ from: addDays(TODAY, -days), to: TODAY, label: `${days}`, preset: 'custom' })
+  const rows = (days: number): Array<[string, string, boolean]> =>
+    projectRows(ctxOf(agg, { hourRetentionDays: 45 }), back(days)).map((r) => [r.key, r.sessions, r.sessionsLowerBound])
+  assert.deepEqual(rows(46), [[KA, '⚠ 1', true], [KB, '–', false]])
+  assert.deepEqual(rows(44), [[KA, '1', false], [KB, '0', false]])
+})
+
 test('1.14 §3 A4 rule 1: the project filter is one conjunction with the provider and the models — bucketsIn, filterFor and the aggregator\'s sums answer alike, and an empty filter passes a none bucket', () => {
   const agg = projectAgg([
     pday(KA, 'claude-opus-4-6', { input: 100, requests: 1 }),

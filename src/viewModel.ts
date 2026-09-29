@@ -514,8 +514,12 @@ export function defaultUiState(cfg: Config): UiState {
  * Folds one message into the UI state. Messages that do not change the view (a refresh, a
  * command) return the very same object, so the caller can tell "nothing to persist" from
  * "state changed" by identity.
+ *
+ * 1.14 §0a.8 (Review 2 F13): `attribution` is the setting of now — under `none` a filter message's project keys are not
+ * stored (the page sends none then; a crafted one leaves no key in `tokenPace.ui`). Left out, it is `none`: a caller that
+ * does not say attribution is on keeps no project chip.
  */
-export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
+export function applyMessage(ui: UiState, m: WebviewMessage, attribution: Attribution = 'none'): UiState {
   switch (m.type) {
     case 'setRange':
       // A drilled day from the old range would keep a table open that the range no longer
@@ -534,8 +538,8 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
         ...ui,
         providers: viewSources(providerViewOf(m.providers)),
         models: m.models,
-        // 1.14 §0a.8: the page sends the project chips with every filter message.
-        projects: m.projects,
+        // 1.14 §0a.8: the page sends the project chips with every filter message — kept only while attribution is on.
+        projects: attribution === 'none' ? [] : m.projects,
       }
     case 'setProvider': {
       // 1.7 F1: the view already shown changes nothing — the same object, nothing to persist.

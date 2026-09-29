@@ -9,10 +9,11 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import * as path from 'path'
-import { Aggregator, IngestContext } from '../src/agg'
+import { Aggregator, IngestContext, claudePlacement } from '../src/agg'
+import { configureRoots } from '../src/discover'
 import {
-  OTHER_PROJECTS, PROJECT_CAP, PROJECT_KEY_RE, PROJECT_NAME_MAX_CHARS, UNATTRIBUTED, cleanProjectName, isProjectKey, projectKeyOf,
-  projectLabel, slugOf,
+  OTHER_PROJECTS, PROJECT_CAP, PROJECT_KEY_RE, PROJECT_NAME_MAX_CHARS, UNATTRIBUTED, claudeProjectSegment, cleanProjectName, isProjectKey,
+  projectKeyOf, projectLabel, slugOf,
 } from '../src/project'
 import { Cursor } from '../src/types'
 import { CLAUDE_ROOT, claudeLine, codexMeta, codexTokenCount, codexTurnContext, ctxFor } from './fixtures/helpers'
@@ -187,4 +188,42 @@ test('§0a.4: a session id outside [A-Za-z0-9_-] or longer than 64 characters fa
   const x = new Aggregator()
   x.addCodexLine(codexMeta({ ts: T0, id: 'bad id' }), cursor(), on({ file: '/virtual/codex/rollout-z.jsonl' }))
   assert.equal(x.sessions()[0].sessionId, 'rollout-z')
+})
+
+// 1.14 fix pass after Review 2 (F2): the key segment is the first below the transcripts root, at any depth — the real-window
+// fixture lay three levels down in this repository's own directory and was keyed, and under basename named, by its own.
+test('§0a.1 (Review 2 F2): a .jsonl three levels down in a project directory keys to the segment directly below the root — never its own directory, and it names the project only by a cwd that slugs to that segment', () => {
+  const { claude } = configureRoots([path.join(path.sep, 'virtual', 'f2-home')])
+  try {
+    const root = claude[0]
+    const top = '-home-u-proj'
+    // Claude Code's layout: the main transcript, a subagent, a workflow agent — the segment is the session's directory.
+    assert.equal(claudeProjectSegment(root, path.join(root, top, 'sess-1.jsonl')), top)
+    assert.equal(claudeProjectSegment(root, path.join(root, top, 'sess-1', 'subagents', 'agent-a1.jsonl')), top)
+    assert.equal(claudeProjectSegment(root, path.join(root, top, 'sess-1', 'subagents', 'workflows', 'wf_1', 'agent-a2.jsonl')), top)
+    // No directory names a file directly in the root or outside it.
+    assert.equal(claudeProjectSegment(root, path.join(root, 'loose.jsonl')), '')
+    assert.equal(claudeProjectSegment(root, path.join(path.dirname(root), 'elsewhere', top, 'sess-1.jsonl')), '')
+    // Three levels down, in a directory named as another folder's slug (the fixture's -home-t-token-pace), with a cwd that slugs to it.
+    const inner = '-home-t-token-pace'
+    const nested = path.join(root, top, 'research', 'fixture', inner, 'sess-2.jsonl')
+    assert.equal(claudePlacement(nested, false).slug, top)
+    const agg = new Aggregator()
+    const names = on({ file: nested, hashProjects: false })
+    agg.addClaudeLine(claudeLine({ id: 'n1', ts: T0, cwd: '/home/t/token-pace', usage: { input: 4 } }), names)
+    const key = projectKeyOf(SALT, top)
+    assert.deepEqual(agg.all().map((b) => b.project), [key])
+    assert.equal(agg.sessions()[0].project, key)
+    assert.deepEqual(Object.keys(agg.projects()), [key], 'the inner directory is a project of its own')
+    assert.equal(agg.projects()[key].name, undefined, 'the inner directory named the project')
+    // A subagent below the nested directory keys to the same segment.
+    const sub = path.join(root, top, 'research', 'fixture', inner, 'sess-2', 'subagents', 'agent-a3.jsonl')
+    agg.addClaudeLine(claudeLine({ id: 'n2', ts: T0 + 1, cwd: '/home/t/token-pace', usage: { input: 2 } }), on({ file: sub, isSub: true, hashProjects: false }))
+    assert.deepEqual([...new Set(agg.all().map((b) => b.project))], [key])
+    // The name rule is unchanged: a main line whose cwd slugs to the segment names it.
+    agg.addClaudeLine(claudeLine({ id: 'n3', ts: T0 + 2, cwd: '/home/u/proj', usage: { input: 1 } }), names)
+    assert.equal(agg.projects()[key].name, 'proj')
+  } finally {
+    configureRoots()
+  }
 })

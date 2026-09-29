@@ -18,6 +18,7 @@
  */
 
 import { createHash } from 'crypto'
+import * as path from 'path'
 import { t } from './i18n'
 import type { ProjectLabel } from './types'
 
@@ -51,6 +52,20 @@ export function isProjectKey(v: unknown): v is string {
  */
 export function slugOf(dir: string): string {
   return dir.replace(/[^A-Za-z0-9]/g, '-')
+}
+
+/**
+ * §0a.1 (Review 2 F2 of 1.14): a Claude transcript's key segment — the FIRST path segment below its transcripts root, the one
+ * `slug` directory directly below `~/.claude/projects/`, however deep the file lies: a main transcript
+ * `<root>/<slug>/<sid>.jsonl`, a subagent's or a workflow agent's `<root>/<slug>/<sid>/subagents/…`, and a `.jsonl` that is
+ * not in Claude Code's layout (`<root>/<slug>/a/b/x.jsonl`) alike — never an inner directory, never the file's name. '' for a
+ * file directly in the root (no directory names it) or one outside it.
+ */
+export function claudeProjectSegment(root: string, file: string): string {
+  const rel = path.relative(root, file)
+  if (rel === '' || path.isAbsolute(rel) || rel === '..' || rel.startsWith(`..${path.sep}`)) return ''
+  const parts = rel.split(path.sep)
+  return parts.length >= 2 ? parts[0] : ''
 }
 
 /** sha256("tp-project-1\0" + salt + "\0" + slug), the first twelve hex digits; '' for an empty salt or slug. */

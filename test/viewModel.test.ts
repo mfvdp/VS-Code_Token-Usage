@@ -3483,9 +3483,25 @@ test('1.14 §0a.8: setFilter\'s project keys — a name, a path, 51 keys, a 13-d
   ]) assert.equal(parseWebviewMessage(msg(bad)), null, JSON.stringify(bad).slice(0, 60))
   assert.deepEqual(parseWebviewMessage(msg(['', '*', ALPHA])), { type: 'setFilter', providers: ['claude'], models: [], projects: ['', '*', ALPHA] })
   assert.deepEqual(parseWebviewMessage(msg(Array.from({ length: 50 }, (_, i) => i.toString(16).padStart(12, '0'))))?.type, 'setFilter')
-  // Keys, never names: the view state takes what the message carries.
-  const ui = applyMessage(defaultUiState(cfg), { type: 'setFilter', providers: ['claude', 'codex'], models: [], projects: [ALPHA] })
+  // Keys, never names: the view state takes what the message carries. 1.14 fix pass after Review 2 (pinned and changed:
+  // applyMessage is told the attribution — F13 —, and keeps the keys only while it is on).
+  const ui = applyMessage(defaultUiState(cfg), { type: 'setFilter', providers: ['claude', 'codex'], models: [], projects: [ALPHA] }, 'project')
   assert.deepEqual(ui.projects, [ALPHA])
+})
+
+// 1.14 fix pass after Review 2 (F13): applyMessage stored setFilter.projects under attribution none too — the page sends none
+// then, but a crafted message would have left keys in tokenPace.ui until the next restore.
+test('1.14 §0a.8 (Review 2 F13): under attribution none a filter message\'s project keys are not stored — the providers and the models are; with project or session they are', () => {
+  const msg = { type: 'setFilter' as const, providers: ['claude' as const], models: ['claude-opus-4-6'], projects: [ALPHA, ''] }
+  for (const attribution of ['none', undefined] as const) {
+    const ui = applyMessage(defaultUiState(cfg), msg, attribution)
+    assert.deepEqual([ui.providers, ui.models, ui.projects], [['claude'], ['claude-opus-4-6'], []], String(attribution))
+  }
+  // A stored chip of before is dropped by such a message too — the state holds no key while attribution is none.
+  assert.deepEqual(applyMessage({ ...defaultUiState(cfg), projects: [BETA] }, msg, 'none').projects, [])
+  for (const attribution of ['project', 'session'] as const) {
+    assert.deepEqual(applyMessage(defaultUiState(cfg), msg, attribution).projects, [ALPHA, ''], attribution)
+  }
 })
 
 test('1.14 §3 A4 rule 11: the provider switch keeps the project chips and clears the model chips; restoreProjectFilter keeps the keys the label table holds, none while attribution is none', () => {
@@ -3612,4 +3628,23 @@ test('1.14 §3 A3 rule 1: the folded line — the Projects table\'s last line an
   assert.equal(all.projects.rows.every((r) => r.sessionsLowerBound), true)
   assert.equal(all.projects.note, 'at least — session records older than 45 days are not kept')
   assert.equal(buildViewModel(makeInput({ cfg: onCfg, agg: buildAgg('project') })).projects.note, null)
+})
+
+// 1.14 fix pass after Review 2 (F3): the page draws a project's label as one left-to-right unit by its key — the rows that
+// name a project carry it, through the JSON the page gets.
+test('1.14 Review 2 F3: the Sessions table\'s rows, the Records\' top projects and top sessions carry the key of the project their label names — through a JSON round trip; a top model none', () => {
+  const round = (c: typeof onCfg): ReturnType<typeof buildViewModel> =>
+    JSON.parse(JSON.stringify(buildViewModel(makeInput({ cfg: c, agg: buildAgg(c.attribution) })))) as ReturnType<typeof buildViewModel>
+  const vm = round(onCfg)
+  const name = new Map([[ALPHA, 'alpha'], [BETA, 'beta']])
+  assert.ok(vm.sessions.rows.length > 0 && vm.records.topProjects.length > 0 && vm.records.topSessions.length > 0)
+  for (const r of vm.sessions.rows) assert.equal(name.get(r.projectKey), r.project, JSON.stringify(r))
+  assert.deepEqual(vm.records.topProjects.map((p) => [p.projectKey, p.label]), [[ALPHA, 'alpha'], [BETA, 'beta']])
+  for (const e of vm.records.topSessions) assert.equal(name.get(String(e.detailProjectKey)), e.detail, JSON.stringify(e))
+  for (const e of vm.records.topModels) assert.equal('projectKey' in e || 'detailProjectKey' in e, false, JSON.stringify(e))
+  for (const e of vm.records.topProjects) assert.equal('detailProjectKey' in e, false, JSON.stringify(e))
+  // Under hash the label is the key's pseudonym — the same key beside it.
+  const hashed = round(makeConfig({ 'tokenPace.attribution': 'session' }))
+  for (const r of hashed.sessions.rows) assert.equal(r.project, `p:${r.projectKey}`)
+  for (const e of hashed.records.topProjects) assert.equal(e.label, `p:${e.projectKey}`)
 })

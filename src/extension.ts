@@ -852,7 +852,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       void vscode.commands.executeCommand('workbench.action.openSettings', sectionSettingsQuery(m.key))
       return
     }
-    const next = applyMessage(ui, m)
+    const next = applyMessage(ui, m, cfg.attribution)
     // `applyMessage` returns the same object when nothing changed — identity is the signal.
     if (next !== ui) {
       ui = next

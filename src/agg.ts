@@ -5,9 +5,11 @@ import * as path from 'path'
 // Value import, and safe: `adapters` imports this module for types only, so the cycle is erased.
 import { isKnownSource } from './adapters'
 import { AGENT_RETENTION_DAYS, MAX_RUN_AGENTS } from './agentTree'
+// Value import, and safe: `discover` imports `adapters`, which imports this module for types only.
+import { rootOf } from './discover'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import {
-  OTHER_PROJECTS, PROJECT_CAP, UNATTRIBUTED, cleanProjectName, isProjectKey, projectKeyOf, projectLabel, slugOf,
+  OTHER_PROJECTS, PROJECT_CAP, UNATTRIBUTED, claudeProjectSegment, cleanProjectName, isProjectKey, projectKeyOf, projectLabel, slugOf,
 } from './project'
 import { cleanRunRecord, cleanRunRecordStat } from './runRecord'
 import { SYSTEM_TIME_CONFIG, TimeConfig, Zone, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
@@ -178,9 +180,10 @@ function monthBounds(month: string): { first: string; last: string } {
 /**
  * §0a.1: a Claude transcript's project key — of where the file lies, never of a line: the directory directly below
  * the projects root, which `claudePlacement` returns as its `slug` for a main transcript, a subagent and a workflow
- * agent alike (the session's directory). So the key is known before the first line is parsed, the same for every
- * line of the file and for every file of a session — a worktree's agent counts to the folder its session was
- * started in. The segment goes into the hash and nowhere else. '' without a salt or a slug.
+ * agent alike (the session's directory) — and, Review 2 F2, for a file at any depth below that directory: the first
+ * segment below the root, never an inner directory. So the key is known before the first line is parsed, the same
+ * for every line of the file and for every file of a session — a worktree's agent counts to the folder its session
+ * was started in. The segment goes into the hash and nowhere else. '' without a salt or a slug.
  */
 function claudeProjectOf(place: ClaudePlacement, ctx: IngestContext): string {
   return projectKeyOf(ctx.projectSalt, place.slug)
@@ -440,7 +443,11 @@ export function parseAgentMeta(text: string): AgentMeta | null {
 
 /** Where a Claude transcript sits, and what that says about it. */
 export interface ClaudePlacement {
-  /** The project directory's name — the fallback project label when a line carries no cwd. */
+  /**
+   * 1.14 §0a.1: the project directory's name — the one segment directly below the transcripts root that holds the file
+   * (project.ts `claudeProjectSegment`), whatever depth the file lies at; '' for a file directly in the root. A path
+   * outside every configured root (a test's virtual one) keeps the layout's reading: the directory above the session.
+   */
   slug: string
   /** For a subagent: the id of the session it belongs to; null for a main transcript. */
   parent: string | null
@@ -457,9 +464,19 @@ export interface ClaudePlacement {
  * directory named `subagents` above the file anchors it: counting a fixed number of levels up
  * took `workflows` for the session and `subagents` for the project at the second depth. A
  * subagent path without such a directory keeps the reading it always had; a main transcript's
- * never changed.
+ * never changed. The `slug` is the first segment below the configured root the file lies under
+ * (1.14 §0a.1), at any depth.
  */
 export function claudePlacement(file: string, isSub: boolean): ClaudePlacement {
+  const place = placementByLayout(file, isSub)
+  // 1.14 §0a.1 (Review 2 F2): the key's segment is the first below the root — a `.jsonl` deeper in a project
+  // directory than Claude Code writes one (a fixture, a copied transcript) belongs to that directory, never to its own.
+  const r = rootOf(file)
+  return r !== null && r.source === 'claude' ? { ...place, slug: claudeProjectSegment(r.root, file) } : place
+}
+
+/** claudePlacement's reading of the path's own layout: the session, the workflow run and the directory above them. */
+function placementByLayout(file: string, isSub: boolean): ClaudePlacement {
   const dir = path.dirname(file)
   if (!isSub) return { slug: path.basename(dir), parent: null, sessionFile: null, workflowId: null }
   // The directory names between `subagents` and the file, outermost first.

@@ -1050,6 +1050,15 @@ function projectName(key: string, label: string): string {
   return key === '' || key === '*' ? esc(label) : '<span class="pname">' + esc(label) + '</span>';
 }
 
+/**
+ * 1.14 Review 2 F3: a cell's text that may name a project — through projectName when the row carries the key of the project
+ * it names (a SessionRow's projectKey, a top project's projectKey, a top session's detailProjectKey), else escaped as it is
+ * (a model's entry, a session id).
+ */
+function projectLabelOf(key: unknown, label: unknown): string {
+  return typeof key === 'string' ? projectName(key, String(label)) : esc(label);
+}
+
 // -- sections ---------------------------------------------------------------
 
 function sSummary(): string {
@@ -1896,8 +1905,9 @@ function recordTable(head: string, rows: Payload[]): string {
     + '<div class="scroll"><table><thead><tr><th>' + esc(head) + '</th><th>' + w.usage + '</th>'
     + '<th>' + w.share + '</th>' + (cost ? '<th>' + w.cost + '</th>' : '') + '</tr></thead><tbody>'
     + rows.map(function (r) {
-      return '<tr><td' + dh(esc(head)) + '>' + esc(r.label)
-        + (r.detail ? ' <span class="meta">' + esc(r.detail) + '</span>' : '')
+      // 1.14 Review 2 F3: a top project's label and a top session's project (its detail) as the Projects table draws them.
+      return '<tr><td' + dh(esc(head)) + '>' + projectLabelOf(r.projectKey, r.label)
+        + (r.detail ? ' <span class="meta">' + projectLabelOf(r.detailProjectKey, r.detail) + '</span>' : '')
         + '</td><td' + dh(w.usage) + '>' + esc(r.usage) + '</td><td' + dh(w.share) + '>'
         + esc(r.share)
         + '</td>' + (cost ? '<td' + dh(w.cost) + '>' + esc(r.cost) + '</td>' : '') + '</tr>';
@@ -2118,7 +2128,10 @@ function sProjects(): string {
   const cost = vm.showCost === true;
   const project = tr('Project'), sessions = tr('Sessions'), last = tr('Last activity');
   const note = typeof vm.projects.note === 'string' && vm.projects.note ? vm.projects.note : '';
-  const folded = vm.projects.folded && typeof vm.projects.folded.text === 'string' ? vm.projects.folded.text : '';
+  // Review 2 F8: the folded line counts the store's folded projects, not the table's rows — under a pressed project chip the
+  // table lists the chosen projects only, and the line would read as if they were short of some; it is drawn without one.
+  const folded = pressedProjects().length === 0 && vm.projects.folded && typeof vm.projects.folded.text === 'string'
+    ? vm.projects.folded.text : '';
   const head = [project, w.usage].concat(cost ? [w.cost] : []).concat([w.requests, w.cacheHit, w.share, sessions, last]);
   const rows = vm.projects.rows.map((p: Payload) => '<tr><td' + dh(project) + '>' + projectName(String(p.key), String(p.project)) + '</td>'
     + '<td' + dh(w.usage) + '>' + esc(p.usage) + '</td>'
@@ -2154,7 +2167,8 @@ function sSessions(): string {
     + '</th></tr></thead><tbody>'
     + vm.sessions.rows.map((s: Payload) => '<tr><td' + dh(session) + '>' + esc(s.session)
       + (s.isSub ? ' <span class="meta">' + tr('sub') + '</span>' : '') + '</td>'
-      + '<td' + dh(project) + '>' + esc(s.project) + '</td><td' + dh(started) + '>'
+      // 1.14 Review 2 F3: a folder's name or pseudonym as the Projects table draws it — one left-to-right unit (projectName).
+      + '<td' + dh(project) + '>' + projectLabelOf(s.projectKey, s.project) + '</td><td' + dh(started) + '>'
       + days(esc(s.started))
       // 1.10 B5 rule 3: a stacked cell wraps; its duration and cache state keep each number with its unit.
       + '</td><td' + dh(duration) + '>' + glue(esc(s.duration)) + '</td><td' + dh(w.usage) + '>'

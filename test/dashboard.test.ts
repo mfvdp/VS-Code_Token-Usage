@@ -12444,3 +12444,64 @@ test('1.14 A9: a chip of the filter bar pressed by the keyboard keeps the focus 
   draw([])
   assert.deepEqual(focused, [])
 })
+
+// ---------------------------------------------------------------------------
+// 1.14 fix pass after Review 2 (F3, F8): a project's label is one unit wherever the page names a project; the folded line
+// only without a pressed chip
+// ---------------------------------------------------------------------------
+
+// Review 2 F3: the Sessions table and the Records printed a project's label through esc() alone — right to left, a name the
+// grammar takes only in part ('_-app', what cleanProjectName makes of an Arabic folder name with a Latin suffix) was torn.
+test('1.14 Review 2 F3: the Sessions table\'s project and the Records\' top projects and top sessions draw a folder\'s name and a pseudonym as the Projects table does — a .pname span, one left-to-right unit right to left —, (no project) and other projects as words; a model\'s entry and a session id stay text', () => {
+  const srow = (projectKey: string | undefined, project: string): Record<string, unknown> => ({
+    session: 'sess-1', ...(projectKey === undefined ? {} : { projectKey }), project, source: 'claude', isSub: false,
+    started: '2026-09-02 14:20', duration: '5 min', usage: '1K', cost: '–', requests: '3', models: 'claude-opus-4-6', cacheHit: '–', cacheState: null,
+  })
+  const cellOf = (h: string): string[] => [...h.matchAll(/<td data-h="Project" data-hl="Project: ">(.*?)<\/td>/g)].map((m) => m[1])
+  const sessions = render('sSessions()', { sessions: { enabled: true, cacheStates: [], rows: [
+    srow(PK[0], '_-app'), srow(PK[1], 'p:' + PK[1]), srow('', '(no project)'), srow('*', 'other projects'),
+  ] } })
+  assert.deepEqual(cellOf(sessions), ['<span class="pname">_-app</span>', '<span class="pname">p:' + PK[1] + '</span>', '(no project)', 'other projects'])
+  // The session id beside it is no project: text, as before.
+  assert.ok(sessions.includes('<td data-h="Session" data-hl="Session: ">sess-1</td>'), sessions)
+  // Right to left the span is the unit, whole — the grammar alone would leave the '_-' outside it.
+  const rtl = isolated(sessions)
+  assert.ok(rtl.includes('<span class="pname fig" dir="ltr">_-app</span>'), rtl)
+  assert.ok(rtl.includes('<span class="pname fig" dir="ltr">p:' + PK[1] + '</span>'), rtl)
+  // The Records: a top project's label by its projectKey, a top session's project (its detail) by its detailProjectKey.
+  const entry = (label: string, detail: string | null, keys: Record<string, string> = {}): Record<string, unknown> =>
+    ({ label, detail, usage: '1K', share: '50 %', cost: '–', ...keys })
+  const records = {
+    topModels: [entry('claude-opus-4-6', 'Claude')],
+    topProjects: [entry('B_ro-App', null, { projectKey: PK[0] }), entry('p:' + PK[1], null, { projectKey: PK[1] }), entry('(no project)', null, { projectKey: '' })],
+    topSessions: [entry('sess-1', '@scope', { detailProjectKey: PK[2] }), entry('thread-1', 'other projects', { detailProjectKey: '*' })],
+  }
+  const h = render('recordTable("Model", vm.records.topModels) + "|" + recordTable("Project", vm.records.topProjects) + "|" + recordTable("Session", vm.records.topSessions)', { records })
+  const [models, projects, tops] = h.split('|')
+  assert.ok(models.includes('<td data-h="Model" data-hl="Model: ">claude-opus-4-6 <span class="meta">Claude</span></td>'), models)
+  assert.equal(models.includes('pname'), false, models)
+  for (const want of ['<span class="pname">B_ro-App</span></td>', '<span class="pname">p:' + PK[1] + '</span></td>', 'data-hl="Project: ">(no project)</td>']) {
+    assert.ok(projects.includes(want), want + ' in ' + projects)
+  }
+  assert.ok(tops.includes('data-hl="Session: ">sess-1 <span class="meta"><span class="pname">@scope</span></span></td>'), tops)
+  assert.ok(tops.includes('data-hl="Session: ">thread-1 <span class="meta">other projects</span></td>'), tops)
+  assert.ok(isolated(tops).includes('<span class="pname fig" dir="ltr">@scope</span>'), isolated(tops))
+  // A row of before without a key (a view model of 1.13) is drawn as it was.
+  assert.deepEqual(cellOf(render('sSessions()', { sessions: { enabled: true, cacheStates: [], rows: [srow(undefined, '_-app')] } })), ['_-app'])
+})
+
+// Review 2 F8: the folded line counts the store's folded projects; under a pressed chip the table lists the chosen projects
+// only, and "1 project folded into other projects" under it read as if the filtered table were short of one.
+test('1.14 Review 2 F8: the folded line under the Projects table is drawn while no project chip is pressed, and not while one is', () => {
+  const folded = { count: 1, cap: 200, text: '1 project folded into other projects (at most 200 are kept)' }
+  const rows = [{ key: PK[0], project: 'token-pace', usage: '1K', cost: '–', costLowerBound: false, costFamily: false, requests: '1',
+    cacheHit: '–', share: '100 %', sessions: '1', sessionsLowerBound: false, lastActive: '09:05' }]
+  const projects = { rows, enabled: true, note: null, folded }
+  const line = '<div class="meta">' + folded.text + '</div>'
+  const chips = (pressed: boolean): Record<string, unknown> => ({ chips: [projectChip(0, pressed, 'token-pace'), projectChip(1, false)] })
+  assert.ok(render('sProjects()', { projects }).endsWith('</tbody></table></div>' + line))
+  assert.ok(render('sProjects()', { projects, projectFilter: chips(false) }).endsWith('</tbody></table></div>' + line))
+  const filtered = render('sProjects()', { projects, projectFilter: chips(true) })
+  assert.ok(filtered.endsWith('</tbody></table></div>'), filtered)
+  assert.equal(filtered.includes('folded into'), false, filtered)
+})

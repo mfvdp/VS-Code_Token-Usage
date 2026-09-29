@@ -58,6 +58,15 @@ function cell(s: string | null | undefined): string {
 }
 
 /**
+ * 1.14 Review 2 F9: a cell that holds a project's label — a folder's name as cleanProjectName keeps it may start and end
+ * with '_' (`_Caf_` from `éCafé`), which a markdown renderer would read as emphasis: every '_' escaped as well. Only a
+ * project's cells; a model id or a figure keeps `cell`'s form.
+ */
+function projectCell(s: string | null | undefined): string {
+  return cell(s).replace(/_/g, '\\_')
+}
+
+/**
  * 1.7 P4b: a borrowed string made safe for a Quick Pick line, whose label, description and detail
  * render `$(name)` as a codicon. Codex's app-server error reaches the provider item's detail verbatim
  * (as its `problem`, or inside the failed attempt's sentence), and its plan name the item's
@@ -921,7 +930,10 @@ function markdownRecords(L: string[], rec: ViewModel['records']): void {
     L.push(header)
     L.push('|---|---|---|---|---|')
     for (const e of rows) {
-      L.push(`| ${cell(e.label)} | ${cell(e.detail)} | ${cell(e.usage)} | ${cell(e.share)} | ${cell(e.cost)} |`)
+      // 1.14 Review 2 F9: a top project's label and a top session's project (its detail) are project cells.
+      const label = e.projectKey !== undefined ? projectCell(e.label) : cell(e.label)
+      const detail = e.detailProjectKey !== undefined ? projectCell(e.detail) : cell(e.detail)
+      L.push(`| ${label} | ${detail} | ${cell(e.usage)} | ${cell(e.share)} | ${cell(e.cost)} |`)
     }
     L.push('')
   }
@@ -957,7 +969,7 @@ export function projectsTableLines(vm: ViewModel): string[] {
   L.push(t('| Project | Usage | API cost | Requests | Cache hit | Share | Sessions | Last activity |'))
   L.push('|---|---|---|---|---|---|---|---|')
   for (const p of vm.projects.rows) {
-    L.push(`| ${cell(p.project)} | ${cell(p.usage)} | ${cell(p.cost)}${p.costLowerBound || p.costFamily ? ' ⚠' : ''} | `
+    L.push(`| ${projectCell(p.project)} | ${cell(p.usage)} | ${cell(p.cost)}${p.costLowerBound || p.costFamily ? ' ⚠' : ''} | `
       + `${cell(p.requests)} | ${cell(p.cacheHit)} | ${cell(p.share)} | ${cell(p.sessions)} | ${cell(p.lastActive)} |`)
   }
   L.push('')
@@ -1269,7 +1281,7 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
     L.push(t('| Session | Project | Started | Duration | Usage | Req. | Models | Cache |'))
     L.push('|---|---|---|---|---|---|---|---|')
     for (const s of vm.sessions.rows) {
-      L.push(`| ${cell(s.session)}${s.isSub ? ` ${t('(sub)')}` : ''} | ${cell(s.project)} | ${cell(s.started)} | `
+      L.push(`| ${cell(s.session)}${s.isSub ? ` ${t('(sub)')}` : ''} | ${projectCell(s.project)} | ${cell(s.started)} | `
         + `${cell(s.duration)} | ${cell(s.usage)} | ${cell(s.requests)} | ${cell(s.models)} | `
         + `${cell(s.cacheState)} |`)
     }

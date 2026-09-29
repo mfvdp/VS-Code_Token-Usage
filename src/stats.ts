@@ -183,9 +183,13 @@ export interface ProjectRow {
   cacheHit: string
   /** Already formatted ("42 %") — of the range's usage in the view —, and '–' when there is no denominator to divide by. */
   share: string
-  /** The main sessions whose activity overlaps the range (§3 A4 rule 3): a count, or '⚠ 12' when it is a lower bound. */
+  /**
+   * The main sessions whose activity overlaps the range (§3 A4 rule 3): a count, or '⚠ 12' when it is a lower bound — and '–'
+   * for a lower bound of none (Review 2 F4: a project whose main sessions all lie beyond the records' horizon, or that has
+   * none — an agent's transcript alone).
+   */
   sessions: string
-  /** The range starts on or before the day the session records' horizon falls on: `sessions` is at least that many. */
+  /** The range starts on or before the day the session records' horizon falls on: `sessions` is at least that many (never '–'). */
   sessionsLowerBound: boolean
   /** `clockStamp` of the project's newest counted line ever (§7a Q22: a fact of the project, not of the range), or '–'. */
   lastActive: string
@@ -194,6 +198,11 @@ export interface ProjectRow {
 export interface SessionRow {
   session: string
   project: string
+  /**
+   * 1.14 Review 2 F3: the key of the project `project` labels (project.ts `PROJECT_KEY_RE`, '' or `OTHER_PROJECTS`) — the
+   * page draws a folder's name or a pseudonym as one left-to-right unit by it, '(no project)' and 'other projects' as words.
+   */
+  projectKey: string
   source: Source
   isSub: boolean
   started: string
@@ -300,6 +309,10 @@ export interface RecordEntry {
   usage: string
   share: string
   cost: string
+  /** 1.14 Review 2 F3: a top project's key — its `label` is that project's (the page draws it by the key, as SessionRow's). */
+  projectKey?: string
+  /** 1.14 Review 2 F3: a top session's project key — its `detail` is that project's label. */
+  detailProjectKey?: string
 }
 
 /**
@@ -2159,20 +2172,26 @@ function byUsageThenLabel(a: { usage: number; label: string }, b: { usage: numbe
 }
 
 function topOf(
-  list: { label: string; detail: string | null; usage: number; cost: string }[],
+  list: { label: string; detail: string | null; usage: number; cost: string; projectKey?: string; detailProjectKey?: string }[],
   total: number,
   cap: number,
 ): RecordEntry[] {
   return [...list]
     .sort(byUsageThenLabel)
     .slice(0, cap)
-    .map((e) => ({
-      label: e.label,
-      detail: e.detail,
-      usage: tokens(e.usage),
-      share: percentOf(e.usage, total),
-      cost: e.cost,
-    }))
+    .map((e) => {
+      const out: RecordEntry = {
+        label: e.label,
+        detail: e.detail,
+        usage: tokens(e.usage),
+        share: percentOf(e.usage, total),
+        cost: e.cost,
+      }
+      // 1.14 Review 2 F3: the project a label or a detail names, only where it names one (a model's entry has none).
+      if (e.projectKey !== undefined) out.projectKey = e.projectKey
+      if (e.detailProjectKey !== undefined) out.detailProjectKey = e.detailProjectKey
+      return out
+    })
 }
 
 /**
@@ -2325,7 +2344,7 @@ export function records(
     cap(models.size),
   )
 
-  const sessions: { label: string; detail: string | null; usage: number; cost: string }[] = []
+  const sessions: { label: string; detail: string | null; usage: number; cost: string; detailProjectKey: string }[] = []
   let sessionTotal = 0
   // 1.14 §3 A1 rule 4: a project by its label — its folder's name only under basename.
   const labels: Readonly<Record<string, ProjectLabel>> = on ? ctx.agg.projects() : {}
@@ -2345,7 +2364,9 @@ export function records(
       const use = billable(emptySession(rec))
       if (use <= 0) continue
       // No per-day model split on a session record, so a per-session cost would be a guess.
-      sessions.push({ label: rec.sessionId, detail: projectLabel(rec.project, labels, names), usage: use, cost: '–' })
+      sessions.push({
+        label: rec.sessionId, detail: projectLabel(rec.project, labels, names), usage: use, cost: '–', detailProjectKey: rec.project,
+      })
       sessionTotal += use
     }
   }
@@ -2364,6 +2385,7 @@ export function records(
     topProjects: topOf(
       [...projectGroups.entries()].map(([key, g]) => ({
         label: projectLabel(key, labels, names),
+        projectKey: key,
         detail: null,
         usage: g.usage,
         cost: ctx.showCost && !g.unpriced ? costText(g.cost) : '–',
@@ -2951,8 +2973,9 @@ export function projectRows(ctx: StatsCtx, range: DayRange): ProjectRow[] {
         // No billable tokens anywhere means no denominator — a dash, like every column
         // beside it. A rendered "0 %" would claim a measured share of nothing.
         share: percentOf(g.usage, total),
-        sessions: lowerBound ? `⚠ ${n}` : String(n),
-        sessionsLowerBound: lowerBound,
+        // Review 2 F4 (§0 anti-fake): "at least 0" says nothing — a lower bound of no record is absence, '–'; an exact 0 stays.
+        sessions: lowerBound && n === 0 ? '–' : lowerBound ? `⚠ ${n}` : String(n),
+        sessionsLowerBound: lowerBound && n > 0,
         lastActive: isStamp(last) ? clockStamp(last, ctx.now, ctx.tcfg) : '–',
       },
     }
@@ -2981,6 +3004,7 @@ export function sessionRows(ctx: StatsCtx, range: DayRange, limit = 50): Session
     return {
       session: s.sessionId,
       project: projectLabel(s.project, labels, names),
+      projectKey: s.project,
       source: s.source,
       isSub: s.isSub,
       // The configured calendar, not UTC: `drill` files this session under `dayOf(firstTs)`,

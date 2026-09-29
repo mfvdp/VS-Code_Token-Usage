@@ -2563,3 +2563,37 @@ test('1.14 §3 A4 rule 10: the project filter is one line of both text views whi
   assert.ok(quickPickItems(dq).some((i) => i.label === '3 projects folded into other projects (at most 200 are kept)'))
   assert.ok(markdownDocument(dq).includes('- 3 projects folded into other projects (at most 200 are kept)'))
 })
+
+// 1.14 fix pass after Review 2 (F9): cell() escapes only '\' and '|' — a folder's name as cleanProjectName keeps it
+// ('_Caf_' from 'éCafé') read as emphasis wherever the pasted summary or the document is rendered.
+test('1.14 Review 2 F9: a project cell escapes every \'_\' — the Projects table of the document and of the summary, the Sessions table\'s project, a top project and a top session\'s project —, and no other cell does', () => {
+  const { toMarkdownSummary } = require('../src/exporter') as typeof import('../src/exporter')
+  const cfgOn = makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename' })
+  const built = buildViewModel(makeInput({ cfg: cfgOn, agg: buildAgg('project') }))
+  assert.ok(built.projects.rows.length > 0 && built.sessions.rows.length > 0 && built.records.topProjects.length > 0 && built.records.topSessions.length > 0)
+  const vm: ViewModel = {
+    ...built,
+    projects: { ...built.projects, rows: built.projects.rows.map((r, i) => (i === 0 ? { ...r, project: '_Caf_' } : r)) },
+    sessions: { ...built.sessions, rows: built.sessions.rows.map((r, i) => (i === 0 ? { ...r, project: '_Caf_' } : r)) },
+    records: {
+      ...built.records,
+      topModels: built.records.topModels.map((m, i) => (i === 0 ? { ...m, label: 'my_model_x' } : m)),
+      topProjects: built.records.topProjects.map((p, i) => (i === 0 ? { ...p, label: '_Caf_' } : p)),
+      topSessions: built.records.topSessions.map((s, i) => (i === 0 ? { ...s, label: 'sess_1', detail: '_Caf_' } : s)),
+    },
+  }
+  const md = markdownDocument(vm)
+  const row = (heading: string, first: string): string | undefined => rowsOf(md, heading).find((l) => l.startsWith(`| ${first} |`))
+  assert.ok(row('## Projects', '\\_Caf\\_'), md)
+  assert.ok(md.split('\n').some((l) => /^\| [^|]+ \| \\_Caf\\_ \| /.test(l)), 'the Sessions table\'s project')
+  const part = recordsPart(md)
+  assert.ok(part.some((l) => l.startsWith('| \\_Caf\\_ | ')), 'a top project')
+  // A session id and a model id are no project: their '_' stays as it is.
+  assert.ok(part.some((l) => l.startsWith('| sess_1 | \\_Caf\\_ | ')), 'a top session\'s project')
+  assert.ok(part.some((l) => l.startsWith('| my_model_x | ')), 'a top model')
+  assert.equal(md.includes('| _Caf_ |'), false, md)
+  // The summary prints the same Projects table (projectsTableLines).
+  const summary = toMarkdownSummary(vm)
+  assert.ok(summary.includes('| \\_Caf\\_ | '), summary)
+  assert.equal(summary.includes('| _Caf_ |'), false, summary)
+})

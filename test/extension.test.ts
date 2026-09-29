@@ -5641,3 +5641,27 @@ test('1.14 §3 A2 rule 4: a 1.13 snapshot (version 8) under session is read agai
   assert.equal(state.log.some((l) => l.message.includes('The per-project figures of 1.14')), false)
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
+
+test('1.14 (after P7, the lead): Copy Usage Summary says what the clipboard carries — model names alone under attribution none, model names and project labels with attribution on under either names mode; the words follow the setting without a reload', async () => {
+  const fx = makeFixture()
+  addSyntheticProject(fx)
+  await activateHost(fx, REPO, { settings: { 'tokenPace.attribution': 'project', ...PROJECT_SECTIONS } })
+  await waitOwnColdStart(state)
+  const said = (): string => state.messages[state.messages.length - 1]?.text ?? ''
+  const ON = 'Token Pace: usage summary copied as markdown (model names and project labels included).'
+  const OFF = 'Token Pace: usage summary copied as markdown (model names included).'
+  await state.execute('tokenPace.copySummary')
+  assert.equal(said(), ON)
+  state.set('tokenPace.showProjectNames', 'basename')
+  state.fireConfigChange(['tokenPace.showProjectNames'])
+  await sleep(300)
+  await state.execute('tokenPace.copySummary')
+  assert.equal(said(), ON, 'basename: the labels are names, still project labels')
+  state.set('tokenPace.attribution', 'none')
+  state.fireConfigChange(['tokenPace.attribution'])
+  await sleep(300)
+  await state.execute('tokenPace.copySummary')
+  assert.equal(said(), OFF, 'under none the summary carries no project — the old sentence')
+  assert.ok(state.clipboard.length >= 3, 'the summary was not copied each time')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})

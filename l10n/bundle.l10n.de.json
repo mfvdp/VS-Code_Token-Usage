@@ -700,6 +700,7 @@
   "Token Pace: the status line entry was removed.": "Token Pace: Der Statuszeilen-Eintrag wurde entfernt.",
   "Token Pace: the status line is already connected.": "Token Pace: Die Statuszeile ist bereits verbunden.",
   "Token Pace: the transcript directories changed. Reload the window to read them.": "Token Pace: Die Transkript-Verzeichnisse haben sich geändert. Laden Sie das Fenster neu, um sie einzulesen.",
+  "Token Pace: usage summary copied as markdown (model names and project labels included).": "Token Pace: Verbrauchsübersicht als Markdown kopiert (Modellnamen und Projektbezeichnungen enthalten).",
   "Token Pace: usage summary copied as markdown (model names included).": "Token Pace: Verbrauchsübersicht als Markdown kopiert (Modellnamen enthalten).",
   "Token Pace: {0}": "Token Pace: {0}",
   "Token Pace: {0} default prompt(s) restored.": "Token Pace: {0} Standard-Prompt(s) wiederhergestellt.",

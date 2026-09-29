@@ -249,8 +249,14 @@ export function registerNativeViews(
 
     vscode.commands.registerCommand('tokenPace.copySummary', async () => {
       await vscode.env.clipboard.writeText(toMarkdownSummary(deps.getVm()))
+      // 1.14 (P7's report, the lead): with attribution on the summary carries project labels — the folder names
+      // under basename, pseudonyms under hash — and the message says so, as the save dialog does: a whole sentence
+      // each, not a stem.
+      const { cfg } = deps.getExportInput()
       void showMessage('info',
-        t('Token Pace: usage summary copied as markdown (model names included).'), {},
+        cfg.attribution === 'none'
+          ? t('Token Pace: usage summary copied as markdown (model names included).')
+          : t('Token Pace: usage summary copied as markdown (model names and project labels included).'), {},
       )
     }),
   )

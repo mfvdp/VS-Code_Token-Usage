@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 63,
+  "applied": 64,
   "bundle": {
     "• Codex — the local \"codex app-server\" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.": {
       "parts": [
@@ -394,6 +394,13 @@
       ],
       "state": "translate",
       "why": "1.14 A4 rule 10: a new key, the Quick Pick's detail of a project row — {0} is a clock stamp (14:20 today, 2026-09-26 14:20 another day — CLOCK_STAMP_KEYS), the project's newest counted line: the label form with a colon, never a preposition that takes a clock hour only, German Letzte Aktivität: {0}"
+    },
+    "Token Pace: usage summary copied as markdown (model names and project labels included).": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "1.14 (after P7, the lead): the Copy Usage Summary message with attribution on — the summary then carries project labels (folder names under basename, pseudonyms under hash), as the save dialog says — a whole sentence, not a stem, and the old key stays for attribution none — German Token Pace: Verbrauchsübersicht als Markdown kopiert (Modellnamen und Projektbezeichnungen enthalten)."
     }
   },
   "nls": {

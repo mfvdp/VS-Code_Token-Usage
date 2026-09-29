@@ -214,6 +214,7 @@
   "Token Pace: exported to {0}": "Token Pace: exportiert nach {0}",
   "Token Pace: exported to {0} and {1}": "Token Pace: exportiert nach {0} und {1}",
   "Token Pace: exported to {0}, {1} and {2}": "Token Pace: exportiert nach {0}, {1} und {2}",
+  "Token Pace: usage summary copied as markdown (model names and project labels included).": "Token Pace: Verbrauchsübersicht als Markdown kopiert (Modellnamen und Projektbezeichnungen enthalten).",
   "Token Pace: usage summary copied as markdown (model names included).": "Token Pace: Verbrauchsübersicht als Markdown kopiert (Modellnamen enthalten).",
   "Token counts are read from local transcript files and need no network access. Quota percentages do.": "Die Token-Zahlen werden aus lokalen Transkriptdateien gelesen und brauchen keinen Netzwerkzugriff. Die Kontingent-Prozentwerte schon.",
   "Token snapshot (state.json)": "Token-Snapshot (state.json)",

@@ -5004,12 +5004,15 @@ test('the pages carry the sentences of the 1.13 documentation package, held to t
   const bar = flatText(doc.statusBar)
   for (const claim of ['fill that has not reached the marker is reserve, fill beyond it is ahead of pace — left of the marker and right of it, since the bar fills from the left',
     'In Arabic, Hebrew and Persian the bar draws from the right, fill first, beside the entry\'s label',
-    'an English settings page next to a bar in Arabic, Hebrew or Persian says left and right, which there read the other way round',
+    // 1.14 P2 (pinned and changed: "an English settings page next to a bar in Arabic, Hebrew or Persian says left and right,
+    // which there read the other way round" → the settings by the marker in every language — §3 B7 rule 4).
+    'The settings say it by the marker too, so their words hold for a bar drawn either way.',
     'The bar\'s glyphs, which are neither letters nor figures, take the entry\'s direction: they draw from the right, fill first',
     'a description can carry no direction mark to make the two agree']) {
     assert.ok(bar.includes(claim), `docs/status-bar.md does not say: ${claim}`)
   }
   assert.equal(bar.includes('fill left of the marker is reserve, fill right of it is ahead of pace'), false, 'status-bar.md still reads the bar by left and right alone')
+  assert.equal(bar.includes('says left and right, which there read the other way round'), false, 'status-bar.md still names the settings\' left and right')
   // agents.md, dashboard.md, notifications.md, settings.md, development.md.
   assert.ok(flatText(doc.agents).includes('In Arabic, Hebrew and Persian the tree is mirrored — it indents toward the left — and the two arrows follow the layout: `←` opens a closed node or moves to its first child, `→` closes an open one or moves to the node above'))
   const dash = flatText(doc.dashboard)

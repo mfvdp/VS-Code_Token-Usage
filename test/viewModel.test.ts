@@ -2293,6 +2293,46 @@ test('the explanation follows the window into every state the card can be in', (
   assert.equal(lines[lines.length - 1], 'The reading is 42 min old (stale after 20 min); the colour may lag.')
 })
 
+test('the explanation names the reset\'s weekday a day or more ahead, as the bar does, and a passed reset\'s day — resetClock and clockStamp handed in by the view model, English and German (1.14 B1, R1-F7-113, §7a Q8)', () => {
+  const { setBundle, setLocale } = require('../src/i18n') as typeof import('../src/i18n')
+  const explainOf = (over: Partial<QuotaWindow>, quota: Parameters<typeof state>[1] = {}) =>
+    buildViewModel(makeInput({
+      cfg: makeConfig(PACE_NO_BAND),
+      quotas: [state('claude', { windows: [win(over)], ...quota })],
+    })).quotas[0].windows[0]
+  // NOW is Thursday 2026-09-03 12:00 UTC: an exhausted seven-day window resetting in three days waits until Sunday.
+  const week = { id: 'weekly_all:10080', kind: 'weekly' as const, label: '7 d', shortLabel: '7d', windowMinutes: 10080 }
+  const full = explainOf({ ...week, percent: 100, resetsAt: NOW + 3 * 86_400_000 })
+  assert.equal(full.explain.lines[0], '100 % used — exhausted until the reset at Su 12:00.')
+  // The Quick Pick's own reset clock of the same window says the same day: one definition (resetClock).
+  assert.equal(full.resetAbsolute, 'Su 12:00')
+  assert.equal(explainOf({ ...week, percent: 101, resetsAt: NOW + 3 * 86_400_000 }).explain.lines[0], '101 % used — over the limit until the reset at Su 12:00.')
+  // The same window resetting today: the clock alone.
+  assert.equal(explainOf({ ...week, percent: 100, resetsAt: NOW + 2 * 3_600_000 }).explain.lines[0], '100 % used — exhausted until the reset at 14:00.')
+  // A passed reset of yesterday, the reading from before it: its day in front (clockStamp) — one of today its clock alone.
+  const yesterday = { fetchedAt: Math.round((NOW - 30 * 3_600_000) / 1000) }
+  const due = explainOf({ ...week, percent: 62, resetsAt: NOW - 26 * 3_600_000 }, yesterday)
+  assert.equal(due.display, 'resetDue')
+  assert.ok(due.explain.lines[0].startsWith('The stated reset (2026-09-02 10:00) has passed'), due.explain.lines[0])
+  assert.ok(explainOf({ percent: 62, resetsAt: NOW - 60_000 }).explain.lines[0].startsWith('The stated reset (11:59) has passed'))
+  // German: „bis zum Reset (So 12:00)" — the brackets of 1.14, the weekday as the code writes it (two letters, no stop).
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    resetTimeMemos()
+    assert.equal(explainOf({ ...week, percent: 100, resetsAt: NOW + 3 * 86_400_000 }).explain.lines[0], '100 % verbraucht — erschöpft bis zum Reset (So 12:00).')
+    assert.equal(explainOf({ ...week, percent: 101, resetsAt: NOW + 3 * 86_400_000 }).explain.lines[0], '101 % verbraucht — über dem Limit bis zum Reset (So 12:00).')
+    assert.equal(explainOf({ ...week, percent: 100, resetsAt: NOW + 2 * 3_600_000 }).explain.lines[0], '100 % verbraucht — erschöpft bis zum Reset (14:00).')
+    assert.ok(explainOf({ ...week, percent: 62, resetsAt: NOW - 26 * 3_600_000 }, yesterday).explain.lines[0]
+      .startsWith('Der angegebene Reset (2026-09-02 10:00) ist vorbei'))
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+    resetTimeMemos()
+  }
+})
+
 test('a measuring window is explained by the phase it is in, with the clock time it ends', () => {
   // A five-point band, so the phase holds up to ten percent under either reading of the rule.
   const vm = buildViewModel(makeInput({

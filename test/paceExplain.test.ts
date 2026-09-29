@@ -10,16 +10,26 @@
 
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { setLocale } from '../src/i18n'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { setBundle, setLocale } from '../src/i18n'
 import { intlTag, LANGUAGES } from '../src/languages'
 import { PaceConfig, paceVerdict, WindowDisplay, windowElapsed } from '../src/pace'
 import { EffectivePace, ExplainInput, explainWindow, paceThresholds } from '../src/paceExplain'
+import { TimeConfig, clockStamp, formatTime, resetClock } from '../src/time'
+import { ROOT } from './helpers/nls'
 
 /** 2026-09-06 12:00 UTC. */
 const NOW = Date.UTC(2026, 8, 6, 12, 0, 0)
 const HOUR = 3_600_000
 /** "HH:MM" in UTC — the view model hands in the configured formatter; here it is fixed. */
 const fmt = (ms: number): string => new Date(ms).toISOString().slice(11, 16)
+/**
+ * 1.14 B1: the reset's clock and the passed reset's stamp as the view model hands them in — `resetClock` (the weekday in
+ * front a day or more ahead) and `clockStamp` (the day in front on another day), in UTC with a 24-hour clock.
+ */
+const UTC: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
+const clocks = { resetClock: (ms: number): string => resetClock(ms, NOW, UTC), stamp: (ms: number): string => clockStamp(ms, NOW, UTC) }
 
 /** No band: yellow from the first whole percent ahead — the 1.3 default. */
 const NO_BAND: EffectivePace = { tolerancePoints: 0, minElapsedPercent: 3, levels: 'binary' }
@@ -48,7 +58,19 @@ function explain(
     : percent > 100.5 ? 'overflow' : percent >= 99.5 ? 'exhausted' : 'normal'
   return explainWindow({
     percent, elapsed, verdict, display, pace, resetsAt, windowMinutes, now: NOW,
-    ageMinutes: 2, staleAfterMinutes: 20, formatTime: fmt, ...over,
+    ageMinutes: 2, staleAfterMinutes: 20, formatTime: fmt, ...clocks, ...over,
+  })
+}
+
+/** 1.14 B1: a seven-day window `hoursToReset` before its reset, judged by the real rule, `display` as `explain`'s. */
+function explainWeek(percent: number, hoursToReset: number, over: Partial<ExplainInput> = {}): ReturnType<typeof explainWindow> {
+  const resetsAt = NOW + hoursToReset * HOUR
+  const elapsed = windowElapsed(resetsAt, 10080, NOW)
+  const verdict = paceVerdict(percent, elapsed, cfgOf(NO_BAND))
+  const display: WindowDisplay = percent > 100.5 ? 'overflow' : percent >= 99.5 ? 'exhausted' : 'normal'
+  return explainWindow({
+    percent, elapsed, verdict, display, pace: NO_BAND, resetsAt, windowMinutes: 10080, now: NOW,
+    ageMinutes: 2, staleAfterMinutes: 20, formatTime: fmt, ...clocks, ...over,
   })
 }
 
@@ -190,6 +212,42 @@ test('a stale reading adds its age and the rule it is stale by, last', () => {
   assert.equal(explain(37, THIRD, NO_BAND, { ageMinutes: null }).lines.some((l) => l.includes('stale')), false)
 })
 
+test('the reset a full window waits for names its weekday a day or more ahead, and a passed reset of an earlier day its day — resetClock and clockStamp through the input, English and German (1.14 B1, R1-F7-113, §7a Q8)', () => {
+  // NOW is Sunday 2026-09-06 12:00 UTC: a seven-day window exhausted three days before its reset waits until Wednesday.
+  const week = explainWeek(100, 72)
+  assert.equal(week.title, 'Why red')
+  assert.equal(week.lines[0], '100 % used — exhausted until the reset at We 12:00.')
+  assert.equal(explainWeek(111, 72).lines[0], '111 % used — over the limit until the reset at We 12:00.')
+  // The bar's own clock of the same reset — one definition (resetClock), so the two never disagree.
+  assert.ok(week.lines[0].includes(resetClock(NOW + 72 * HOUR, NOW, UTC)))
+  // The same window resetting today: the clock alone, as the bar writes it.
+  assert.equal(explainWeek(100, 2).lines[0], '100 % used — exhausted until the reset at 14:00.')
+  // Less than a day ahead, the next morning: no weekday either (resetClock's rule — a day or more).
+  assert.equal(explainWeek(100, 20).lines[0], '100 % used — exhausted until the reset at 08:00.')
+  // A passed reset of yesterday names its day (clockStamp), one of today its clock.
+  const due = explain(62, -26, NO_BAND, { display: 'resetDue' })
+  assert.ok(due.lines[0].startsWith('The stated reset (2026-09-05 10:00) has passed'), due.lines[0])
+  assert.ok(explain(62, -5 / 60, NO_BAND, { display: 'resetDue' }).lines[0].startsWith('The stated reset (11:55) has passed'))
+  // The mutation of B1 rule 1: the clock of today (formatTime, the measuring line's formatter) in the reset's place
+  // loses the day — the sentence this test exists against.
+  assert.equal(explainWeek(100, 72, { resetClock: fmt }).lines[0], '100 % used — exhausted until the reset at 12:00.')
+  assert.equal(explain(62, -26, NO_BAND, { display: 'resetDue', stamp: fmt }).lines[0].startsWith('The stated reset (10:00)'), true)
+  // German: the label form's brackets, the weekday as the code writes it — „Mi" without a full stop (1.13 P8).
+  const german = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(german)
+    setLocale('de')
+    assert.equal(explainWeek(100, 72).lines[0], '100 % verbraucht — erschöpft bis zum Reset (Mi 12:00).')
+    assert.equal(explainWeek(111, 72).lines[0], '111 % verbraucht — über dem Limit bis zum Reset (Mi 12:00).')
+    assert.equal(explainWeek(100, 2).lines[0], '100 % verbraucht — erschöpft bis zum Reset (14:00).')
+    assert.ok(explain(62, -26, NO_BAND, { display: 'resetDue' }).lines[0].startsWith('Der angegebene Reset (2026-09-05 10:00) ist vorbei'))
+    assert.equal(formatTime(NOW, UTC, true), 'So 12:00')
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+})
+
 test('a passed reset makes the bar neutral, and the words say whose figure is left on it', () => {
   const e = explain(62, -5 / 60, NO_BAND, { display: 'resetDue' })
   assert.equal(e.title, 'Why grey')
@@ -202,7 +260,7 @@ test('a passed reset makes the bar neutral, and the words say whose figure is le
 test('no limit and no reading are explained as absences, never as a green pace', () => {
   const unlimited = explainWindow({
     percent: 0, elapsed: 60, display: 'unlimited', pace: NO_BAND, resetsAt: NOW + 2 * HOUR,
-    windowMinutes: 300, now: NOW, ageMinutes: 2, staleAfterMinutes: 20, formatTime: fmt,
+    windowMinutes: 300, now: NOW, ageMinutes: 2, staleAfterMinutes: 20, formatTime: fmt, ...clocks,
     verdict: { level: 'ok', points: null, ratio: null, measuring: false, text: 'unlimited' },
   })
   assert.equal(unlimited.title, 'Why no colour')

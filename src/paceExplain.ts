@@ -11,7 +11,8 @@
  * the bar decides another — and it is the one place that writes them: the dashboard popover,
  * the markdown line under the table and the Quick Pick detail all print these lines verbatim.
  *
- * Pure: no vscode, no clock of its own. The time formatter comes in as a parameter, like
+ * Pure: no vscode, no clock of its own. The time formatters come in as parameters — a clock
+ * of today, a reset's clock with its weekday, a stamp with its day (1.14 B1) —, like
  * everywhere else in the view model, so the words honour the reader's zone and hour cycle
  * without this module knowing either.
  *
@@ -59,7 +60,19 @@ export interface ExplainInput {
   /** Age of the reading in minutes; null when the source named no time. */
   ageMinutes: number | null
   staleAfterMinutes: number
+  /** The clock alone, without a day — the measuring phase's end. */
   formatTime: (ms: number) => string
+  /**
+   * 1.14 B1 (R1-F7-113): the clock of the reset a full window waits for, as the bar and the notifications write it —
+   * `resetClock`'s form: the weekday in front a day or more ahead ("Thu 06:00"), the clock alone today ("06:00"). A
+   * seven-day window's reset three days away is no clock of today.
+   */
+  resetClock: (ms: number) => string
+  /**
+   * 1.14 B1 rule 2 (§7a Q8): the clock of a stated reset that has passed — `clockStamp`'s form: "14:20" today,
+   * "2026-09-26 14:20" on an earlier day.
+   */
+  stamp: (ms: number) => string
 }
 
 /**
@@ -223,8 +236,7 @@ export function explainWindow(i: ExplainInput): WindowExplain {
       // 1.10 B4: the setting as the reader wrote it — a decimal in their decimal mark, a whole number plain.
       ageWords(i.ageMinutes), figure(i.staleAfterMinutes))
     : null
-  const time = (ms: number | null): string | null =>
-    (ms !== null && Number.isFinite(ms) ? i.formatTime(ms) : null)
+  const resetsAt = i.resetsAt !== null && Number.isFinite(i.resetsAt) ? i.resetsAt : null
 
   if (!Number.isFinite(i.percent)) {
     return {
@@ -242,10 +254,11 @@ export function explainWindow(i: ExplainInput): WindowExplain {
     return { title: t('Why no colour'), lines }
   }
   if (i.display === 'resetDue') {
-    const at = time(i.resetsAt)
-    lines.push(at
+    // A reset of an earlier day names its day (1.14 B1 rule 2): the reading may be days old.
+    const passed = resetsAt !== null ? i.stamp(resetsAt) : null
+    lines.push(passed
       ? t('The stated reset ({0}) has passed and no reading since has caught up: the {1} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.',
-        at, used)
+        passed, used)
       : t('The stated reset has passed and no reading since has caught up: the {0} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.',
         used))
     if (staleLine) lines.push(staleLine)
@@ -261,18 +274,19 @@ export function explainWindow(i: ExplainInput): WindowExplain {
   const clock = i.elapsed !== null && Number.isFinite(i.elapsed)
   const facts = clock ? factsLine(used, i.elapsed as number, i.verdict, i.percent) : null
   if (reached || i.verdict.level === 'error') {
-    const at = time(i.resetsAt)
+    // The reset with its weekday once it is a day or more away (1.14 B1): a seven-day window waits days for it.
+    const until = resetsAt !== null ? i.resetClock(resetsAt) : null
     if (reached) lines.push(t('The provider reports this limit as reached.'))
     // The state is part of the sentence, not a word dropped into a slot: "over the limit"
     // and "exhausted" take different grammar in another language.
     if (i.verdict.level === 'error') {
       if (i.display === 'overflow') {
-        lines.push(at
-          ? t('{0} % used — over the limit until the reset at {1}.', used, at)
+        lines.push(until
+          ? t('{0} % used — over the limit until the reset at {1}.', used, until)
           : t('{0} % used — over the limit; this window reports no reset time.', used))
       } else {
-        lines.push(at
-          ? t('{0} % used — exhausted until the reset at {1}.', used, at)
+        lines.push(until
+          ? t('{0} % used — exhausted until the reset at {1}.', used, until)
           : t('{0} % used — exhausted; this window reports no reset time.', used))
       }
     }

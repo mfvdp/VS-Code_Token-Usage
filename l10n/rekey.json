@@ -73,6 +73,316 @@
       "part": "text",
       "key": "\"Token Pace: Disconnect Claude Status Line\" restores the previous entry exactly — as long as\nthe entry is still the one we installed. Uninstalling the extension does not remove the entry\nbut deletes the script's copy with the extension's storage, and a status line still connected\nwould then start a script that is gone — so disconnect first if you plan to remove Token Pace.",
       "why": "T17 (1.14): the English's hard wraps — as many lines as the English, each at most 100 characters — re-wrap, and shorten only where the words do not fit"
+    },
+    {
+      "n": 10,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "{0} % used — over the limit until the reset at {1}.",
+      "why": "1.14 B1 (R1-F7-113): the English is unchanged, but its slot {1} now holds the reset's clock with the weekday in front a day or more ahead (Th 06:00, German Do 06:00), the clock alone today (06:00) — as the bar writes it (was the clock alone) — before {1} write a label or brackets, never a preposition that takes a clock hour only (German: bis zum Reset ({1}), was bis zum Reset um {1}) — keep your form where it reads with a weekday, else change it"
+    },
+    {
+      "n": 11,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "{0} % used — exhausted until the reset at {1}.",
+      "why": "1.14 B1 (R1-F7-113): the English is unchanged, but its slot {1} now holds the reset's clock with the weekday in front a day or more ahead (Th 06:00, German Do 06:00), the clock alone today (06:00) — as the bar writes it (was the clock alone) — before {1} write a label or brackets, never a preposition that takes a clock hour only (German: bis zum Reset ({1}), was bis zum Reset um {1}) — keep your form where it reads with a weekday, else change it"
+    },
+    {
+      "n": 12,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "The stated reset ({0}) has passed and no reading since has caught up: the {1} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.",
+      "why": "1.14 B1 rule 2 (§7a Q8): the English is unchanged, but its slot {0} now holds a clock stamp — 14:20 for a reset passed today, 2026-09-26 14:20 for one of an earlier day (was the clock alone) — a slot takes no preposition that takes a clock hour only: write a label, a colon or brackets before it (German keeps its brackets: Der angegebene Reset ({0}) ist vorbei) — keep your form where it reads with a date, else change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 13,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "rejected at {0}",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 14,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "rejected at {0} — {1}",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 15,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Stopped — the parent recorded ‘{0}’ at {1}.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {1} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 16,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Failed — the parent recorded the failure at {0}.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 17,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Completed — the parent recorded the result at {0}.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 18,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Running — inferred: the transcript changed {0}, after an outcome was recorded at {1}.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {1} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 19,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Unknown — inferred: the transcript went on after an outcome was recorded at {0}, and has been silent since {1}.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slots {0} and {1} hold a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 20,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Unknown — inferred: no result was recorded; the last request, at {0}, was rejected.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 21,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Unknown — inferred: no result was recorded; the last request, at {0}, was rejected — {1}.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 22,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Unknown — inferred: no result was recorded and the transcript has been silent since {0}, after a {1} call; the agent may have been stopped.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 23,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Unknown — inferred: no result was recorded and the transcript has been silent since {0}; the agent may have been stopped.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German keeps its form, which reads with a date — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 24,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Unknown — inferred: the parent recorded the launch at {0} but no result, and the agent's transcript was never seen; the agent may have been stopped.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 25,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Idle — inferred: the session transcript has been silent since {0}.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German keeps its form, which reads with a date — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 26,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Stopped — the parent recorded ‘{0}’ for this run at {1}.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {1} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 27,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Failed — the parent recorded the failure of this run at {0}.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 28,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Completed — the parent recorded the end of this run at {0}.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 29,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Unknown — inferred: the parent launched this run at {0}, but no agent of it was ever seen.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 30,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Running — inferred: an agent of this run wrote on after the parent recorded its end at {0}.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 31,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "{0} · started {1} · {2} agents · {3} tokens · {4} tool calls · {5} · default model {6}",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {1} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German keeps its form, which reads with a date — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 32,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "The agent hook reported at {0}: waiting for approval.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 33,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "The agent hook reported at {0}: waiting for input.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 34,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "{0} at {1}",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {1} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 35,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "{0} · last at {1} (manual, {2} → {3})",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {1} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 36,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "{0} · last at {1} (auto, {2} → {3})",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {1} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 37,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "{0} · last at {1} (–, {2} → {3})",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {1} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 38,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "{0} · prompt cache cold since {1} (1 h TTL)",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {1} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German keeps its form, which reads with a date — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 39,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "{0} · prompt cache cold since ~{1} (1 h TTL, estimated from the transcript)",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {1} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German keeps its form, which reads with a date — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 40,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "A cold start after {0} re-writes {1} tokens instead of reading them from the cache.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German keeps its form, which reads with a date — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 41,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input, {3}) instead of reading them from the cache ({4}× input, {5}).",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German keeps its form, which reads with a date — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 42,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input) instead of reading them from the cache ({3}× input).",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German keeps its form, which reads with a date — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 43,
+      "by": "P2",
+      "kind": "review",
+      "part": "model",
+      "key": "Codex prompt cache · last request at {0} · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until {1}, perhaps longer.",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slots {0} and {1} hold a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 44,
+      "by": "P2",
+      "kind": "review",
+      "part": "text",
+      "key": "Last attempt at {0} failed: {1}",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German turned its um into a label or brackets in 1.14 — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 45,
+      "by": "P2",
+      "kind": "review",
+      "part": "dashboard",
+      "key": "silent since {0}",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German keeps its form, which reads with a date — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 46,
+      "by": "P2",
+      "kind": "review",
+      "part": "dashboard",
+      "key": "since {0}",
+      "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German keeps its form, which reads with a date — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    {
+      "n": 47,
+      "by": "P2",
+      "kind": "nls-reword",
+      "key": "config.timeProgressStyle.description",
+      "why": "1.14 B7 (R-P8-113-bar-words): the bar read by reaching the marker, no longer by left and right (a mirrored bar fills from the right) — fill that has not reached the marker is reserve or spare, fill beyond it is ahead of pace, the rest word for word — reword by reaching the marker, translate anew — ar, he and fa: review and keep (they read so since 1.13's fix pass)"
+    },
+    {
+      "n": 48,
+      "by": "P2",
+      "kind": "nls-reword",
+      "key": "walkthrough.getStarted.readTheBar.description",
+      "why": "1.14 B7 (R-P8-113-bar-words): the bar read by reaching the marker, no longer by left and right (a mirrored bar fills from the right) — fill that has not reached the marker is reserve or spare, fill beyond it is ahead of pace, the rest word for word — reword by reaching the marker, translate anew — ar, he and fa: review and keep (they read so since 1.13's fix pass)"
     }
   ]
 }

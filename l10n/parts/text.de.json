@@ -96,7 +96,7 @@
   "Largest session {0}: {1}": "Größte Sitzung {0}: {1}",
   "Last 7 days · where the agent tokens went": "Letzte 7 Tage · wohin die Agent-Token gingen",
   "Last 7 days: {0}": "Letzte 7 Tage: {0}",
-  "Last attempt at {0} failed: {1}": "Letzter Versuch um {0} fehlgeschlagen: {1}",
+  "Last attempt at {0} failed: {1}": "Letzter Versuch ({0}) fehlgeschlagen: {1}",
   "Last reading: {0}": "Letzter Messwert: {0}",
   "Let Token Pace type a keep-warm line into Claude Code's terminal?": "Token Pace eine Warmhalte-Zeile in das Terminal von Claude Code tippen lassen?",
   "Log": "Protokoll",

@@ -480,6 +480,7 @@ test('a workflow run is running, failed, done or unknown from its agents', () =>
 // ---------------------------------------------------------------------------
 
 test('a stop the parent recorded is stopped — recorded, in the parent\'s own word — and never failed', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „aufgezeichnet (11:55)" — §3 B2 rule 3).
   // killed, cancelled and stopped are a stop; failed, error and timeout a failure, as before.
   const stop = (id: string, word: AgentRec['outcomeStatus'], outcomeTs: number | null = NOW - 5 * MIN): Partial<AgentTreeInput> => ({
     agents: [rec(id, { outcome: 'stopped', outcomeStatus: word, outcomeTs, lastTs: NOW - 5 * MIN })],
@@ -532,7 +533,7 @@ test('a stop the parent recorded is stopped — recorded, in the parent\'s own w
   assert.equal(stateText(pending, p.key), 'Stopped — the parent recorded ‘killed’ at 11:40.')
   // In German, with the word verbatim.
   assert.equal(german(() => stateText(stop('aaaa0001', 'killed'), agentKey('aaaa0001'))),
-    'Gestoppt — der Elternprozess hat ‚killed‘ um 11:55 aufgezeichnet.')
+    'Gestoppt — der Elternprozess hat ‚killed‘ aufgezeichnet (11:55).')
   assert.equal(german(() => stateText(stop('aaaa0002', 'cancelled', null), agentKey('aaaa0002'))),
     'Gestoppt — der Elternprozess hat ‚cancelled‘ aufgezeichnet.')
 })
@@ -561,6 +562,7 @@ test('a run whose agents all ended is done while one completed, and stopped when
 })
 
 test('a stopped agent that wrote on after its stop is inferred again, and its Recorded row says stopped', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „gestoppt (11:50)" — §3 B2 rule 3).
   const over: Partial<AgentTreeInput> = {
     agents: [rec('aaaa0001', { outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 10 * MIN, lastTs: NOW - 8 * MIN })],
     launches: [launch('aaaa0001', { outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 10 * MIN })],
@@ -569,7 +571,7 @@ test('a stopped agent that wrote on after its stop is inferred again, and its Re
   const n = node(build(over), agentKey('aaaa0001'))
   assert.deepEqual([n.state, n.derived], ['running', true])
   assert.equal(build(over).selected?.rows.find((r) => r.label === 'Recorded')?.value, 'stopped at 11:50')
-  assert.deepEqual(german(() => build(over).selected?.rows.find((r) => r.label === 'Aufgezeichnet')?.value), 'gestoppt um 11:50')
+  assert.deepEqual(german(() => build(over).selected?.rows.find((r) => r.label === 'Aufgezeichnet')?.value), 'gestoppt (11:50)')
 })
 
 // ---------------------------------------------------------------------------
@@ -2025,6 +2027,7 @@ test('the tree speaks German with the bundle the extension ships', () => {
 })
 
 test('the Compactions row writes its trigger inside one whole sentence per trigger, in English and German as 1.6 did (1.7 V-A)', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „zuletzt: 11:20" — §3 B2 rule 3).
   // 1.7 V-A: three templates — manual, auto, none recorded — instead of a bare `auto` / `manual`
   // spliced into one; the words on the page are 1.6's, character for character, in both languages.
   const at = NOW - 40 * MIN
@@ -2048,12 +2051,12 @@ test('the Compactions row writes its trigger inside one whole sentence per trigg
   ])
   assert.equal(agentRow(), '1 · last at 2026-09-20 11:20 (auto, 90K → –)')
   assert.deepEqual(german(() => ['manual', 'auto', null, 'forced'].map(sessionRow)), [
-    '2 · zuletzt um 11:20 (manuell, 167,2K → 12,4K)',
-    '2 · zuletzt um 11:20 (automatisch, 167,2K → 12,4K)',
-    '2 · zuletzt um 11:20 (–, 167,2K → 12,4K)',
-    '2 · zuletzt um 11:20 (–, 167,2K → 12,4K)',
+    '2 · zuletzt: 11:20 (manuell, 167,2K → 12,4K)',
+    '2 · zuletzt: 11:20 (automatisch, 167,2K → 12,4K)',
+    '2 · zuletzt: 11:20 (–, 167,2K → 12,4K)',
+    '2 · zuletzt: 11:20 (–, 167,2K → 12,4K)',
   ])
-  assert.equal(german(agentRow), '1 · zuletzt um 2026-09-20 11:20 (automatisch, 90K → –)')
+  assert.equal(german(agentRow), '1 · zuletzt: 2026-09-20 11:20 (automatisch, 90K → –)')
 })
 
 test('every message of the tree and of its markdown has a German entry, and the sentences are not English', () => {
@@ -2499,6 +2502,7 @@ test('a session\'s span is days and hours from 48 hours on, the hours floored; i
 })
 
 test('an agent that writes on more than a minute after its recorded outcome is inferred again, and keeps the record', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „fertig (11:50)", „aufgezeichnet wurde (11:50)" — §3 B2 rule 3).
   assert.equal(RESUMED_AFTER_MS, 60_000)
   const at = NOW - 10 * MIN
   const after = (ms: number, over: Partial<AgentRec> = {}, lo: Partial<AgentLaunch> = {}): Partial<AgentTreeInput> => ({
@@ -2552,10 +2556,10 @@ test('an agent that writes on more than a minute after its recorded outcome is i
   const timeless = after(10 * MIN, { outcomeTs: null }, { outcomeTs: null })
   assert.equal(state(timeless).state, 'done')
   // In German: the state word and „um".
-  assert.deepEqual(german(() => build(on).selected?.rows.find((r) => r.value.endsWith(' um 11:50'))),
-    { label: 'Aufgezeichnet', value: 'fertig um 11:50' })
+  assert.deepEqual(german(() => build(on).selected?.rows.find((r) => r.value.endsWith(' (11:50)'))),
+    { label: 'Aufgezeichnet', value: 'fertig (11:50)' })
   assert.equal(german(() => stateText(on, agentKey('aaaa0001'))),
-    'Läuft — abgeleitet: Das Transkript hat sich vor 9 min geändert, nachdem um 11:50 ein Ausgang aufgezeichnet wurde.')
+    'Läuft — abgeleitet: Das Transkript hat sich vor 9 min geändert, nachdem ein Ausgang aufgezeichnet wurde (11:50).')
 })
 
 test('short ids: the fewest characters from four on that no other agent of the session shares, without the leading a', () => {
@@ -2690,6 +2694,7 @@ test('the "may have been stopped" sentence stays only where no rejection is know
 })
 
 test('each reason a rejected request gives, in English and in German', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „abgelehnt (11:31)", „die letzte Anfrage (11:31)" — §3 B2 rule 3).
   const cases: Array<[Partial<NonNullable<AgentRec['rejected']>>, string, string]> = [
     [{ error: 'rate_limit', limit: 'five_hour' }, '5-hour limit', '5-Stunden-Limit'],
     [{ error: 'rate_limit', limit: 'seven_day' }, 'weekly limit', 'Wochenlimit'],
@@ -2708,9 +2713,9 @@ test('each reason a rejected request gives, in English and in German', () => {
     const world: Partial<AgentTreeInput> = { agents: [rec('eeee0001', { lastTs: NOW - 30 * MIN, rejected: rejected(NOW - 29 * MIN, over) })] }
     assert.equal(detailRow(world, agentKey('eeee0001'), 'Last request')?.value, `rejected at 11:31 — ${en} (HTTP 429)`, JSON.stringify(over))
     const g = german(() => agentDetails(input(world), NOW, agentKey('eeee0001')))
-    assert.equal(g?.rows.find((r) => r.label === 'Letzte Anfrage')?.value, `abgelehnt um 11:31 — ${de} (HTTP 429)`, JSON.stringify(over))
+    assert.equal(g?.rows.find((r) => r.label === 'Letzte Anfrage')?.value, `abgelehnt (11:31) — ${de} (HTTP 429)`, JSON.stringify(over))
     assert.equal(g?.stateText,
-      `Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage um 11:31 wurde abgelehnt — ${de} (HTTP 429).`)
+      `Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage (11:31) wurde abgelehnt — ${de} (HTTP 429).`)
   }
   // The other three sentences in German.
   const running: Partial<AgentTreeInput> = { agents: [rec('eeee0002', { lastTs: NOW - 5 * MIN, rejected: rejected(NOW - 2 * MIN) })] }
@@ -2721,9 +2726,9 @@ test('each reason a rejected request gives, in English and in German', () => {
     'Läuft — abgeleitet: Das Transkript hat sich vor 2 min geändert; seine letzte Anfrage wurde abgelehnt.')
   const quiet: Partial<AgentTreeInput> = { agents: [rec('eeee0004', { lastTs: NOW - 30 * MIN, rejected: rejected(NOW - 29 * MIN, bare) })] }
   assert.equal(german(() => stateText(quiet, agentKey('eeee0004'))),
-    'Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage um 11:31 wurde abgelehnt.')
+    'Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage (11:31) wurde abgelehnt.')
   assert.equal(german(() => agentDetails(input(quiet), NOW, agentKey('eeee0004'))?.rows.find((r) => r.label === 'Letzte Anfrage')?.value),
-    'abgelehnt um 11:31')
+    'abgelehnt (11:31)')
 })
 
 test('a run and a session count their agents that ended on a rejected request, one row per reason', () => {
@@ -3097,6 +3102,7 @@ test('a lower bound says why in numbers — on an agent, on its run\'s and its s
 })
 
 test('an unknown agent whose transcript went quiet on a tool call names the call; any other keeps its sentence (1.6 N5)', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „seit einem Bash-Aufruf (11:30)" — §3 B2 rule 3).
   const quiet = (over: Partial<AgentRec>): string | undefined =>
     stateText({ agents: [rec('aaaa0001', { lastTs: NOW - 30 * MIN, ...over })] }, agentKey('aaaa0001'))
   const withTool = 'Unknown — inferred: no result was recorded and the transcript has been silent since 11:30, after a Bash call; the agent may have been stopped.'
@@ -3121,7 +3127,7 @@ test('an unknown agent whose transcript went quiet on a tool call names the call
     outcome: 'completed', outcomeTs: NOW - 30 * MIN })] }, agentKey('aaaa0001')), 'Completed — the parent recorded the result at 11:30.')
   // In German: the call's name before „-Aufruf", the time after it.
   assert.equal(german(() => quiet({ lastTool: 'Bash', lastToolTs: NOW - 30 * MIN })),
-    'Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet, und das Transkript hat sich seit einem Bash-Aufruf um 11:30 nicht mehr geändert; der Agent wurde möglicherweise abgebrochen.')
+    'Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet, und das Transkript hat sich seit einem Bash-Aufruf (11:30) nicht mehr geändert; der Agent wurde möglicherweise abgebrochen.')
 })
 
 test('a running agent by its own transcript may say how long it has been silent; a waiting one, a launch, a finished one may not (1.6 N5)', () => {
@@ -3775,6 +3781,7 @@ test('a session\'s details say how often its own transcript was compacted, which
 })
 
 test('the O3 rows speak German with the bundle the extension ships (1.6 O3)', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „zuletzt: 11:30" — §3 B2 rule 3).
   const over: Partial<AgentTreeInput> = {
     agents: [rec('aaaa0001', {
       toolCalls: 41, toolErrors: 3, cacheMisses: { previous_message_not_found: 2, system_changed: 1, tools_changed: 1, messages_changed: 1 },
@@ -3788,12 +3795,12 @@ test('the O3 rows speak German with the bundle the extension ships (1.6 O3)', ()
   assert.deepEqual([de.get('Cache-Fehltreffer')?.value, de.get('Cache-Fehltreffer')?.note],
     ['vorherige Nachricht nicht gefunden 2 · Nachrichten geändert 1 · Tools geändert 1 · Systemprompt geändert 1',
       '1,3K Token nicht aus dem Cache gelesen'])
-  assert.equal(de.get('Kompaktierungen')?.value, '2 · zuletzt um 11:30 (automatisch, 167,2K → 12,4K)')
+  assert.equal(de.get('Kompaktierungen')?.value, '2 · zuletzt: 11:30 (automatisch, 167,2K → 12,4K)')
   assert.equal(de.get('Claude-Code-Version')?.value, '2.1.281')
   const models = german(() => rowsOf({ agents: [rec('aaaa0001', { cacheMisses: { model_changed: 1, unavailable: 1 } })] }, agentKey('aaaa0001')))
   assert.equal(models.get('Cache-Fehltreffer')?.value, 'Cache nicht verfügbar 1 · Modell gewechselt 1')
   const session = german(() => new Map((agentDetails(input(over), NOW, rootKey)?.rows ?? []).map((r) => [r.label, r.value])))
-  assert.equal(session.get('Kompaktierungen'), '1 · zuletzt um 10:30 (manuell, 180K → 21K)')
+  assert.equal(session.get('Kompaktierungen'), '1 · zuletzt: 10:30 (manuell, 180K → 21K)')
   // The mode is Claude Code's own word, in either language.
   assert.equal(session.get('Berechtigungsmodus'), 'plan')
 })

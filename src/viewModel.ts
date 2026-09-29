@@ -61,8 +61,8 @@ import {
   projectRows, records as recordsOf, sessionRows, totalsFor, totalsWindowSpans,
 } from './stats'
 import {
-  DayRange, RangePreset, TimeConfig, addDays, ageText, attemptWhen, dayCount, dayOf, formatDay, formatReset,
-  formatTime, lastFailureText, rangeFor, isDay, previousRange, refreshWords,
+  DayRange, RangePreset, TimeConfig, addDays, ageText, attemptWhen, clockStamp, dayCount, dayOf, formatDay, formatReset,
+  formatTime, lastFailureText, rangeFor, isDay, previousRange, refreshWords, resetClock,
 } from './time'
 import {
   AgentRec, Attribution, Bucket, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaSample,
@@ -1669,6 +1669,10 @@ function quotaCard(
       ageMinutes: age,
       staleAfterMinutes: cfg.staleAfterMinutes,
       formatTime: (ms) => formatTime(ms, tcfg),
+      // 1.14 B1: the reset a full window waits for with its weekday a day or more ahead, as the bar writes it; a passed
+      // reset with its day when it passed on an earlier day (§7a Q8).
+      resetClock: (ms) => resetClock(ms, now, tcfg),
+      stamp: (ms) => clockStamp(ms, now, tcfg),
     })
     // N7 (1.6): Claude Code's subagents are Claude's alone — Codex records no agent the section
     // could name, and its forks are not what the Agents section counts. P10c: a model window counts

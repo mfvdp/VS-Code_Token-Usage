@@ -73,9 +73,8 @@ Part of the [Token Pace documentation](../README.md#documentation).
   fill beyond it is ahead of pace — left of the marker and right of it, since the bar fills from
   the left. In Arabic, Hebrew and Persian the bar draws from the right, fill first, beside the
   entry's label, and the marker is placed from the right too: fill before it is reserve, fill
-  beyond it — to its left — is ahead of pace. The settings say it by the marker in those three
-  languages; an English settings page next to a bar in Arabic, Hebrew or Persian says left and
-  right, which there read the other way round.
+  beyond it — to its left — is ahead of pace. The settings say it by the marker too, so their
+  words hold for a bar drawn either way.
 * **Indicator.** `tokenPace.indicator` decides whether the verdict is signalled by `color`,
   `glyph` (`▲` / `▲▲`), `both` (default) or `none`. Colour alone is invisible to red-green
   colour blind readers and disappears in themes that tint the whole status bar.

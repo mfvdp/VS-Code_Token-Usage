@@ -1532,6 +1532,7 @@ test('a stale reading whose own fetch failed says the next attempt after its age
 })
 
 test('a fresh reading beside a failed fetch keeps its text; the tooltip names the failure either way (1.7 W1)', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „Letzter Versuch (11:40)" — §3 B2 rule 3).
   const fresh = failedReading({ fetchedAt: Math.floor(NOW / 1000) - 60, lastFailure: { at: NOW - 30_000, problem: RETRY_WORDS, kind: 'retry' } })
   const m = buildItems(input({ quotas: [fresh] }))[0]
   assert.equal(m.text, 'CC 5h ██┃▁▁▁▁▁ 25% · resets 3h30m')
@@ -1558,7 +1559,7 @@ test('a fresh reading beside a failed fetch keeps its text; the tooltip names th
   const de = german(() => quotaTooltip(failedReading({
     lastFailure: { at: NOW - 20 * 60_000, problem: 'HTTP 429 — Wartezeit vor dem nächsten Versuch', kind: 'retry' },
   }), makeContext(input())))
-  assert.ok(de.includes('$(clock) Letzter Versuch um 11:40 fehlgeschlagen: `HTTP 429 — Wartezeit vor dem nächsten Versuch` · nächster Versuch in 1h12m'), de)
+  assert.ok(de.includes('$(clock) Letzter Versuch (11:40) fehlgeschlagen: `HTTP 429 — Wartezeit vor dem nächsten Versuch` · nächster Versuch in 1h12m'), de)
 })
 
 test('a due attempt held for focus is a tooltip line of its own when nothing failed (1.7 W2)', () => {

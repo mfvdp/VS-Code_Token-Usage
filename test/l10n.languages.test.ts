@@ -433,6 +433,16 @@ export const RESET_CLOCK_KEYS: ReadonlyArray<readonly [string, string]> = [
   ['{0}, {1} window: exhausted — resets at {2}.', '{2}'],
   ['{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.', '{3}'],
   ['{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.', '{4}'],
+  // 1.14 B1 (P2, R1-F7-113): paceExplain.ts explainWindow — the reset a full window waits for, through the explanation
+  // input's `resetClock` (viewModel.ts quotaCard: resetClock(ms, now, tcfg)); a seven-day window's is days away.
+  ['{0} % used — over the limit until the reset at {1}.', '{1}'],
+  ['{0} % used — exhausted until the reset at {1}.', '{1}'],
+]
+
+/** 1.14 B1 (P2): the keys RESET_CLOCK_KEYS gained in 1.14 — the brief names them in "1.14: your pending list", not in 1.13's. */
+export const RESET_CLOCK_KEYS_1_14: ReadonlyArray<string> = [
+  '{0} % used — over the limit until the reset at {1}.',
+  '{0} % used — exhausted until the reset at {1}.',
 ]
 
 /**
@@ -460,6 +470,8 @@ export const RESET_CLOCK_SOURCES: ReadonlyArray<readonly [string, string, number
   ['src/time.ts', 'resetClock', 1],
   // The window's `reset` (relative — a countdown) and `resetAbsolute` (absolute — the Quick Pick's "reset at {0}").
   ['src/viewModel.ts', 'formatReset', 2],
+  // 1.14 B1 (P2): the explanation input's `resetClock` — the full window's "until the reset at {1}".
+  ['src/viewModel.ts', 'resetClock', 1],
 ]
 
 /**
@@ -524,6 +536,9 @@ export const CLOCK_STAMP_KEYS: ReadonlyArray<readonly [string, string]> = [
   // The page (src/webview/main.ts) — the view model's startClock and lastClock, the words a screen reader gets.
   ['silent since {0}', '{0}'],
   ['since {0}', '{0}'],
+  // 1.14 B1 rule 2 (P2, §7a Q8): paceExplain.ts explainWindow — a stated reset that has passed, through the explanation
+  // input's `stamp` (viewModel.ts quotaCard: clockStamp(ms, now, tcfg)); a reading days old names the reset's day.
+  ['The stated reset ({0}) has passed and no reading since has caught up: the {1} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.', '{0}'],
 ]
 
 /**
@@ -549,6 +564,8 @@ export const CLOCK_STAMP_SOURCES: ReadonlyArray<readonly [string, string, number
   ['src/stats.ts', 'clockStamp', 1],
   // The failed quota attempt's sentence.
   ['src/time.ts', 'clockStamp', 1],
+  // 1.14 B1 rule 2 (P2): the explanation input's `stamp` — the passed reset's "The stated reset ({0}) has passed …".
+  ['src/viewModel.ts', 'clockStamp', 1],
 ]
 
 /**
@@ -561,6 +578,7 @@ export const CLOCK_STAMP_SOURCES: ReadonlyArray<readonly [string, string, number
 export const CLOCK_STAMP_FIELDS: ReadonlyArray<readonly [string, boolean, string]> = [
   ['lastClock', true, 'agentTreeBuild.ts clockOf — the view model\'s clock of a node\'s last line; the page words it "silent since {0}"'],
   ['startClock', true, 'agentTreeBuild.ts clockOf — the view model\'s clock of a node\'s start; the page words it "since {0}"'],
+  ['stamp', true, 'viewModel.ts quotaCard — the explanation input\'s formatter (ExplainInput.stamp, a function field — 1.14 P2), called by paceExplain.ts for the passed reset "The stated reset ({0}) has passed …"'],
   ['start', false, 'stats.ts, the records\' longest and largest sessions — a table cell (the page\'s recordFigure, the markdown table) and the Quick Pick\'s description joined with " · " (textViews.ts rest), never a t() placeholder'],
   ['value', false, 'agentTreeBuild.ts, a details row\'s value (Started, Since first line, Last activity) — printed beside its label (the page\'s details panel, the markdown table\'s cell), never a t() placeholder'],
 ]
@@ -3189,7 +3207,10 @@ test('NOTIFY_TEXT_KEYS_1_12 is the seventeen notification texts of 1.12\'s ledge
 interface ClockScan {
   found: Array<{ file: string; fn: 't' | 'tr'; key: string; ph: string; line: number }>
   calls: { t: number; tr: number }
-  /** The fields followed: every field a clock is written into, or — with a `follow` list — those of the list that are. */
+  /**
+   * The fields followed: every field a clock is written into, or — with a `follow` list — those of the list that are; since
+   * 1.14 P2 also a field that holds a function returning a clock, whose call is one (the explanation input's formatters).
+   */
   fields: string[]
   /** 1.14: the fields a clock is written into that the spec's `follow` list does not name, each with its sites. */
   unfollowed: Record<string, string[]>
@@ -3226,7 +3247,8 @@ const CLOCK_STAMP_SPEC: ClockScanSpec = {
  * The scan (1.13 B5 rule 3's, generalised by 1.14 P1 for B2 rule 1 — one scan, a spec per kind of clock): its spec as the
  * first argument (JSON), then the directories (src/ by default), every `.ts` file. A value is a clock when it is a call of
  * a source; a variable, a local function (its returned value) or an object field bound to one (every field, or the
- * spec's `follow` list — a field outside it is recorded in `unfollowed` and not followed); a conditional, `??` or `||`
+ * spec's `follow` list — a field outside it is recorded in `unfollowed` and not followed), and a call of a field bound to
+ * a function that returns one (`i.resetClock(ms)`, `i.stamp(ms)`: paceExplain.ts's input — 1.14 P2); a conditional, `??` or `||`
  * with one in a branch; a wrapper call with one as an argument (`estimate(…)`, `esc(…)`) or a method of one; with
  * `params`, a call with a function argument that returns one (`or(v, (x) => stamp(x, …))`), and inside a local function
  * the parameter a clock is passed to (`hookSentence(w, stamp(…))`) — a parameter's clock reaches a t() slot and the
@@ -3260,6 +3282,7 @@ const pvars = new Map()
 const fns = new Map()
 const decls = new Map()
 const fields = new Set()
+const fnFields = new Set()
 const unfollowed = new Map()
 const add = (m, scope, name) => { if (!m.has(scope)) m.set(scope, new Set()); if (m.get(scope).has(name)) return false; m.get(scope).add(name); return true }
 const bound = (m, node, name) => { for (let p = node.parent; p; p = p.parent) if (isScope(p) && m.has(p) && m.get(p).has(name)) return true; return false }
@@ -3285,6 +3308,7 @@ function carries(e, texts, viaParams) {
       if (kind === 'formatReset') return !relative(e)
       if (bound(fns, e, c.text)) return true
     }
+    if (ts.isPropertyAccessExpression(c) && fnFields.has(c.name.text)) return true
     if (ts.isPropertyAccessExpression(c) && carries(c.expression, false, viaParams)) return true
     if (spec.params && e.arguments.some((a) => isFnLit(a) && returnsOf(a).some((r) => carries(r, false, false)))) return true
     return e.arguments.some((a) => carries(a, false, viaParams))
@@ -3306,9 +3330,9 @@ for (const { sf } of files) {
   }
   visit(sf)
 }
-const field = (name, sf, n) => {
-  if (fields.has(name)) return false
-  if (spec.follow === null || spec.follow.includes(name)) { fields.add(name); return true }
+const field = (name, sf, n, set = fields) => {
+  if (set.has(name)) return false
+  if (spec.follow === null || spec.follow.includes(name)) { set.add(name); return true }
   if (!unfollowed.has(name)) unfollowed.set(name, [])
   const at = path.relative(root, sf.fileName).split(path.sep).join('/') + ':' + (sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1)
   if (!unfollowed.get(name).includes(at)) unfollowed.get(name).push(at)
@@ -3331,6 +3355,8 @@ for (let changed = true, round = 0; changed && round < 20; round++) {
         else if (spec.params && carries(n.right, false, true)) changed = add(pvars, scopeOf(n), n.left.text) || changed
       }
       if (ts.isPropertyAssignment(n) && (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name)) && carries(n.initializer, false, false)) changed = field(n.name.text, sf, n) || changed
+      if (ts.isPropertyAssignment(n) && (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name)) && isFnLit(n.initializer)
+        && returnsOf(n.initializer).some((r) => carries(r, false, false))) changed = field(n.name.text, sf, n, fnFields) || changed
       if (ts.isShorthandPropertyAssignment(n) && bound(vars, n, n.name.text)) changed = field(n.name.text, sf, n) || changed
       if (spec.params && ts.isCallExpression(n) && ts.isIdentifier(n.expression) && !isTr(n)) {
         const fn = declOf(n, n.expression.text)
@@ -3344,7 +3370,7 @@ for (let changed = true, round = 0; changed && round < 20; round++) {
     visit(sf)
   }
 }
-const out = { found: [], calls: { t: 0, tr: 0 }, fields: [...fields].sort(), unfollowed: Object.fromEntries([...unfollowed.entries()].sort()), sources: [] }
+const out = { found: [], calls: { t: 0, tr: 0 }, fields: [...new Set([...fields, ...fnFields])].sort(), unfollowed: Object.fromEntries([...unfollowed.entries()].sort()), sources: [] }
 for (const { label, sf, withT, withTr } of files) {
   const visit = (n) => {
     if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
@@ -3391,14 +3417,17 @@ test('RESET_CLOCK_KEYS: every key a t() key that holds its placeholder, and exac
     assert.ok(s.keys.includes(key), `${J(key)} is no t() key of src/ (any more)`)
     assert.ok(/^\{\d\}$/.test(ph) && key.includes(ph), `${J(key)} does not hold ${ph}`)
   }
-  assert.deepEqual([RESET_CLOCK_KEYS.length, new Set(RESET_CLOCK_KEYS.map(([k]) => k)).size, RESET_CLOCK_EXCEPTED.length], [9, 8, 1])
+  // 1.14 P2 (pinned and changed: [9, 8, 1] → [11, 10, 1] — B1 rule 3: the explanation's two "until the reset at {1}" keys).
+  assert.deepEqual([RESET_CLOCK_KEYS.length, new Set(RESET_CLOCK_KEYS.map(([k]) => k)).size, RESET_CLOCK_EXCEPTED.length], [11, 10, 1])
+  assert.ok(RESET_CLOCK_KEYS_1_14.every((k) => RESET_CLOCK_KEYS.some(([key]) => key === k)), 'a key of 1.14 is not in RESET_CLOCK_KEYS')
   for (const [key, , why] of RESET_CLOCK_EXCEPTED) assert.ok(why.length > 20 && !listed.some((x) => x.startsWith(`${key}\u0000`)), `${J(key)}: no reason, or listed too`)
   const scan = resetClockScan()
   assert.ok(scan.calls.t >= 1000 && scan.calls.tr >= 300, `the scan read ${scan.calls.t} t() and ${scan.calls.tr} tr() calls`)
   // The scan and the lists: the listed slots and the excepted ones, no more, no less.
   assert.deepEqual(slotsOf(scan), [...listed, ...RESET_CLOCK_EXCEPTED.map(([k, ph]) => `${k}\u0000${ph}`)].sort())
-  // The one field the view model carries a clock in, and where the two functions are called.
-  assert.deepEqual(scan.fields, ['resetAbsolute'])
+  // The fields the view model carries a clock in, and where the two functions are called. 1.14 P2 (pinned and changed:
+  // ['resetAbsolute'] → with `resetClock`, the explanation input's formatter — a function field, B1 rule 3).
+  assert.deepEqual(scan.fields, ['resetAbsolute', 'resetClock'])
   const counts = new Map<string, number>()
   for (const x of scan.sources) counts.set(`${x.file} ${x.callee}`, (counts.get(`${x.file} ${x.callee}`) ?? 0) + 1)
   assert.deepEqual([...counts.entries()].sort(), RESET_CLOCK_SOURCES.map(([f, c, n]): [string, number] => [`${f} ${c}`, n]).sort())
@@ -3409,17 +3438,22 @@ test('RESET_CLOCK_KEYS: every key a t() key that holds its placeholder, and exac
 
 /**
  * 1.13 B5 rule 2 (P6, §7a Q18): the German values of RESET_CLOCK_KEYS that write „um" before their slot — a preposition
- * that takes a clock hour only, while the slot may hold „Mo 06:00" — each named with its key and placeholder.
+ * that takes a clock hour only, while the slot may hold „Mo 06:00" — each named with its key and placeholder. 1.14 B2
+ * rule 5 (P2): 1.13's germanResetClockProblems over both lists — CLOCK_STAMP_KEYS' slots may hold „2026-09-26 14:20".
  */
-function germanResetClockProblems(bundle: Record<string, string>): string[] {
-  return RESET_CLOCK_KEYS.filter(([key, ph]) => typeof bundle[key] === 'string' && new RegExp(`(?<!\\p{L})um\\s+${reEsc(ph)}`, 'u').test(bundle[key]))
+function germanClockProblems(bundle: Record<string, string>): string[] {
+  return [...RESET_CLOCK_KEYS, ...CLOCK_STAMP_KEYS]
+    .filter(([key, ph]) => typeof bundle[key] === 'string' && new RegExp(`(?<!\\p{L})um\\s+${reEsc(ph)}`, 'u').test(bundle[key]))
     .map(([key, ph]) => `de: ${J(key)} writes „um ${ph}": ${J(bundle[key])}`)
 }
 
-test('the German reset clock: no German value of a RESET_CLOCK_KEYS key writes „um" before its slot — the label form „Reset: {0}" (and „leer: {3} — vor dem Reset ({4})") —, the bar two days before its reset reads „· Reset: Mo 06:00", and one „Reset um {0}" back is caught (1.13 B5 rules 2–3, §7a Q18)', () => {
+// 1.14 P2 (pinned and changed: germanResetClockProblems → germanClockProblems, over RESET_CLOCK_KEYS and CLOCK_STAMP_KEYS —
+// B2 rule 5; the list of slots gains 1.14's two explanation keys with their brackets — B1 rule 4).
+test('the German reset clock: no German value of a RESET_CLOCK_KEYS key writes „um" before its slot — the label form „Reset: {0}" (and „leer: {3} — vor dem Reset ({4})", „bis zum Reset ({1})") —, the bar two days before its reset reads „· Reset: Mo 06:00", and one „Reset um {0}" back is caught (1.13 B5 rules 2–3, §7a Q18; 1.14 B1 rule 4)', () => {
   const german = readTable(join(ROOT, 'l10n', 'bundle.l10n.de.json'))
-  assert.deepEqual(germanResetClockProblems(german), [])
-  // Every slot's German as 1.13 writes it — the label form where 1.12 wrote „um", the two formatReset keys unchanged.
+  assert.deepEqual(germanClockProblems(german), [])
+  // Every slot's German as 1.13 writes it — the label form where 1.12 wrote „um", the two formatReset keys unchanged —,
+  // and 1.14's two explanation keys with the brackets where 1.13 wrote „bis zum Reset um {1}".
   assert.deepEqual(RESET_CLOCK_KEYS.map(([key, ph]) => [key, ph, german[key]]), [
     ['resets at {0}', '{0}', 'Reset: {0}'],
     ['resets at {0} (in {1})', '{0}', 'Reset: {0} (in {1})'],
@@ -3430,14 +3464,20 @@ test('the German reset clock: no German value of a RESET_CLOCK_KEYS key writes �
     ['{0}, {1} window: exhausted — resets at {2}.', '{2}', '{0}, Fenster {1}: erschöpft — Reset: {2}.'],
     ['{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.', '{3}', '{0}, Fenster {1}: {2} verbraucht, leer: {3} — vor dem Reset ({4}).'],
     ['{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.', '{4}', '{0}, Fenster {1}: {2} verbraucht, leer: {3} — vor dem Reset ({4}).'],
+    ['{0} % used — over the limit until the reset at {1}.', '{1}', '{0} % verbraucht — über dem Limit bis zum Reset ({1}).'],
+    ['{0} % used — exhausted until the reset at {1}.', '{1}', '{0} % verbraucht — erschöpft bis zum Reset ({1}).'],
   ])
   // Keys outside the list keep their „um" — a clock of today, never a weekday.
   assert.equal(german['This channel works: Token Pace can reach it. Sent at {0}.'], 'Dieser Kanal funktioniert: Token Pace erreicht ihn. Gesendet um {0}.')
   assert.equal(german['{0}, {1} window: reset at {2} — {3} used in the new window.'], '{0}, Fenster {1}: Reset um {2} — im neuen Fenster {3} verbraucht.')
   // The mutation: one „Reset um {0}" back, and the n=73 slots' „um" back — each caught, by key and slot.
-  assert.deepEqual(germanResetClockProblems({ ...german, 'resets at {0}': 'Reset um {0}' }), ['de: "resets at {0}" writes „um {0}": "Reset um {0}"'])
+  assert.deepEqual(germanClockProblems({ ...german, 'resets at {0}': 'Reset um {0}' }), ['de: "resets at {0}" writes „um {0}": "Reset um {0}"'])
   const n73 = '{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.'
-  assert.equal(germanResetClockProblems({ ...german, [n73]: '{0}, Fenster {1}: {2} verbraucht, leer um {3} — vor dem Reset um {4}.' }).length, 2)
+  assert.equal(germanClockProblems({ ...german, [n73]: '{0}, Fenster {1}: {2} verbraucht, leer um {3} — vor dem Reset um {4}.' }).length, 2)
+  // 1.14 B1: 1.13's „bis zum Reset um {1}" back is caught too.
+  const exhausted = '{0} % used — exhausted until the reset at {1}.'
+  assert.deepEqual(germanClockProblems({ ...german, [exhausted]: '{0} % verbraucht — erschöpft bis zum Reset um {1}.' }),
+    [`de: ${J(exhausted)} writes „um {1}": "{0} % verbraucht — erschöpft bis zum Reset um {1}."`])
   // The bar, two days before its reset (BAR_FIXTURE.weekdayAt: Saturday 06:00, the reset Monday 06:00), in German.
   const absolute: BarVariant = { settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute' }, at: BAR_FIXTURE.weekdayAt }
   const both: BarVariant = { settings: { ...NO_BAR, 'tokenPace.resetFormat': 'both' }, at: BAR_FIXTURE.weekdayAt }
@@ -3477,6 +3517,9 @@ test('RESET_CLOCK_KEYS\' scan follows a clock through a variable, a local functi
     "export const barrier = (): string => t('Outer {0}', t('Inner {0}', resetClock(1, 2, cfg)))",
     "export const countdown = (): string => t('Countdown {0}', formatReset(1, 2, 'relative', cfg))",
     "export const lineOf = (): string => { const line = `${resetClock(1, 2, cfg)} · x`; return t('Line {0}', line) }",
+    // 1.14 B1 rule 3: a field that holds a function returning a clock (the explanation input's resetClock) — its call is one.
+    "export const input = { clock: (x: number): string => resetClock(x, 2, cfg), today: (x: number): string => String(x) }",
+    "export const viaFnField = (i: typeof input): string => t('FnField {0} today {1}', i.clock(1), i.today(2))",
   ].join('\n'))
   writeFileSync(join(dir, 'x', 'page.ts'), [
     'declare const resetClock: (a: number) => string',
@@ -3484,9 +3527,10 @@ test('RESET_CLOCK_KEYS\' scan follows a clock through a variable, a local functi
     "export const onPage = (): string => tr('Page {0}', resetClock(1))",
   ].join('\n'))
   const scan = resetClockScan(join(dir, 'x'))
-  assert.deepEqual(slotsOf(scan), ['Direct {0}\u0000{0}', 'Field {0} rel {1}\u0000{0}', 'Fn {0}\u0000{0}', 'Inner {0}\u0000{0}', 'Page {0}\u0000{0}',
-    'Template {0}\u0000{0}', 'Var {0} and {1}\u0000{1}', 'Wrapped {0}\u0000{0}'])
-  assert.deepEqual(scan.fields, ['at'])
+  // 1.14 P2 (pinned and changed: the function field's slot and `clock` among the fields — B1 rule 3).
+  assert.deepEqual(slotsOf(scan), ['Direct {0}\u0000{0}', 'Field {0} rel {1}\u0000{0}', 'Fn {0}\u0000{0}', 'FnField {0} today {1}\u0000{0}', 'Inner {0}\u0000{0}',
+    'Page {0}\u0000{0}', 'Template {0}\u0000{0}', 'Var {0} and {1}\u0000{1}', 'Wrapped {0}\u0000{0}'])
+  assert.deepEqual(scan.fields, ['at', 'clock'])
   // The mutation: src/ as it is, and one more call beside it — the scan finds a slot RESET_CLOCK_KEYS does not list.
   const listed = [...RESET_CLOCK_KEYS, ...RESET_CLOCK_EXCEPTED.map(([k, ph]) => [k, ph] as const)].map(([k, ph]) => `${k}\u0000${ph}`).sort()
   const more = tempDir()
@@ -3504,8 +3548,9 @@ test('CLOCK_STAMP_KEYS: every key a t() or tr() key that holds its placeholder, 
     assert.ok(s.keys.includes(key), `${J(key)} is no t() key of src/ (any more)`)
     assert.ok(/^\{\d\}$/.test(ph) && key.includes(ph), `${J(key)} does not hold ${ph}`)
   }
-  // 1.14 P1: 36 slots in 34 keys, none excepted. P2 (B1 rule 2, §7a Q8) adds the passed reset's key.
-  assert.deepEqual([CLOCK_STAMP_KEYS.length, new Set(CLOCK_STAMP_KEYS.map(([k]) => k)).size, CLOCK_STAMP_EXCEPTED.length], [36, 34, 0])
+  // 1.14 P1: 36 slots in 34 keys, none excepted. 1.14 P2 (pinned and changed: [36, 34, 0] → [37, 35, 0] — B1 rule 2,
+  // §7a Q8: the passed reset's key).
+  assert.deepEqual([CLOCK_STAMP_KEYS.length, new Set(CLOCK_STAMP_KEYS.map(([k]) => k)).size, CLOCK_STAMP_EXCEPTED.length], [37, 35, 0])
   for (const [key, , why] of CLOCK_STAMP_EXCEPTED) assert.ok(why.length > 20 && !listed.some((x) => x.startsWith(`${key}\u0000`)), `${J(key)}: no reason, or listed too`)
   const fields = CLOCK_STAMP_FIELDS.map(([f]) => f)
   assert.equal(new Set(fields).size, fields.length, 'a field stands twice in CLOCK_STAMP_FIELDS')
@@ -3526,12 +3571,66 @@ test('CLOCK_STAMP_KEYS: every key a t() or tr() key that holds its placeholder, 
   // The two lists are apart: a slot is a reset clock or a clock stamp, never both.
   const resets = new Set(RESET_CLOCK_KEYS.map(([k, ph]) => `${k}\u0000${ph}`))
   assert.deepEqual(listed.filter((x) => resets.has(x)), [])
-  // The German: every listed key has one; 24 of the slots write „um" before it today — B2 rule 3 (P2) turns each into a
-  // label or bracket form, and this pin into 0.
+  // The German: every listed key has one. 1.14 P2 (pinned and changed: 24 slots with „um" before them → 0 — B2 rule 3;
+  // the German test below holds each value).
   const german = readTable(join(ROOT, 'l10n', 'bundle.l10n.de.json'))
   for (const [key] of CLOCK_STAMP_KEYS) assert.equal(typeof german[key], 'string', `${J(key)}: no German`)
   const um = CLOCK_STAMP_KEYS.filter(([key, ph]) => new RegExp(`(?<!\\p{L})um\\s+${reEsc(ph)}`, 'u').test(german[key]))
-  assert.equal(um.length, 24, J(um))
+  assert.equal(um.length, 0, J(um))
+})
+
+test('the German clock stamps: no German value of a CLOCK_STAMP_KEYS key writes „um" before its slot — a label („letzte Anfrage: {0}", „zuletzt: {1}") or brackets („abgelehnt ({0})", „aufgezeichnet ({0})", „Letzter Versuch ({0}) fehlgeschlagen") where 1.13 wrote „um" —, the slots that read with a date („seit {0}", „nach {0}", „Start {1}") unchanged, and one „um {0}" back is caught (1.14 B2 rules 3, 5)', () => {
+  const german = readTable(join(ROOT, 'l10n', 'bundle.l10n.de.json'))
+  assert.deepEqual(germanClockProblems(german), [])
+  // Every slot's German as 1.14 writes it (24 slots of 1.13 wrote „um" before it: B2 rule 3).
+  assert.deepEqual(CLOCK_STAMP_KEYS.map(([key, ph]) => [key, ph, german[key]]), [
+    ['rejected at {0}', '{0}', 'abgelehnt ({0})'],
+    ['rejected at {0} — {1}', '{0}', 'abgelehnt ({0}) — {1}'],
+    ['Stopped — the parent recorded ‘{0}’ at {1}.', '{1}', 'Gestoppt — der Elternprozess hat ‚{0}‘ aufgezeichnet ({1}).'],
+    ['Failed — the parent recorded the failure at {0}.', '{0}', 'Fehlgeschlagen — der Elternprozess hat den Fehlschlag aufgezeichnet ({0}).'],
+    ['Completed — the parent recorded the result at {0}.', '{0}', 'Fertig — der Elternprozess hat das Ergebnis aufgezeichnet ({0}).'],
+    ['Running — inferred: the transcript changed {0}, after an outcome was recorded at {1}.', '{1}', 'Läuft — abgeleitet: Das Transkript hat sich {0} geändert, nachdem ein Ausgang aufgezeichnet wurde ({1}).'],
+    ['Unknown — inferred: the transcript went on after an outcome was recorded at {0}, and has been silent since {1}.', '{0}', 'Unbekannt — abgeleitet: Das Transkript wurde weitergeschrieben, nachdem ein Ausgang aufgezeichnet wurde ({0}), und hat sich seit {1} nicht mehr geändert.'],
+    ['Unknown — inferred: the transcript went on after an outcome was recorded at {0}, and has been silent since {1}.', '{1}', 'Unbekannt — abgeleitet: Das Transkript wurde weitergeschrieben, nachdem ein Ausgang aufgezeichnet wurde ({0}), und hat sich seit {1} nicht mehr geändert.'],
+    ['Unknown — inferred: no result was recorded; the last request, at {0}, was rejected.', '{0}', 'Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage ({0}) wurde abgelehnt.'],
+    ['Unknown — inferred: no result was recorded; the last request, at {0}, was rejected — {1}.', '{0}', 'Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage ({0}) wurde abgelehnt — {1}.'],
+    ['Unknown — inferred: no result was recorded and the transcript has been silent since {0}, after a {1} call; the agent may have been stopped.', '{0}', 'Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet, und das Transkript hat sich seit einem {1}-Aufruf ({0}) nicht mehr geändert; der Agent wurde möglicherweise abgebrochen.'],
+    ['Unknown — inferred: no result was recorded and the transcript has been silent since {0}; the agent may have been stopped.', '{0}', 'Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet, und das Transkript hat sich seit {0} nicht mehr geändert; der Agent wurde möglicherweise abgebrochen.'],
+    ['Unknown — inferred: the parent recorded the launch at {0} but no result, and the agent\'s transcript was never seen; the agent may have been stopped.', '{0}', 'Unbekannt — abgeleitet: Der Elternprozess hat den Start aufgezeichnet ({0}), aber kein Ergebnis, und das Transkript des Agenten wurde nie gesehen; der Agent wurde möglicherweise abgebrochen.'],
+    ['Idle — inferred: the session transcript has been silent since {0}.', '{0}', 'Ruht — abgeleitet: Das Sitzungstranskript hat sich seit {0} nicht mehr geändert.'],
+    ['Stopped — the parent recorded ‘{0}’ for this run at {1}.', '{1}', 'Gestoppt — der Elternprozess hat für diesen Lauf ‚{0}‘ aufgezeichnet ({1}).'],
+    ['Failed — the parent recorded the failure of this run at {0}.', '{0}', 'Fehlgeschlagen — der Elternprozess hat den Fehlschlag dieses Laufs aufgezeichnet ({0}).'],
+    ['Completed — the parent recorded the end of this run at {0}.', '{0}', 'Fertig — der Elternprozess hat das Ende dieses Laufs aufgezeichnet ({0}).'],
+    ['Unknown — inferred: the parent launched this run at {0}, but no agent of it was ever seen.', '{0}', 'Unbekannt — abgeleitet: Der Elternprozess hat diesen Lauf gestartet ({0}), aber keiner seiner Agenten wurde je gesehen.'],
+    ['Running — inferred: an agent of this run wrote on after the parent recorded its end at {0}.', '{0}', 'Läuft — abgeleitet: Ein Agent dieses Laufs schrieb weiter, nachdem der Elternprozess das Ende des Laufs aufgezeichnet hatte ({0}).'],
+    ['{0} · started {1} · {2} agents · {3} tokens · {4} tool calls · {5} · default model {6}', '{1}', '{0} · Start {1} · {2} Agenten · {3} Token · {4} Tool-Aufrufe · {5} · Standardmodell {6}'],
+    ['The agent hook reported at {0}: waiting for approval.', '{0}', 'Der Agent-Hook meldete ({0}): wartet auf Freigabe.'],
+    ['The agent hook reported at {0}: waiting for input.', '{0}', 'Der Agent-Hook meldete ({0}): wartet auf Eingabe.'],
+    ['{0} at {1}', '{1}', '{0} ({1})'],
+    ['{0} · last at {1} (manual, {2} → {3})', '{1}', '{0} · zuletzt: {1} (manuell, {2} → {3})'],
+    ['{0} · last at {1} (auto, {2} → {3})', '{1}', '{0} · zuletzt: {1} (automatisch, {2} → {3})'],
+    ['{0} · last at {1} (–, {2} → {3})', '{1}', '{0} · zuletzt: {1} (–, {2} → {3})'],
+    ['{0} · prompt cache cold since {1} (1 h TTL)', '{1}', '{0} · Prompt-Cache kalt seit {1} (1 h TTL)'],
+    ['{0} · prompt cache cold since ~{1} (1 h TTL, estimated from the transcript)', '{1}', '{0} · Prompt-Cache kalt seit ~{1} (1 h TTL, geschätzt aus dem Transkript)'],
+    ['A cold start after {0} re-writes {1} tokens instead of reading them from the cache.', '{0}', 'Ein Kaltstart nach {0} schreibt {1} Token neu, statt sie aus dem Cache zu lesen.'],
+    ['A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input, {3}) instead of reading them from the cache ({4}× input, {5}).', '{0}', 'Ein Kaltstart nach {0} schreibt {1} Token zum 1-h-Schreibpreis neu ({2}× Eingabe, {3}), statt sie aus dem Cache zu lesen ({4}× Eingabe, {5}).'],
+    ['A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input) instead of reading them from the cache ({3}× input).', '{0}', 'Ein Kaltstart nach {0} schreibt {1} Token zum 1-h-Schreibpreis neu ({2}× Eingabe), statt sie aus dem Cache zu lesen ({3}× Eingabe).'],
+    ['Codex prompt cache · last request at {0} · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until {1}, perhaps longer.', '{0}', 'Codex-Prompt-Cache · letzte Anfrage: {0} · OpenAI hält einen zwischengespeicherten Prompt-Anfang bei GPT-5.6 und neuer mindestens 30 Minuten nach der letzten Nutzung — ~bis {1}, womöglich länger.'],
+    ['Codex prompt cache · last request at {0} · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until {1}, perhaps longer.', '{1}', 'Codex-Prompt-Cache · letzte Anfrage: {0} · OpenAI hält einen zwischengespeicherten Prompt-Anfang bei GPT-5.6 und neuer mindestens 30 Minuten nach der letzten Nutzung — ~bis {1}, womöglich länger.'],
+    ['Last attempt at {0} failed: {1}', '{0}', 'Letzter Versuch ({0}) fehlgeschlagen: {1}'],
+    ['silent since {0}', '{0}', 'still seit {0}'],
+    ['since {0}', '{0}', 'seit {0}'],
+    ['The stated reset ({0}) has passed and no reading since has caught up: the {1} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.', '{0}', 'Der angegebene Reset ({0}) ist vorbei und kein Messwert seither hat aufgeholt: Die {1} % gehören zum Fenster davor, daher bleibt der Balken neutral, bis ein neuerer Messwert eintrifft.'],
+  ])
+  // A clock of today keeps its „um" — never a date in the slot: the turn's end, the test message's sending.
+  assert.equal(german['{0} finished a turn at {1}, after at least {2}.'], '{0} hat um {1} einen Turn beendet, nach mindestens {2}.')
+  assert.equal(german['This channel works: Token Pace can reach it. Sent at {0}.'], 'Dieser Kanal funktioniert: Token Pace erreicht ihn. Gesendet um {0}.')
+  // The mutation: one „um {0}" back, a clock stamp's and a second slot of a key with two, each caught by key and slot.
+  assert.deepEqual(germanClockProblems({ ...german, 'rejected at {0}': 'abgelehnt um {0}' }), ['de: "rejected at {0}" writes „um {0}": "abgelehnt um {0}"'])
+  const two = 'Unknown — inferred: the transcript went on after an outcome was recorded at {0}, and has been silent since {1}.'
+  assert.equal(germanClockProblems({ ...german, [two]: 'Unbekannt — abgeleitet: Das Transkript wurde weitergeschrieben, nachdem um {0} ein Ausgang aufgezeichnet wurde, und hat sich um {1} nicht mehr geändert.' }).length, 2)
+  const passed = 'The stated reset ({0}) has passed and no reading since has caught up: the {1} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.'
+  assert.equal(germanClockProblems({ ...german, [passed]: 'Der angegebene Reset um {0} ist vorbei.' }).length, 1)
 })
 
 test('CLOCK_STAMP_KEYS\' scan follows a stamp through a wrapper function, a function\'s parameter, a function passed as an argument and a followed field, names a field it does not follow, and stops at formatTime, at a log line and at a wrapper\'s other calls — and a new t(…, clockStamp(…)) call beside src/ is a slot the list lacks (1.14 B2 rule 5\'s mutation)', () => {
@@ -3554,13 +3653,20 @@ test('CLOCK_STAMP_KEYS\' scan follows a stamp through a wrapper function, a func
     "function esc(x: string): string { return x.replace(/&/g, '&amp;') }",
     "export const escaped = (): string => t('Esc {0}', esc(stamp(1)))",
     "export const other = (): string => t('Other {0}', esc('x'))",
+    // 1.14 B1 rule 2: the explanation input's `stamp`, a followed field that holds a function returning a stamp; `later`
+    // is one the spec does not follow — named, not followed.
+    "export const input = { stamp: (x: number): string => stamp(x), later: (x: number): string => clockStamp(x, 0, cfg) }",
+    "export const viaFnField = (i: typeof input): string => t('FnField {0} later {1}', i.stamp(1), i.later(2))",
   ].join('\n'))
   const scan = clockStampScan(join(dir, 'x'))
-  assert.deepEqual(slotsOf(scan), ['Arg {0}\u0000{0}', 'Direct {0}\u0000{0}', 'Esc {0}\u0000{0}', 'Field {0} and {1}\u0000{0}', 'Param {0} at {1}\u0000{1}'])
-  assert.deepEqual(scan.fields, ['lastClock'])
-  assert.deepEqual(Object.keys(scan.unfollowed), ['start'])
+  // 1.14 P2 (pinned and changed: the function field's slot, `stamp` among the fields, `later` among the unfollowed ones,
+  // two more calls — B1 rule 2).
+  assert.deepEqual(slotsOf(scan), ['Arg {0}\u0000{0}', 'Direct {0}\u0000{0}', 'Esc {0}\u0000{0}', 'Field {0} and {1}\u0000{0}', 'FnField {0} later {1}\u0000{0}',
+    'Param {0} at {1}\u0000{1}'])
+  assert.deepEqual(scan.fields, ['lastClock', 'stamp'])
+  assert.deepEqual(Object.keys(scan.unfollowed), ['later', 'start'])
   assert.equal(scan.unfollowed.start.length, 1)
-  assert.deepEqual(scan.sources.map((x) => x.callee).sort(), ['clockStamp', 'clockStamp', 'stamp', 'stamp', 'stamp', 'stamp', 'stamp', 'stamp'])
+  assert.deepEqual(scan.sources.map((x) => x.callee).sort(), ['clockStamp', 'clockStamp', 'clockStamp', 'stamp', 'stamp', 'stamp', 'stamp', 'stamp', 'stamp', 'stamp'])
   // The reset-clock spec over the same file finds nothing: no reset clock in it.
   assert.deepEqual(slotsOf(resetClockScan(join(dir, 'x'))), [])
   // The mutation: src/ as it is, and one more call beside it — the scan finds a slot CLOCK_STAMP_KEYS does not list.
@@ -3650,11 +3756,14 @@ test('the brief\'s 1.14 sections: your pending list — the ledger\'s start, the
     'translate anew', 'stay open', 'Not a native speaker: the translations are an AI agent\'s.', 'node scripts/nls-sources.mjs <id>',
     'test ! -e l10n/pending/<id>.json',
   ]) assert.ok(a.includes(needed), `the brief's "1.14: your pending list" does not say: ${needed}`)
+  // 1.14 P2: the reset-clock keys of 1.14, each in backticks, and the passed reset's key sent to the clock stamps.
+  for (const key of RESET_CLOCK_KEYS_1_14) assert.ok(a.includes(`\`${key}\``), `the brief's 1.14 list does not name the reset-clock key ${J(key)}`)
+  for (const needed of ['„bis zum Reset ({1})"', '`The stated reset ({0}) has passed …`']) assert.ok(a.includes(needed), `the brief's "1.14: your pending list" does not say: ${needed}`)
   const b = flat.slice(stamps, wraps)
   for (const needed of [
     '`14:20`', '`2026-09-26 14:20`', 'The slot may hold `14:20` or `2026-09-26 14:20` — write a form that reads with both',
     'a label (`Recorded: {0}`), a colon or brackets', 'German *um*', 'Danish *kl.*', 'Ukrainian *о*', 'Greek *στις*',
-    '`CLOCK_STAMP_KEYS`', '`clockStamp`', '`{0} finished a turn at {1}`',
+    '`CLOCK_STAMP_KEYS`', '`clockStamp`', '`{0} finished a turn at {1}`', '„zuletzt: {1}"',
   ]) assert.ok(b.includes(needed), `the brief's "1.14: clock stamps" does not say: ${needed}`)
   // Every clock-stamp slot, whole, in backticks, with its placeholder.
   for (const [key, ph] of CLOCK_STAMP_KEYS) {

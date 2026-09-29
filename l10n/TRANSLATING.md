@@ -525,7 +525,9 @@ key on the list, then `node scripts/merge-l10n.mjs`, `node scripts/nls-sources.m
 5. **The reset in the explanation** (`review`): `{0} % used — over the limit until the reset at {1}.` and
    `{0} % used — exhausted until the reset at {1}.` — their slot `{1}` holds the reset's weekday a day or more ahead
    (`Thu 06:00`) from 1.14 on, as the reset-clock slots of [1.13: your pending list](#113-your-pending-list) do: a label or
-   brackets before it, never a clock-only preposition.
+   brackets before it, never a clock-only preposition (German „bis zum Reset ({1})"). The explanation of a reset that has
+   passed, `The stated reset ({0}) has passed …`, holds a clock stamp from 1.14 on — one of the keys of
+   [1.14: clock stamps](#114-clock-stamps).
 6. **The bar's sentences** (`review` of two manifest keys, their `why` says "translate anew"):
    `config.timeProgressStyle.description` and `walkthrough.getStarted.readTheBar.description` read the bar by reaching the
    marker, no longer by left and right; Arabic, Hebrew and Persian read so since 1.13's fix pass — review and keep.
@@ -542,7 +544,7 @@ A clock stamp is `14:20` for a time of today and `2026-09-26 14:20` for one of a
 decides which it holds (`clockStamp` in `src/time.ts`). The slot may hold `14:20` or `2026-09-26 14:20` — write a form
 that reads with both: a label (`Recorded: {0}`), a colon or brackets; never a preposition that takes a clock hour only
 (German *um*, Danish *kl.*, Ukrainian *о*, Greek *στις*) — the reset-clock slots' rule, for a slot that may hold a date.
-1.14 turns the German to such forms („abgelehnt ({0})", „aufgezeichnet ({0})"). The slots, `CLOCK_STAMP_KEYS` in
+1.14 turns the German to such forms („abgelehnt ({0})", „aufgezeichnet ({0})", „zuletzt: {1}"). The slots, `CLOCK_STAMP_KEYS` in
 `test/l10n.languages.test.ts`, which a scan of every `t()` and `tr()` call holds to the code:
 
 * an agent in the tree — its last request, its end as the parent recorded it, its state inferred after or without it:
@@ -581,6 +583,8 @@ that reads with both: a label (`Recorded: {0}`), a colon or brackets; never a pr
   * `A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input) instead of reading them from the cache ({3}× input).` ({0})
   * `Codex prompt cache · last request at {0} · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until {1}, perhaps longer.` ({0} and {1})
   * `Last attempt at {0} failed: {1}` ({0})
+* a quota window's explanation — a stated reset that has passed, with its day when it passed on an earlier day:
+  * `The stated reset ({0}) has passed and no reading since has caught up: the {1} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.` ({0})
 * the page's words a screen reader gets for a row's clock:
   * `silent since {0}` ({0})
   * `since {0}` ({0})

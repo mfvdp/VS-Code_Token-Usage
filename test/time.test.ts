@@ -506,6 +506,7 @@ function failedState(over: Partial<QuotaState> = {}): QuotaState {
 }
 
 test('lastFailureText: when, the poller\'s words verbatim, then the next attempt — EN and DE (1.7 W1)', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „Letzter Versuch (11:40) fehlgeschlagen" — §3 B2 rule 3).
   assert.equal(lastFailureText(failedState(), NOW, utc),
     'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt · next attempt in 1h12m')
   assert.equal(lastFailureText(failedState({ nextAttemptAt: NOW - 1 }), NOW, utc),
@@ -531,9 +532,13 @@ test('lastFailureText: when, the poller\'s words verbatim, then the next attempt
   const de = german(() => lastFailureText(failedState({
     lastFailure: { at: NOW - 20 * 60_000, problem: 'HTTP 429 — Wartezeit vor dem nächsten Versuch', kind: 'retry' },
   }), NOW, utc))
-  assert.equal(de, 'Letzter Versuch um 11:40 fehlgeschlagen: HTTP 429 — Wartezeit vor dem nächsten Versuch · nächster Versuch in 1h12m')
+  assert.equal(de, 'Letzter Versuch (11:40) fehlgeschlagen: HTTP 429 — Wartezeit vor dem nächsten Versuch · nächster Versuch in 1h12m')
   assert.equal(german(() => lastFailureText(failedState({ nextAttemptAt: NOW - 1, attemptHeld: 'focus' }), NOW, utc)),
-    'Letzter Versuch um 11:40 fehlgeschlagen: HTTP 429 — backing off before the next attempt · nächster Versuch wartet auf Fokus')
+    'Letzter Versuch (11:40) fehlgeschlagen: HTTP 429 — backing off before the next attempt · nächster Versuch wartet auf Fokus')
+  // 1.14 B2: another day in the brackets — the form reads with a date, where „um 2026-09-02 14:20" did not.
+  assert.equal(german(() => lastFailureText(failedState({
+    lastFailure: { at: Date.UTC(2026, 8, 2, 14, 20), problem: 'timeout while fetching', kind: 'offline' },
+  }), NOW, utc)), 'Letzter Versuch (2026-09-02 14:20) fehlgeschlagen: timeout while fetching · nächster Versuch in 1h12m')
 })
 
 // ---------------------------------------------------------------------------

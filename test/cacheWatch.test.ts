@@ -394,6 +394,7 @@ test('factorText: three significant digits at most, the locale\'s decimal mark, 
 // ---------------------------------------------------------------------------
 
 test('Codex: a GPT-5.6 turn within 30 minutes gives the "at least until" line, none after; no cost, no countdown', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „letzte Anfrage: 14:37" — §3 B2 rule 3).
   assert.equal(CODEX_RETENTION_MS, 30 * MIN)
   const at = NOW - 10 * MIN
   const line = codexCacheText({ at, model: 'gpt-5.6-sol' }, NOW, tcfg)
@@ -401,7 +402,7 @@ test('Codex: a GPT-5.6 turn within 30 minutes gives the "at least until" line, n
   // The minutes the sentence names are the constant's.
   assert.ok(line?.includes(`at least ${CODEX_RETENTION_MS / MIN} minutes`))
   assert.equal(german(() => codexCacheText({ at, model: 'gpt-5.6-sol' }, NOW, tcfg)),
-    'Codex-Prompt-Cache · letzte Anfrage um 14:37 · OpenAI hält einen zwischengespeicherten Prompt-Anfang bei GPT-5.6 und neuer mindestens 30 Minuten nach der letzten Nutzung — ~bis 15:07, womöglich länger.')
+    'Codex-Prompt-Cache · letzte Anfrage: 14:37 · OpenAI hält einen zwischengespeicherten Prompt-Anfang bei GPT-5.6 und neuer mindestens 30 Minuten nach der letzten Nutzung — ~bis 15:07, womöglich länger.')
   for (const word of ['$', '×', 'input', 'cools', 'cold']) assert.equal(line?.includes(word), false, word)
   assert.equal(codexCacheText({ at: NOW - 31 * MIN, model: 'gpt-5.6-sol' }, NOW, tcfg), null)
   assert.equal(codexCacheText({ at: NOW - CODEX_RETENTION_MS, model: 'gpt-5.6-sol' }, NOW, tcfg), null)

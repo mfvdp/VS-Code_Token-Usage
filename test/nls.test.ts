@@ -402,3 +402,25 @@ test('the three 1.12 leftovers of the manifest, in both languages: the Keychain\
   assert.equal(en(mode).includes('; it ends'), false)
   assert.ok(de(mode).includes('und fragt ihn über dieselbe Verbindung; er endet, wenn VS Code schließt, ein anderes Fenster das Abrufen übernimmt oder der Abruf ausgeschaltet wird'), de(mode))
 })
+
+test('the bar\'s two manifest sentences read the fill by reaching the marker, no longer by left and right — a mirrored bar fills from the right — in both languages; Arabic, Hebrew and Persian keep the wording they have read so since 1.13 (1.14 B7, R-P8-113-bar-words)', () => {
+  const style = 'config.timeProgressStyle.description'
+  const walk = 'walkthrough.getStarted.readTheBar.description'
+  assert.equal(englishNls[style], 'How elapsed time is shown in the bar. This is what makes pace readable **without colour**: fill that has not reached the marker means reserve, fill beyond it means ahead of pace.')
+  assert.equal(englishNls[walk], 'An entry is one quota window: label, window, bar, percentage, and the countdown to its reset.\n\n'
+    + 'The colour compares consumption with the share of the window that has **already elapsed** — the ┃ marker in the bar. Fill that has not reached the marker is spare, fill beyond it is ahead of pace. A 60 % bar is calm an hour before the reset and loud five minutes in.\n\n'
+    + '[Preview status bar states](command:tokenPace.previewStatusBar)')
+  assert.equal(germanNls[style], 'Wie die verstrichene Zeit im Balken gezeigt wird. Das macht das Tempo **ohne Farbe** lesbar: Füllung, die die Marke noch nicht erreicht hat, ist Reserve; Füllung jenseits davon ist dem Tempo voraus.')
+  assert.ok(germanNls[walk].includes('— der Marke ┃ im Balken. Füllung, die die Marke noch nicht erreicht hat, ist Reserve; Füllung jenseits davon ist dem Tempo voraus. Ein Balken bei 60 %'), germanNls[walk])
+  // The mutation: 1.13's left and right back — neither language says it any more.
+  for (const key of [style, walk]) {
+    assert.equal(/left of the marker|right of it/i.test(englishNls[key]), false, `${key}: the English reads the bar by left and right`)
+    assert.equal(/links der Marke|rechts davon/.test(germanNls[key]), false, `${key}: the German reads the bar by left and right`)
+  }
+  // Every language's value stands on its list for review until its package has read it anew (B7 rule 3: Arabic, Hebrew
+  // and Persian read so since 1.13's fix pass and keep theirs; the twenty-four translate anew).
+  for (const { id } of LANGUAGES.filter((l) => l.id !== 'en' && l.id !== 'de')) {
+    const pending = pendingNlsKeys(id)
+    if (pending.size > 0) assert.ok(pending.has(style) && pending.has(walk), `${id}: the two bar sentences are not on its list`)
+  }
+})

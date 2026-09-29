@@ -346,7 +346,10 @@ record's `or(…)`), the view model's `startClock` and `lastClock` fields, and n
 where their value goes (`CLOCK_STAMP_FIELDS`: a details row's `value`, a record's `start`, never a placeholder); it asks
 for exactly the listed keys (`CLOCK_STAMP_EXCEPTED` for a found slot that is none — empty) and pins the calls
 (`CLOCK_STAMP_SOURCES`, the keep-warm host's two English log lines among them). Following a parameter changed none of the
-reset-clock slots. The brief names every key ("1.14: clock stamps").
+reset-clock slots. The brief names every key ("1.14: clock stamps"). The scan also follows a field that holds a function
+returning a clock, whose call is one: the quota explanation's input, whose `resetClock` writes the reset a full window waits
+for with its weekday a day or more ahead and whose `stamp` the day of a stated reset that has passed — the explanation's two
+"until the reset at {1}" keys stand in `RESET_CLOCK_KEYS`, the passed reset's in `CLOCK_STAMP_KEYS`.
 
 ## The price table
 

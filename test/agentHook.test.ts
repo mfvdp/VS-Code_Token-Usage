@@ -676,6 +676,7 @@ test('a call without an agent marks the session row — a wait for input only wh
 })
 
 test('the marker in German, the words of the bundle', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „meldete (11:59)", „wartet auf Freigabe (11:59)" — §3 B2 rule 3).
   const bundle = JSON.parse(fs.readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
   try {
     setLocale('de')
@@ -684,11 +685,11 @@ test('the marker in German, the words of the bundle', () => {
     const vm = tree(hookMap(entry(), entry({ agentId: null, event: 'Notification', wait: 'input' })), { selected: key })
     assert.equal(nodeOf(vm, key).hookWait, 'wartet auf Freigabe')
     assert.equal(nodeOf(vm, `s:${SESSION}`).hookWait, 'wartet auf Eingabe')
-    assert.ok(vm.selected?.stateText.endsWith(' Der Agent-Hook hat um 11:59 gemeldet: wartet auf Freigabe.'), vm.selected?.stateText)
+    assert.ok(vm.selected?.stateText.endsWith(' Der Agent-Hook meldete (11:59): wartet auf Freigabe.'), vm.selected?.stateText)
     const rows = vm.selected?.rows ?? []
-    assert.deepEqual(rows[rows.length - 1], { label: 'Agent-Hook', value: 'wartet auf Freigabe um 11:59' })
+    assert.deepEqual(rows[rows.length - 1], { label: 'Agent-Hook', value: 'wartet auf Freigabe (11:59)' })
     const s = tree(hookMap(entry({ agentId: null, event: 'Notification', wait: 'input' })), { selected: `s:${SESSION}` })
-    assert.ok(s.selected?.stateText.endsWith(' Der Agent-Hook hat um 11:59 gemeldet: wartet auf Eingabe.'), s.selected?.stateText)
+    assert.ok(s.selected?.stateText.endsWith(' Der Agent-Hook meldete (11:59): wartet auf Eingabe.'), s.selected?.stateText)
   } finally {
     setBundle(undefined)
     setLocale(undefined)

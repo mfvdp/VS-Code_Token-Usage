@@ -510,6 +510,7 @@ test('a run launched from an agent\'s own transcript belongs to that agent\'s se
 })
 
 test('the run\'s end sentences are German in German', () => {
+  // 1.14 P2 (pinned and changed: the German „um {n}" before a clock stamp → a label or brackets — „aufgezeichnet (${at})", „diesen Lauf gestartet (…)" — §3 B2 rule 3).
   const bundle = JSON.parse(fs.readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
   try {
     setBundle(bundle)
@@ -524,14 +525,14 @@ test('the run\'s end sentences are German in German', () => {
       launchRun(agg, 'toolu_wf1', NOW - 20 * MIN)
       notify(agg, 'toolu_wf1', NOW - 5 * MIN, status)
     })
-    assert.equal(ended('completed').stateText, `Fertig — der Elternprozess hat das Ende dieses Laufs um ${at} aufgezeichnet.`)
-    assert.equal(ended('failed').stateText, `Fehlgeschlagen — der Elternprozess hat den Fehlschlag dieses Laufs um ${at} aufgezeichnet.`)
-    assert.equal(ended('killed').stateText, `Gestoppt — der Elternprozess hat für diesen Lauf ‚killed‘ um ${at} aufgezeichnet.`)
+    assert.equal(ended('completed').stateText, `Fertig — der Elternprozess hat das Ende dieses Laufs aufgezeichnet (${at}).`)
+    assert.equal(ended('failed').stateText, `Fehlgeschlagen — der Elternprozess hat den Fehlschlag dieses Laufs aufgezeichnet (${at}).`)
+    assert.equal(ended('killed').stateText, `Gestoppt — der Elternprozess hat für diesen Lauf ‚killed‘ aufgezeichnet (${at}).`)
     const launched = texts((agg) => launchRun(agg, 'toolu_wf1', NOW - 2 * MIN))
     assert.equal(launched.stateText, 'Läuft — abgeleitet: Der Elternprozess hat diesen Lauf vor 2 min gestartet, und noch kein Agent hat geschrieben.')
     const lost = texts((agg) => launchRun(agg, 'toolu_wf1', NOW - 20 * MIN))
     assert.equal(lost.stateText,
-      `Unbekannt — abgeleitet: Der Elternprozess hat diesen Lauf um ${clock(NOW - 20 * MIN)} gestartet, aber keiner seiner Agenten wurde je gesehen.`)
+      `Unbekannt — abgeleitet: Der Elternprozess hat diesen Lauf gestartet (${clock(NOW - 20 * MIN)}), aber keiner seiner Agenten wurde je gesehen.`)
     const revived = texts((agg) => {
       launchRun(agg, 'toolu_wf1', NOW - 20 * MIN)
       agentLine(agg, A1, 1, NOW - 19 * MIN)
@@ -540,7 +541,7 @@ test('the run\'s end sentences are German in German', () => {
       agentLine(agg, A1, 2, NOW - 1 * MIN)
     })
     assert.equal(revived.stateText,
-      `Läuft — abgeleitet: Ein Agent dieses Laufs schrieb weiter, nachdem der Elternprozess um ${at} das Ende des Laufs aufgezeichnet hatte.`)
+      `Läuft — abgeleitet: Ein Agent dieses Laufs schrieb weiter, nachdem der Elternprozess das Ende des Laufs aufgezeichnet hatte (${at}).`)
     const resumed = texts((agg) => {
       launchRun(agg, 'toolu_wf1', NOW - 40 * MIN)
       launchRun(agg, 'toolu_wf2', NOW - 20 * MIN, { resume: RUN })

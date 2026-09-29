@@ -64,7 +64,7 @@ import {
 import { CLAUDE_ROOTS, CODEX_ROOTS, configureRoots } from './discover'
 import { DEFAULT_FORECAST_CONFIG, ForecastConfig } from './forecast'
 import { hostUi, showMessage, showPick, showPickMany, showProgress } from './hostUi'
-import { dir, locale, setBundle, setDir, setLang, setLocale, t } from './i18n'
+import { dir, listOf, locale, setBundle, setDir, setLang, setLocale, t } from './i18n'
 import { hookPermissionOpen, KEEP_WARM_LINE } from './keepWarm'
 import { folderSessions, KEEPWARM_CANCEL_COMMAND, KEEPWARM_FILE_NAME, KeepWarmHost } from './keepWarmHost'
 import { availableLanguages, bundleFileName, readBundle } from './languageLoad'
@@ -1874,7 +1874,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       }
     }
     if (result.failed.length > 0) {
-      void showMessage('warning', t('Token Pace: could not delete {0}.', result.failed.join(', ')), {})
+      void showMessage('warning', t('Token Pace: could not delete {0}.', listOf(result.failed)), {})
     }
     if (result.deleted.includes('state')) {
       dirty = false

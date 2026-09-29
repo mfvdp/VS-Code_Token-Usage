@@ -22,7 +22,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { DEFAULT_DIR, DEFAULT_LANG, DEFAULT_LOCALE, dir, lang, locale, setBundle, setDir, setLang, setLocale, t } from '../src/i18n'
+import { DEFAULT_DIR, DEFAULT_LANG, DEFAULT_LOCALE, dir, lang, listOf, locale, setBundle, setDir, setLang, setLocale, t } from '../src/i18n'
 import { dayOf, formatDay, formatTime, rangeFor, TimeConfig } from '../src/time'
 import { readJson, ROOT } from './helpers/nls'
 
@@ -474,4 +474,78 @@ test('1.12 D6: no English key has a space before its ellipsis — a range betwee
   const bundle = readJson(BUNDLE) as Record<string, string>
   assert.deepEqual(['Loading…', 'Reading history…', 'reading history…'].map((k) => bundle[k]),
     ['Wird geladen …', 'Verlauf wird gelesen …', 'Verlauf wird gelesen …'])
+})
+
+/**
+ * 1.14 B6 (R-RLC-113-lists, §7a Q18): the lists a reader is shown are joined by the words' separator — `t('{0}, {1}')`
+ * applied pairwise (listOf). The English data keep their ", ": the diagnostics report is pasted into issues in English
+ * (i18n.ts "What stays English on purpose"), and nothing else in src/ joins with a literal ", ".
+ */
+const LIST_JOIN_ALLOWED: ReadonlyArray<readonly [string, string]> = [
+  ['src/diagnostics.ts', 'the diagnostics report — English data, pasted into issues: its events, its allow-list error, its roots and drift'],
+]
+
+test('1.14 B6: listOf joins by the words\' list separator, applied pairwise — none, one, two and three items in English and under a bundle writing "{0}، {1}"', () => {
+  try {
+    setBundle(undefined)
+    assert.equal(listOf([]), '')
+    assert.equal(listOf(['claude-opus-4-6']), 'claude-opus-4-6')
+    assert.equal(listOf(['a', 'b']), 'a, b')
+    assert.equal(listOf(['~/.claude', '~/.codex', 'gpt-5.3-codex-mini']), '~/.claude, ~/.codex, gpt-5.3-codex-mini')
+    setBundle({ '{0}, {1}': '{0}، {1}' })
+    assert.equal(listOf([]), '')
+    assert.equal(listOf(['a']), 'a')
+    assert.equal(listOf(['a', 'b']), 'a، b')
+    assert.equal(listOf(['a', 'b', 'c']), 'a، b، c')
+    // An item is never read as a template: its own braces stay as they are.
+    setBundle({ '{0}, {1}': '{0}、{1}' })
+    assert.equal(listOf(['{1}', '{0}', 'x']), '{1}、{0}、x')
+  } finally {
+    setBundle(undefined)
+  }
+})
+
+test('1.14 B6: the bundle\'s separator of every language on disk, applied pairwise, is that language\'s list — the English one where the language has not written it yet', () => {
+  const ids = readdirSync(join(ROOT, 'l10n')).map((f) => /^bundle\.l10n\.([a-z-]+)\.json$/.exec(f)).filter((m) => m !== null).map((m) => (m as RegExpExecArray)[1])
+  assert.ok(ids.includes('de') && ids.includes('ar') && ids.length >= 28, ids.join(' '))
+  try {
+    for (const id of ids) {
+      const bundle = readJson(`l10n/bundle.l10n.${id}.json`) as Record<string, string>
+      const sep = bundle['{0}, {1}'] ?? '{0}, {1}'
+      // One {0} before one {1}, and nothing of a list word or a direction mark around them.
+      assert.match(sep, /^\{0\}[^{}\p{L}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]{1,3}\{1\}$/u, `${id}: ${JSON.stringify(sep)}`)
+      setBundle(bundle)
+      const one = (a: string, b: string): string => sep.replace('{0}', a).replace('{1}', b)
+      assert.equal(listOf(['x', 'y', 'z']), one(one('x', 'y'), 'z'), id)
+    }
+  } finally {
+    setBundle(undefined)
+  }
+  // German writes the English comma (the glossary's Listentrennzeichen).
+  assert.equal((readJson('l10n/bundle.l10n.de.json') as Record<string, string>)['{0}, {1}'], '{0}, {1}')
+})
+
+test('1.14 B6: no list in src/ is joined with a literal ", " but the English data of LIST_JOIN_ALLOWED — every shown list goes through listOf', () => {
+  const files: string[] = []
+  const walk = (dir: string): void => {
+    for (const e of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${e.name}`
+      if (e.isDirectory()) walk(rel)
+      else if (/\.ts$/.test(e.name)) files.push(rel)
+    }
+  }
+  walk('src')
+  const found: string[] = []
+  for (const f of files) {
+    readFileSync(join(ROOT, f), 'utf8').split('\n').forEach((line, i) => {
+      if (/\.join\(\s*(['"`]), \1\s*\)/.test(line)) found.push(`${f}:${i + 1}`)
+    })
+  }
+  const allowed = new Set(LIST_JOIN_ALLOWED.map(([f]) => f))
+  assert.deepEqual(found.filter((x) => !allowed.has(x.slice(0, x.lastIndexOf(':')))), [])
+  // Each allowed file still has such a join (an entry without one is stale), and the host's own seam is listOf.
+  for (const [f] of LIST_JOIN_ALLOWED) assert.ok(found.some((x) => x.startsWith(f + ':')), f)
+  assert.ok(found.length >= 1)
+  const i18n = readFileSync(join(ROOT, 'src', 'i18n.ts'), 'utf8')
+  assert.match(i18n, /t\('\{0\}, \{1\}', out, items\[i\]\)/)
 })

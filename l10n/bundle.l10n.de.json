@@ -1241,6 +1241,7 @@
   "{0}, recorded": "{0}, aufgezeichnet",
   "{0}, then {1}": "{0}, dann {1}",
   "{0}, your configured rates": "{0}, Ihre konfigurierten Sätze",
+  "{0}, {1}": "{0}, {1}",
   "{0}, {1} window: exhausted — resets at {2}.": "{0}, Fenster {1}: erschöpft — Reset: {2}.",
   "{0}, {1} window: exhausted.": "{0}, Fenster {1}: erschöpft.",
   "{0}, {1} window: reset at {2} — {3} used in the new window.": "{0}, Fenster {1}: Reset um {2} — im neuen Fenster {3} verbraucht.",

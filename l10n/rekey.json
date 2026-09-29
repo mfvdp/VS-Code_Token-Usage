@@ -383,6 +383,23 @@
       "kind": "nls-reword",
       "key": "walkthrough.getStarted.readTheBar.description",
       "why": "1.14 B7 (R-P8-113-bar-words): the bar read by reaching the marker, no longer by left and right (a mirrored bar fills from the right) — fill that has not reached the marker is reserve or spare, fill beyond it is ahead of pace, the rest word for word — reword by reaching the marker, translate anew — ar, he and fa: review and keep (they read so since 1.13's fix pass)"
+    },
+    {
+      "n": 49,
+      "by": "P3",
+      "kind": "add",
+      "part": "model",
+      "key": "{0}, {1}",
+      "why": "1.14 B6 (R-RLC-113-lists, §7a Q18): a new key, the list separator — listOf applies it pairwise to every list a reader is shown (model ids, folder names, sources, paths, phrases): a, b, c = t('{0}, {1}', t('{0}, {1}', a, b), c) — write the comma your language puts between the items of a list of names and nothing more (no word for and, no bidi mark — T16 refuses a U+200F): Arabic and Persian '{0}، {1}', Chinese and Japanese '{0}、{1}' or '{0}, {1}' (your choice, named), every other language most likely '{0}, {1}' as the English — not Intl.ListFormat, which writes none in Chinese and an and before every Arabic item"
+    },
+    {
+      "n": 50,
+      "by": "P3",
+      "kind": "copy",
+      "from": "model",
+      "part": "dashboard",
+      "key": "{0}, {1}",
+      "why": "1.14 B6 (R-RLC-113-lists): the same list separator on the page — the page's listOf joins its lists (the data-quality roots, the unpriced and family-priced models, the unrendered fields) through tr('{0}, {1}') — the model part's value copied, one translation in both parts"
     }
   ]
 }

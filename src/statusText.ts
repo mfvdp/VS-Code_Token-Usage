@@ -21,7 +21,7 @@ import { BudgetRow, worstBudget } from './budget'
 import { CACHE_WATCH_MAX, CachePhase, CacheWatchEntry, cacheCostText, cacheLineText, cacheMoreText } from './cacheWatch'
 import { Config, oneLine, planNameOf, readPaceConfig, readTimeConfig } from './config'
 import { lockoutText } from './forecast'
-import { dir, t } from './i18n'
+import { dir, listOf, t } from './i18n'
 import { paceVerdict, windowDisplay, WindowDisplay, windowElapsed } from './pace'
 import { isCustomPricing, PRICES_AS_OF, PricingOptions } from './prices'
 import { countdownText, promptCacheText } from './promptCache'
@@ -883,7 +883,7 @@ function usageTable(source: Source, ctx: RenderContext): string[] {
     const c = ctx.agg.cost(days[0], today, ctx.tcfg, ctx.pricing, { source })
     if (c.unpricedTokens > 0) {
       out.push('')
-      out.push(`⚠ ${t('{0} tokens have no price ({1}) — they are missing from the cost, not billed at a guess.', compact(c.unpricedTokens), c.unpricedModels.map(span).join(', ') || t('unknown model'))}`)
+      out.push(`⚠ ${t('{0} tokens have no price ({1}) — they are missing from the cost, not billed at a guess.', compact(c.unpricedTokens), listOf(c.unpricedModels.map(span)) || t('unknown model'))}`)
     }
     if (c.fastUnpricedTokens > 0) {
       out.push('')
@@ -891,7 +891,7 @@ function usageTable(source: Source, ctx: RenderContext): string[] {
     }
     if (c.familyPriced.length > 0) {
       out.push('')
-      out.push(`⚠ ${t('priced from a family fallback: {0}.', c.familyPriced.map(span).join(', '))}`)
+      out.push(`⚠ ${t('priced from a family fallback: {0}.', listOf(c.familyPriced.map(span)))}`)
     }
   }
   return out

@@ -19,7 +19,7 @@ import { SOURCES, SOURCE_TITLE, maybeAdapterFor } from './adapters'
 import { AGENT_RETENTION_DAYS, SESSION_ACTIVE_MS } from './agentTree'
 import { Aggregator, BucketFilter, HourQuery, Metric, billable } from './agg'
 import { rangeArrow } from './bidi'
-import { locale, t } from './i18n'
+import { listOf, locale, t } from './i18n'
 // Type only: the chart carries the setting's value, not the module that reads settings.
 import type { ChartModelStyle } from './config'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, isCustomPricing, priceOf } from './prices'
@@ -2492,7 +2492,7 @@ function newRecords(
         cost: shown ? costText(h.usd) : '–',
         // A dash already says "no cost known"; the mark only qualifies a figure that is shown.
         floor: shown && h.unpriced,
-        models: writers.slice(0, CACHE_HOUR_MODELS).join(', ') + (rest > 0 ? ` ${t('+{0} more', full(rest))}` : ''),
+        models: listOf(writers.slice(0, CACHE_HOUR_MODELS)) + (rest > 0 ? ` ${t('+{0} more', full(rest))}` : ''),
       }
     })
 
@@ -2516,7 +2516,7 @@ function newRecords(
   }
   if (!ctx.showCost) notes.push(t('The most expensive days need tokenPace.showCost.'))
   if (!claude && ctx.sources.length > 0) {
-    notes.push(t('Claude Code only — not shown while {0} is selected.', ctx.sources.map((s) => SOURCE_TITLE[s] ?? s).join(', ')))
+    notes.push(t('Claude Code only — not shown while {0} is selected.', listOf(ctx.sources.map((s) => SOURCE_TITLE[s] ?? s))))
   }
   return { costDays, longestSessions, largestSessions, cacheHours, reading: null, recordNotes: notes }
 }
@@ -2801,7 +2801,7 @@ export function sessionRows(ctx: StatsCtx, limit = 50): SessionRow[] {
       usage: tokens(billable(b)),
       cost: '–',
       requests: tokens(s.requests),
-      models: s.models.join(', '),
+      models: listOf(s.models),
       cacheHit: percentOf(parts.num, parts.den),
       cacheState: cacheStateOf(s, ctx.now),
     }

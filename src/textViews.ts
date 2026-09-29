@@ -14,7 +14,7 @@
 import type { AgentTally, AgentTreeVm, AgentWeek, NodeState, RunningItem, TreeNode } from './agentTree'
 import { tallySpoken, tallyText } from './agentTreeBuild'
 import { rangeArrow } from './bidi'
-import { t } from './i18n'
+import { listOf, t } from './i18n'
 import { DEFAULT_BAR, estimate, full, renderBar } from './render'
 import type { Forecast, Source } from './types'
 import { SOURCE_TITLE } from './viewModel'
@@ -643,13 +643,13 @@ function retroWorthShowing(vm: ViewModel): ViewModel['retro'] {
 function dataQualityLines(vm: ViewModel): string[] {
   const d = vm.dataQuality
   const out: string[] = [
-    t('Roots: {0} · {1} file(s)', d.roots.length > 0 ? d.roots.join(', ') : t('none'), d.files),
+    t('Roots: {0} · {1} file(s)', d.roots.length > 0 ? listOf(d.roots) : t('none'), d.files),
     t('Coverage: {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB',
       d.oldestDay ?? '–', d.newestDay ?? '–', d.buckets.hour, d.buckets.day, d.buckets.month,
       Math.round(d.snapshotBytes / 1024)),
     t('Lower bound share: {0}', d.lowerBoundShare)
-    + (d.unpricedModels.length > 0 ? ` · ${t('unpriced: {0}', d.unpricedModels.join(', '))}` : '')
-    + (d.familyPriced.length > 0 ? ` · ${t('family-priced: {0}', d.familyPriced.join(', '))}` : ''),
+    + (d.unpricedModels.length > 0 ? ` · ${t('unpriced: {0}', listOf(d.unpricedModels))}` : '')
+    + (d.familyPriced.length > 0 ? ` · ${t('family-priced: {0}', listOf(d.familyPriced))}` : ''),
     t('Retention: {0} d hourly · {1} d daily · {2} d quota history',
       d.retention.hourDays, d.retention.days, d.retention.historyDays),
     t('Quota history: {0} samples · {1} KB · oldest {2}',
@@ -668,7 +668,7 @@ function dataQualityLines(vm: ViewModel): string[] {
       ? q.candidates.map((c) => `${c.id} ${c.ok ? `${c.ageSec === null ? t('ok') : t('{0} min', Math.round(c.ageSec / 60))}` : (c.problem ?? t('unavailable'))}`).join(' · ')
       : t('no source answered')
     out.push(t('Quota sources {0}: {1}', q.source, cands))
-    if (q.drift.length > 0) out.push(t('Unrendered fields {0}: {1}', q.source, q.drift.join(', ')))
+    if (q.drift.length > 0) out.push(t('Unrendered fields {0}: {1}', q.source, listOf(q.drift)))
   }
   for (const c of d.calibration) out.push(t('Calibration {0} {1}: {2}', c.source, c.windowId, c.text))
   if (d.bridge) out.push(t('Status line: {0}', d.bridge))

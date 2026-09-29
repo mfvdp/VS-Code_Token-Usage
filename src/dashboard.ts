@@ -729,6 +729,12 @@ p { margin: 6px 0; }
 [data-body="quota"] .row > .name { white-space: nowrap; }
 .row { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
 .wrap { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+/* 1.14 B4 (R-P7b-113-chips): a chip beside a row's text keeps its words whole. The row is flex, and the body's
+   overflow-wrap: anywhere gave each chip a min-content of one character, so at 260–320 px the row shrank the chips
+   below their words ("usa|ge", "Verbrauch", "الاستخ|دام"). A chip is one line of its own: at least as wide as its label,
+   the chips stack in their .wrap, and the text beside them — the stats line, first — wraps. nowrap rather than
+   overflow-wrap: normal, which still let a Japanese or Chinese chip break between its characters ("使用|量", "コス|ト"). */
+.row > .wrap > button { white-space: nowrap; }
 button, select, input {
   font-family: inherit; font-size: 11px; color: var(--vscode-foreground);
   background: var(--vscode-button-secondaryBackground, transparent);
@@ -1977,6 +1983,8 @@ function webviewWords(): Record<string, string> {
     '{0} tokens over {1} day(s)': t('{0} tokens over {1} day(s)'),
     '{0} · derived': t('{0} · derived'),
     '{0} · recorded': t('{0} · recorded'),
+    // 1.14 B6 (§7a Q18): the list separator, applied pairwise by the page's listOf (the host's is src/i18n.ts listOf).
+    '{0}, {1}': t('{0}, {1}'),
     '{0}, derived': t('{0}, derived'),
     '{0}, recorded': t('{0}, recorded'),
     '{0} · {1} · {2} · {3} % of the day · {1} total {4}':

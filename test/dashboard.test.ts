@@ -1179,7 +1179,8 @@ test('the card keeps its short age but neither the freshness row nor the officia
   assert.equal(h.indexOf('https://'), -1, h)
   assert.equal(/last check|last data|last local event|next refresh|snapshot/.test(h), false, h)
   // 1.10 B5 rule 3 (rewritten: the header's meta line is glued — "2 min" never broken between the figure and its unit).
-  assert.ok(h.indexOf('<span class="meta">plan max20 · poll · 2\u00a0min ago</span>') >= 0, h)
+  // 1.14 P3 (pinned and changed: the age in its .nobr span — §3 B5 rule 2).
+  assert.ok(h.indexOf('<span class="meta">plan max20 · poll · <span class="nobr">2\u00a0min ago</span></span>') >= 0, h)
 })
 
 // 1.7 W1: our own fetch failed after the reading the card shows — one dim line directly under the
@@ -2982,11 +2983,12 @@ test('the prompt-cache line carries its own age, and an old reading is marked as
     quotas: [card({ promptCache: { text: line, note: 'n', expired: false, ageText: '3 d ago', fresh: false } })],
   })
   // 1.10 B5 rule 3 (rewritten: the line and its age glued).
-  assert.ok(old.indexOf('<div class="meta warn" title="n">' + glued(line + ' · updated 3 d ago') + ' · ⚠ stale</div>') >= 0, old)
+  // 1.14 P3 (pinned and changed: the age in its .nobr span — §3 B5 rule 2).
+  assert.ok(old.indexOf('<div class="meta warn" title="n">' + glued(line + ' · updated <span class="nobr">3 d ago</span>') + ' · ⚠ stale</div>') >= 0, old)
   const fresh = render('sQuota()', {
     quotas: [card({ promptCache: { text: line, note: 'n', expired: false, ageText: '1 min ago', fresh: true } })],
   })
-  assert.ok(fresh.indexOf('<div class="meta" title="n">' + glued(line + ' · updated 1 min ago') + '</div>') >= 0, fresh)
+  assert.ok(fresh.indexOf('<div class="meta" title="n">' + glued(line + ' · updated <span class="nobr">1 min ago</span>') + '</div>') >= 0, fresh)
   // A payload from a build without the fields is marked neither fresh nor stale.
   const older = render('sQuota()', {
     quotas: [card({ promptCache: { text: line, note: 'n', expired: false } })],
@@ -3380,7 +3382,8 @@ test('a context reading without a window size gets tokens and no bar at all', ()
 test('a stale context reading is marked, a fresh one is not', () => {
   const stale = render('sContext()', { context: contextCard({ fresh: false, ageText: '3 h ago' }) })
   assert.ok(stale.includes('⚠ stale'), stale)
-  assert.ok(stale.includes('updated 3 h ago'), stale)
+  // 1.14 P3 (pinned and changed: the age in its .nobr span — §3 B5 rule 2).
+  assert.ok(stale.includes('updated <span class="nobr">3 h ago</span>'), stale)
   assert.equal(render('sContext()', { context: contextCard() }).includes('stale'), false)
 })
 
@@ -10894,7 +10897,8 @@ test('a number stays with its unit: the page\'s glue() keeps a figure and a foll
     quotas: [card({ ageText: '2 min 전', windows: [win({ verdict: { text: '구간의 37 % 아직 여유', level: 'ok' },
       forecast: { state: 'eta', text: '~39 min 후 소진' } })] })],
   })
-  assert.ok(q.includes('<span class="meta">plan max20 · poll · 2 min 전</span>'), q)
+  // 1.14 P3 (pinned and changed: the age in its .nobr span — §3 B5 rule 2).
+  assert.ok(q.includes('<span class="meta">plan max20 · poll · <span class="nobr">2 min 전</span></span>'), q)
   assert.ok(q.includes('<span class="verdict ok">구간의 37 % 아직 여유</span>'), q)
   assert.ok(q.includes('<div class="meta">~39 min 후 소진</div>'), q)
   // Never in an attribute: the figure's own markup and every data-* value keep their plain text.
@@ -11595,6 +11599,16 @@ class MText {
   declare parentNode: MEl | null
   constructor(doc: MiniDoc, data: string) { doc.count(); hideKey(this, 'parentNode', null); this.data = String(data) }
   get textContent(): string { return this.data }
+  // 1.14 B5: a text's neighbours, as a browser's DOM has them (glueLabels reads the elements beside a text).
+  get nextSibling(): MEl | MText | null { return miniSibling(this, 1) }
+  get previousSibling(): MEl | MText | null { return miniSibling(this, -1) }
+}
+/** 1.14 B5: the node `d` places after (1) or before (-1) `n` among its parent's children, or null. */
+function miniSibling(n: MEl | MText, d: 1 | -1): MEl | MText | null {
+  const p = n.parentNode
+  if (!p) return null
+  const i = p.childNodes.indexOf(n)
+  return i < 0 ? null : p.childNodes[i + d] ?? null
 }
 class MEl {
   nodeType = 1
@@ -11614,6 +11628,8 @@ class MEl {
     this.attrs = { ...attrs }
   }
   get dir(): string { return this.attrs.dir ?? '' }
+  get nextSibling(): MEl | MText | null { return miniSibling(this, 1) }
+  get previousSibling(): MEl | MText | null { return miniSibling(this, -1) }
   getAttribute(k: string): string | null { return k in this.attrs ? this.attrs[k] : null }
   setAttribute(k: string, v: string): void { this.attrs[k] = String(v) }
   get className(): string { return this.attrs.class ?? '' }
@@ -12022,4 +12038,103 @@ test('1.13 fix pass 2 (Review L C-F1): right to left a model\'s id is cut in its
   nodeVm.runInContext('fitAgentNames()', a.c)
   assert.equal(rtlSliver.cls.has('ag-gone'), false)
   assert.match(SOURCE, /const cut = m\.scrollWidth > m\.clientWidth \+ 0\.5 \|\| \(!!id && id\.clientWidth > 0 && id\.scrollWidth > id\.clientWidth \+ 0\.5\);/)
+})
+
+// ---------------------------------------------------------------------------
+// 1.14 B4, B5, B6 (P3): the Activity chips keep whole words, a label stays with its figure, one list separator.
+// ---------------------------------------------------------------------------
+
+test('1.14 B4 (R-P7b-113-chips): a chip in a row keeps its words — `.row > .wrap > button { white-space: nowrap; }` in the stylesheet, direction-free', () => {
+  const css = STYLE.replace(/\/\*[\s\S]*?\*\//g, '')
+  assert.ok(css.includes('.row > .wrap > button { white-space: nowrap; }'), 'the chips\' rule')
+  // The row stays as it was: flex, its text first; only the chips' own wrapping changed.
+  assert.ok(css.includes('.row { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }'))
+  // The Activity section's chips are such buttons: in a .wrap, the row's second child, after the stats line.
+  const h = render('sHeatmap()')
+  assert.match(h, /^<div class="row"><span class="meta">[^]*?<\/span><span class="wrap"><button data-act="heatmapMetric"/, h.slice(0, 300))
+})
+
+/** 1.14 B5: one markup string through glueLabels over a MiniDom tree, as markup again. */
+function glueDom(html: string, d: 'ltr' | 'rtl' = 'ltr'): string {
+  const m = miniCtx(d)
+  m.root.innerHTML = html
+  ;(m.c as Record<string, unknown>).scope = m.root
+  nodeVm.runInContext('glueLabels(scope)', m.c)
+  return m.root.innerHTML
+}
+
+test('1.14 B5 (R-RLC-113-glue, §7a Q17): a label stays with its figure and a word with its bracketed figure — the space after a label\'s colon before a figure, and between a word and a "(" that opens on one, a no-break space; a bracket on a word, a label before a word and a figure\'s unit keep theirs', () => {
+  const g = (s: string): string => String(nodeVm.runInContext('glueLabelText(' + JSON.stringify(s) + ')', ctx))
+  const nb = '\u00a0'
+  const cases: Array<[string, string]> = [
+    ['Files: 4', `Files:${nb}4`],
+    ['الملفات: 4', `الملفات:${nb}4`],
+    ['share (83 %)', `share${nb}(83 %)`],
+    ['K محسوبون هنا (83 %)', `K محسوبون هنا${nb}(83 %)`],
+    ['a word (~12 min)', `a word${nb}(~12 min)`],
+    ['models (9) ▾', `models${nb}(9) ▾`],
+    // A translation's own label (ja "Generated {0}."), a closing bracket before the colon, French's space before it.
+    ['生成: 12:00。', `生成:${nb}12:00。`],
+    ['calls (7 d): 244', `calls${nb}(7 d):${nb}244`],
+    [`Fichiers${nb}: 4`, `Fichiers${nb}:${nb}4`],
+    ['文件： 4', `文件：${nb}4`],
+    // A figure's marks and a currency before its digits.
+    ['Cost: ~$5.33 · Share: <1 % · Left: ≈3 · Hooks: ⚠ 2', `Cost:${nb}~$5.33 · Share:${nb}<1 % · Left:${nb}≈3 · Hooks: ⚠ 2`],
+    // Untouched: the bracket opens on a word, the label stands before a word, a figure (no letter) before the bracket.
+    ['5 h (in 2h14m)', '5 h (in 2h14m)'],
+    ['ratio: x', 'ratio: x'],
+    ['12:30 (4)', '12:30 (4)'],
+    ['Claude Code 96 % (doskonała)', 'Claude Code 96 % (doskonała)'],
+    // A figure's glued unit is no word: the countdown and its bracket may still part.
+    [`cools in 4${nb}m${nb}10${nb}s (1${nb}h TTL)`, `cools in 4${nb}m${nb}10${nb}s (1${nb}h TTL)`],
+    [`4${nb}min (2 %)`, `4${nb}min (2 %)`],
+    ['', ''],
+  ]
+  for (const [raw, want] of cases) assert.equal(g(raw), want, raw)
+  // On what a render drew: the texts only — an attribute (a data-* value, a title) keeps its plain spaces —, and a
+  // label or a figure in the element beside its text.
+  const h = glueDom('<span data-x="Files: 4" title="share (83 %)">Files: 4 · share (83 %)</span>'
+    + '<b>Roots:</b> 2<i>Oldest: <span class="nobr">2026-09-01</span></i><em>ratio: </em><i>x</i>')
+  assert.ok(h.includes('data-x="Files: 4"') && h.includes('title="share (83 %)"'), h)
+  assert.ok(h.includes(`>Files:${nb}4 · share${nb}(83 %)</span>`), h)
+  assert.ok(h.includes(`<b>Roots:</b>${nb}2`), h)
+  assert.ok(h.includes(`<i>Oldest:${nb}<span class="nobr">2026-09-01</span></i>`), h)
+  assert.ok(h.includes('<em>ratio: </em>'), h)
+  // A form control's text and a drawing's are no words of the page (FIGURE_SKIP).
+  const skip = glueDom('<textarea>Files: 4</textarea><svg><title>share (8 %)</title></svg>')
+  assert.equal(skip.includes(nb), false, skip)
+  // Right to left the same, before the figures are isolated.
+  assert.ok(glueDom('<div>الملفات: 4 · الحصة (83 %)</div>', 'rtl').includes(`الملفات:${nb}4 · الحصة${nb}(83 %)`))
+  // Every render path runs the pass right before isolateFigures, over the same scope.
+  const lines = SOURCE.split('\n')
+  const iso = lines.map((l, i) => [l.trim(), i] as const).filter(([l]) => /^isolateFigures\(/.test(l))
+  assert.ok(iso.length >= 6, String(iso.length))
+  const codeBefore = (i: number): string => { let k = i - 1; while (k > 0 && /^\/\//.test(lines[k].trim())) k--; return lines[k].trim() }
+  for (const [l, i] of iso) assert.equal(codeBefore(i), l.replace(/^isolateFigures/, 'glueLabels'), `line ${i + 1}: ${l}`)
+})
+
+test('1.14 B5 rule 2 (§7a Q17): a reading\'s age is one run — the quota card\'s, the context card\'s and the prompt-cache line\'s age each in a .nobr span', () => {
+  const q = render('sQuota()', { quotas: [card({ ageText: 'قبل 2 min' })] })
+  assert.ok(q.includes('<span class="nobr">قبل 2\u00a0min</span></span>'), q)
+  assert.equal(SOURCE.split('\n').filter((l) => /ageSpan\((q|c|q\.promptCache)\.(promptCache\.)?ageText\)/.test(l)).length, 3)
+})
+
+test('1.14 B6 (R-RLC-113-lists, §7a Q18): the page joins its lists by its own word \'{0}, {1}\', applied pairwise — the Data quality lines under a dictionary writing "{0}، {1}"; the key is a page word', () => {
+  assert.ok(Object.prototype.hasOwnProperty.call(DICT, '{0}, {1}'))
+  const dq = { dataQuality: dataQualityOf({ roots: ['~/.claude', '~/.codex'], unpricedModels: ['a-1', 'b-2', 'c-3'], familyPriced: ['f-1', 'f-2'],
+    quota: [{ source: 'claude', candidates: [], drift: ['x', 'y'] }] }) }
+  const en = render('sDataQuality()', dq)
+  assert.ok(en.includes('~/.claude, ~/.codex') && en.includes('a-1, b-2, c-3') && en.includes('f-1, f-2') && en.includes('x, y'), en)
+  const ar = makeContext()
+  nodeVm.runInContext(between(germanPage({ '{0}, {1}': '{0}، {1}' }), /<script nonce="[A-Za-z0-9]+">/, '</script>'), ar)
+  ;(ar as Record<string, unknown>).fixture = model(dq)
+  const h = String(nodeVm.runInContext('vm = fixture; sDataQuality()', ar))
+  assert.ok(h.includes('~/.claude، ~/.codex') && h.includes('a-1، b-2، c-3') && h.includes('f-1، f-2') && h.includes('x، y'), h)
+  assert.equal(h.includes('a-1, b-2'), false, h)
+  const one = (s: string): string => String(nodeVm.runInContext('listOf(' + s + ')', ar))
+  assert.equal(one('[]'), '')
+  assert.equal(one('["a"]'), 'a')
+  assert.equal(one('["a", "b", "c"]'), 'a، b، c')
+  // No list of the page is joined with a literal ", " any more.
+  assert.deepEqual(SOURCE.split('\n').filter((l) => /\.join\(', '\)/.test(l)), [])
 })

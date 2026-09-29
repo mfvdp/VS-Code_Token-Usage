@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 48,
+  "applied": 50,
   "bundle": {
     "• Codex — the local \"codex app-server\" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.": {
       "parts": [
@@ -323,6 +323,14 @@
       ],
       "state": "review",
       "why": "1.14 B2 (R2-F4-113): the English is unchanged — its slot {0} holds a clock stamp, 14:20 today or 2026-09-26 14:20 on another day, and a slot takes no preposition that takes a clock hour only (German um, Danish kl., Ukrainian о, Greek στις): a label, a colon or brackets before it — the German keeps its form, which reads with a date — your 1.12/1.13 form was read by Review L and mostly holds: check it, keep it or change it, and say which (1.14: clock stamps)"
+    },
+    "{0}, {1}": {
+      "parts": [
+        "model",
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "1.14 B6 (R-RLC-113-lists, §7a Q18): a new key, the list separator — listOf applies it pairwise to every list a reader is shown (model ids, folder names, sources, paths, phrases): a, b, c = t('{0}, {1}', t('{0}, {1}', a, b), c) — write the comma your language puts between the items of a list of names and nothing more (no word for and, no bidi mark — T16 refuses a U+200F): Arabic and Persian '{0}، {1}', Chinese and Japanese '{0}、{1}' or '{0}, {1}' (your choice, named), every other language most likely '{0}, {1}' as the English — not Intl.ListFormat, which writes none in Chinese and an and before every Arabic item; 1.14 B6 (R-RLC-113-lists): the same list separator on the page — the page's listOf joins its lists (the data-quality roots, the unpriced and family-priced models, the unrendered fields) through tr('{0}, {1}') — the model part's value copied, one translation in both parts"
     }
   },
   "nls": {

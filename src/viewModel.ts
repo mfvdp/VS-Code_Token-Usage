@@ -27,7 +27,7 @@ import {
   readTimeConfig,
 } from './config'
 import { digest } from './digest'
-import { locale, t } from './i18n'
+import { listOf, locale, t } from './i18n'
 import {
   FlagId, LANGUAGES, LanguageId, LanguageSetting, ResolvedLanguage, TextDirection, isLanguageId, languageDir, languageEntry,
   languageName, resolveLanguage,
@@ -2027,8 +2027,8 @@ export function toolRows(ctx: StatsCtx, range: DayRange, limit: number): ToolsDa
       calls: g.calls,
       callsText: full(g.calls),
       share: percentOf(g.calls, total),
-      models: models.length === 0 ? '–' : shown.join(', ') + (rest > 0 ? ` ${t('+{0} more', rest)}` : ''),
-      sources: [...g.sources].sort().map((s) => SOURCE_TITLE[s]).join(', '),
+      models: models.length === 0 ? '–' : listOf(shown) + (rest > 0 ? ` ${t('+{0} more', rest)}` : ''),
+      sources: listOf([...g.sources].sort().map((s) => SOURCE_TITLE[s])),
     }
   })
 
@@ -2596,16 +2596,17 @@ function claudeOnlyText(view: Exclude<ProviderView, 'all'>): string {
  */
 export function laterChecksText(sources: readonly Source[]): string | null {
   const rows = PRICES_CHECKED_LATER.filter((r) => sources.includes(r.source))
-  return rows.length === 0 ? null : rows.map((r) => `${r.model} (${r.checked})`).join(', ')
+  return rows.length === 0 ? null : listOf(rows.map((r) => `${r.model} (${r.checked})`))
 }
 
 /**
  * 1.11 C2: the pages the prices of the providers the view shows were read from — PRICE_SOURCE_PAGES' host names in
- * the registry's order, joined by ", " (host names are no words: never translated, never part of a key). Under
- * All `docs.claude.com, platform.claude.com, developers.openai.com`; under a provider view its own.
+ * the registry's order, joined by the words' list separator (1.14 B6 listOf — ", " in English; host names are no words:
+ * never translated, never part of a key). Under All `docs.claude.com, platform.claude.com, developers.openai.com`; under
+ * a provider view its own.
  */
 export function priceSourcesText(sources: readonly Source[]): string {
-  return SOURCES.filter((s) => sources.includes(s)).flatMap((s) => PRICE_SOURCE_PAGES[s] ?? []).join(', ')
+  return listOf(SOURCES.filter((s) => sources.includes(s)).flatMap((s) => PRICE_SOURCE_PAGES[s] ?? []))
 }
 
 function footnotesFor(vm: ViewModel, cfg: Config): string[] {
@@ -2630,10 +2631,10 @@ function footnotesFor(vm: ViewModel, cfg: Config): string[] {
     if (vm.pricing.sources !== '') out.push(t('Price sources: {0}.', vm.pricing.sources))
     if (vm.pricing.custom) out.push(t('Costs use your configured rates, not the published list prices.'))
     if (vm.unpricedModels.length > 0) {
-      out.push(t('No price on file for: {0} — every cost total is a lower bound.', vm.unpricedModels.join(', ')))
+      out.push(t('No price on file for: {0} — every cost total is a lower bound.', listOf(vm.unpricedModels)))
     }
     if (vm.familyPriced.length > 0) {
-      out.push(t('Priced from a related model (family fallback): {0}.', vm.familyPriced.join(', ')))
+      out.push(t('Priced from a related model (family fallback): {0}.', listOf(vm.familyPriced)))
     }
   }
   // The glyph legend every view prints. `≈` is only explained where it can appear: the

@@ -13,7 +13,7 @@
  */
 
 import { SOURCE_TITLE } from './adapters'
-import { t } from './i18n'
+import { listOf, t } from './i18n'
 import { WindowDisplay } from './pace'
 import { compact, usd } from './render'
 import { Source } from './types'
@@ -107,7 +107,7 @@ function cacheSentence(d: DigestInput): string | null {
 function unpricedSentence(d: DigestInput): string | null {
   if (!d.showCost || d.unpricedModels.length === 0) return null
   const n = d.unpricedModels.length
-  const names = d.unpricedModels.join(', ')
+  const names = listOf(d.unpricedModels)
   return n === 1
     ? t('{0} model without a price on file ({1}), so every cost figure here is a lower bound.', n, names)
     : t('{0} models without a price on file ({1}), so every cost figure here is a lower bound.', n, names)

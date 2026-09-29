@@ -39,7 +39,7 @@ import {
   SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, TallyPart, TreeNode, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS, hookKey,
 } from './agentTree'
 import { billable, outcomeOfStatus } from './agg'
-import { t } from './i18n'
+import { listOf, t } from './i18n'
 import { PricingOptions, costOfBucket, normalizeModel } from './prices'
 import { compact, full } from './render'
 import { cleanRunRecord } from './runRecord'
@@ -899,7 +899,7 @@ export function tallySpoken(n: AgentTally): string {
   if (n.stopped > 0) parts.push(t('{0} stopped', full(n.stopped)))
   if (n.running > 0) parts.push(t('about {0} running', full(n.running)))
   if (n.unknown > 0) parts.push(t('about {0} unknown', full(n.unknown)))
-  return parts.join(', ')
+  return listOf(parts)
 }
 
 /**
@@ -2028,7 +2028,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       }]
       : []),
     ...(env.attribution !== 'none' ? [{ label: t('Project'), value: root.sub ?? '–' }] : []),
-    { label: t('Models'), value: modelsOf(main?.models).join(', ') || '–' },
+    { label: t('Models'), value: listOf(modelsOf(main?.models)) || '–' },
     ...timeRows(root.startTs, root.lastTs, now, tcfg, true),
     ...countRows(mainCounters, false),
     // O3: how often its own transcript was compacted.
@@ -2206,7 +2206,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         ...contextRows(r, c),
         ...perMinuteRows(c, activity - first),
         { label: t('Type'), value: type ?? '–' },
-        { label: t('Models'), value: models.join(', ') || alias || '–' },
+        { label: t('Models'), value: listOf(models) || alias || '–' },
         // N8: the effort its replies were written at.
         { label: t('Effort'), value: effortText(effortsOf(r)) },
         idRow(r.agentId),

@@ -479,6 +479,7 @@
   "{0}, list as of {1}": "{0}, Listenpreis mit Stand {1}",
   "{0}, then {1}": "{0}, dann {1}",
   "{0}, your configured rates": "{0}, Ihre konfigurierten Sätze",
+  "{0}, {1}": "{0}, {1}",
   "{0}: no usage": "{0}: kein Verbrauch",
   "~ = estimate · measured = read from the provider · derived = computed from measured values.": "~ = Schätzung · gemessen = vom Anbieter gelesen · abgeleitet = aus gemessenen Werten berechnet.",
   "~ = estimate · ≈ = lower bound · measured = read from the provider · derived = computed from measured values.": "~ = Schätzung · ≈ = Untergrenze · gemessen = vom Anbieter gelesen · abgeleitet = aus gemessenen Werten berechnet.",

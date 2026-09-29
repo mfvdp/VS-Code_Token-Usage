@@ -134,6 +134,24 @@ export function t(message: string, ...args: Array<string | number>): string {
   return args.length === 0 ? template : fill(template, args)
 }
 
+/**
+ * 1.14 B6 (R-RLC-113-lists, §7a Q18): items joined by the words' list separator — `t('{0}, {1}')` applied pairwise, so
+ * `a, b, c` is `t('{0}, {1}', t('{0}, {1}', a, b), c)`: English and German write "a, b, c", Arabic and Persian "a، b، c",
+ * Chinese and Japanese may write "a、b、c" — each language its own comma, in one key it translates once. One item comes
+ * back as it is, none as ''. For the lists a reader is shown: model ids, folder names, sources, paths, phrases; the English
+ * data (the diagnostics report, the log, the export's notes) keep their ", ".
+ *
+ * Not `Intl.ListFormat`: its unit style drops the comma in English ("x y z"), writes no separator in Chinese ("xyz"), an
+ * "and" before every Arabic item and a U+200F in Persian — for a list of ids the separator must be a comma of the
+ * language, nothing more.
+ */
+export function listOf(items: readonly string[]): string {
+  if (items.length === 0) return ''
+  let out = items[0]
+  for (let i = 1; i < items.length; i++) out = t('{0}, {1}', out, items[i])
+  return out
+}
+
 function fill(template: string, args: Array<string | number>): string {
   return template.replace(/\{(\d+)\}/g, (match, index: string) => {
     const arg = args[Number(index)]

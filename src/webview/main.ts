@@ -90,6 +90,77 @@ function glue(html: string): string {
 }
 
 /**
+ * 1.14 B5 (R-RLC-113-glue, §7a Q17): a label stays with its figure, in every language, by one rule of the code rather than a
+ * no-break space each translation would have to write. The space after a label's colon — `:` or the full-width `：`, the
+ * label ending in a letter or a closing bracket, a no-break or narrow no-break space before the colon allowed (French writes
+ * one) — becomes a no-break space where a figure starts after it: an optional ~ ⚠ ≈ < > ≤ ≥, an optional currency sign, a
+ * digit ("Files: 4", "الملفات: 4", "生成: 12:00"). A label before a word ("ratio: x") keeps its space.
+ */
+const LABEL_GLUE_RE = /([\p{L})][\u00a0\u202f]?[:\uff1a]) (?=[~\u26a0\u2248<>\u2264\u2265]?\p{Sc}?\d)/gu;
+/**
+ * 1.14 B5: a word stays with the figure in brackets after it — the space between a word's last letter and a `(` that opens
+ * on a figure (LABEL_GLUE_RE's start) becomes a no-break space: "share (83 %)", "models (9) ▾", "الحصة (83 %)". A bracket
+ * that opens on a word ("5 h (in 2h14m)") keeps its space, and so does a figure's unit, which is no word: after a glued
+ * "10 s" or "4 min" ("cools in 4 m 10 s (1 h TTL)") the line may still break.
+ */
+const BRACKET_GLUE_RE = /(?<!\d\u00a0\p{L}{0,2})(\p{L}) (?=\([~\u26a0\u2248<>\u2264\u2265]?\p{Sc}?\d)/gu;
+/** 1.14 B5: the two joins over a text as the reader gets it (decoded — no entity, no tag): each such space a no-break space. */
+function glueLabelText(s: string): string {
+  return s.replace(LABEL_GLUE_RE, '$1\u00a0').replace(BRACKET_GLUE_RE, '$1\u00a0');
+}
+/**
+ * 1.14 B5: the two joins on what a render drew — every text node of `scope` (never an attribute, never a form control's or a
+ * drawing's text: FIGURE_SKIP), in every language and direction, before the figures are isolated and anything is measured.
+ * A pass over the drawn text rather than a glue() at each site: the pairs come from a score of sites and from the
+ * translations themselves (Japanese writes "生成: {0}。" for "Generated {0}."), so no list of sites could hold them all. A
+ * text reads the ends of the elements beside it: a label's space before an element that holds the figure ("Files: <span
+ * class="nobr">4…"), a figure's space after an element that holds the label ("<b>Files:</b> 4").
+ */
+function glueLabels(scope: Payload): void {
+  if (!scope || typeof scope.nodeType !== 'number') return;
+  const texts: Payload[] = [];
+  const stack: Payload[] = [scope];
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (n.nodeType === 3) { texts.push(n); continue; }
+    if (n.nodeType !== 1 || FIGURE_SKIP.indexOf(String(n.tagName).toUpperCase()) >= 0) continue;
+    const kids = n.childNodes || [];
+    for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]);
+  }
+  for (const t of texts) {
+    const s = typeof t.data === 'string' ? t.data : '';
+    if (s.indexOf(' ') < 0) continue;
+    const near = (e: Payload): string => (e && e.nodeType === 1 ? String(e.textContent || '') : '');
+    const before = near(t.previousSibling).slice(-3), after = near(t.nextSibling).slice(0, 4);
+    const g = glueLabelText(before + s + after).slice(before.length, before.length + s.length);
+    if (g !== s) t.data = g;
+  }
+}
+
+/**
+ * 1.14 B6 (R-RLC-113-lists, §7a Q18): items joined by the words' own list separator — the page's word '{0}, {1}' applied
+ * pairwise (`a, b, c` = tr('{0}, {1}', tr('{0}, {1}', a, b), c)), as src/i18n.ts listOf joins the host's lists: Arabic and
+ * Persian write '{0}، {1}', Chinese and Japanese may write '{0}、{1}'. One item as it is; none, ''. The items are escaped by
+ * the caller, as every tr() argument is. Not Intl.ListFormat: its unit style drops the English comma, writes none in
+ * Chinese, an "and" before every Arabic item and a U+200F in Persian.
+ */
+function listOf(items: readonly string[]): string {
+  if (!items.length) return '';
+  let out = items[0];
+  for (let i = 1; i < items.length; i++) out = tr('{0}, {1}', out, items[i]);
+  return out;
+}
+
+/**
+ * 1.14 B5 rule 2 (R-RLC-113-glue, §7a Q17): a reading's age is one run — "2 min ago", „vor 2 min", "قبل 2 min", "לפני 2 min"
+ * never part between the word and the figure. The quota card's, the context card's and the prompt-cache line's age (the
+ * view model's ageText, at most ≈ 16 characters) in a .nobr span; the agents' ages have theirs since 1.5.
+ */
+function ageSpan(text: unknown): string {
+  return '<span class="nobr">' + esc(text) + '</span>';
+}
+
+/**
  * 1.10 B5 rule 2 (forLead 5 b): an ISO day never breaks at its hyphen — every `2026-08-05` of an escaped text in a
  * `.nobr` span of its own (the class exists: a window label is one word to the reader, and so is a day).
  */
@@ -220,6 +291,7 @@ function isolateText(t: Payload): void {
 /** 1.13 A3 rule 3: a text the page writes itself (a live clock, a line of the Prompts section), its units isolated. */
 function setText(el: Payload, text: string): void {
   el.textContent = text;
+  glueLabels(el);
   isolateFigures(el);
 }
 
@@ -712,6 +784,7 @@ function setLanguageOpen(open: boolean, focus: 'checked' | 'button' | null): voi
   if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
   if (langOpen && l) {
     box.insertAdjacentHTML('beforeend', languagePop(l));
+    glueLabels(box.querySelector('.lng-pop'));
     isolateFigures(box.querySelector('.lng-pop'));
   }
   if (focus === 'checked') {
@@ -926,7 +999,7 @@ function quotaCard(q: Payload): string {
     // planText already carries the word "plan" and, for a name out of the settings, the
     // "(as configured)" that keeps it apart from something a provider said.
     + glue([q.planText ? esc(q.planText) : '', q.origin ? esc(q.origin) : '',
-       q.ageText ? esc(q.ageText) : ''].filter(Boolean).join(' · '))
+       q.ageText ? ageSpan(q.ageText) : ''].filter(Boolean).join(' · '))
     + (q.stale ? ' ⚠ ' + tr('stale') : '') + '</span></div>';
   // 1.7 W1: our own last fetch failed after the reading below — said directly under the header, in
   // the dim tone and without a glyph: a fact about our fetch, not an alarm about the quota.
@@ -1060,7 +1133,7 @@ function quotaCard(q: Payload): string {
     // the quota race, which is not the mirror this line was read from. A payload without the
     // fields — an older build — is marked neither fresh nor stale.
     const aged = q.promptCache.fresh === false;
-    const seen = [q.promptCache.ageText ? tr('updated {0}', esc(q.promptCache.ageText)) : '',
+    const seen = [q.promptCache.ageText ? tr('updated {0}', ageSpan(q.promptCache.ageText)) : '',
       aged ? '⚠ ' + tr('stale') : ''].filter(Boolean).join(' · ');
     h += '<div class="meta' + (aged ? ' warn' : '') + '" title="'
       + esc(q.promptCache.note) + '">' + glue(esc(q.promptCache.text)
@@ -1159,7 +1232,7 @@ function sContext(): string {
       + '<br><button data-act="cmd" data-id="tokenPace.connectStatusLine">'
       + tr('Connect the status line') + '</button></p>';
   }
-  const age = [c.ageText ? tr('updated {0}', esc(c.ageText)) : '', c.fresh ? '' : '⚠ ' + tr('stale')]
+  const age = [c.ageText ? tr('updated {0}', ageSpan(c.ageText)) : '', c.fresh ? '' : '⚠ ' + tr('stale')]
     .filter(Boolean).join(' · ');
   let h = '<div class="card"><div class="row"><span class="name">' + tr('Context window') + '</span>'
     + '<span class="meta' + (c.fresh ? '' : ' warn') + '">' + age + '</span></div>'
@@ -2013,13 +2086,13 @@ function sDataQuality(): string {
   const d = vm.dataQuality;
   const li = [];
   li.push(tr('Roots: {0} · {1} file(s)',
-    d.roots.length ? d.roots.map(esc).join(', ') : tr('none'), d.files));
+    d.roots.length ? listOf(d.roots.map(esc)) : tr('none'), d.files));
   li.push(tr('Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB',
     days(esc(d.oldestDay || '–')), days(esc(d.newestDay || '–')),
     d.buckets.hour, d.buckets.day, d.buckets.month, Math.round(d.snapshotBytes / 1024)));
   li.push(tr('Lower bound share {0}', esc(d.lowerBoundShare))
-    + (d.unpricedModels.length ? ' · ' + tr('unpriced: {0}', d.unpricedModels.map(esc).join(', ')) : '')
-    + (d.familyPriced.length ? ' · ' + tr('family-priced: {0}', d.familyPriced.map(esc).join(', ')) : ''));
+    + (d.unpricedModels.length ? ' · ' + tr('unpriced: {0}', listOf(d.unpricedModels.map(esc))) : '')
+    + (d.familyPriced.length ? ' · ' + tr('family-priced: {0}', listOf(d.familyPriced.map(esc))) : ''));
   // 1.6 N7: the subagent tokens of the last seven days counted two ways, and why the two differ.
   // The figures and the note are the view model's; only the two labels are the page's.
   const ag = d.agents;
@@ -2040,7 +2113,7 @@ function sDataQuality(): string {
       : tr('no source answered')));
     if (q.drift.length) {
       li.push(tr('Fields reported but not rendered ({0}): {1}',
-        esc(q.source), q.drift.map(esc).join(', ')));
+        esc(q.source), listOf(q.drift.map(esc))));
     }
   }
   for (const c of d.calibration) {
@@ -4005,6 +4078,8 @@ function renderAll(): void {
   } finally {
     promptWriting = false;
   }
+  // 1.14 B5: a label with its figure, a word with its bracketed one, on one line — in every direction.
+  glueLabels(document.getElementById('root'));
   // 1.13 A3 rule 3: the figures one left-to-right unit each in a right-to-left page — before anything is measured.
   isolateFigures(document.getElementById('root'));
   applyStyles();
@@ -4055,6 +4130,7 @@ function renderSection(key: string): void {
     agentFocusInTree = false;
     promptWriting = false;
   }
+  glueLabels(body);
   isolateFigures(body);
   applyStyles();
   restorePop(keep);
@@ -4107,6 +4183,7 @@ function placeSection(key: string, body: Element | null, render: () => string): 
   if (after === null) after = document.querySelector('[data-sec="notices"]');
   if (after === null || typeof after.insertAdjacentHTML !== 'function') return true;
   after.insertAdjacentHTML('afterend', sectionHtml(key, render));
+  glueLabels(after.nextElementSibling);
   isolateFigures(after.nextElementSibling);
   applyStyles();
   return true;
@@ -4583,6 +4660,7 @@ function fitScroll(): void {
     if (!over) return;
     el.insertAdjacentHTML('afterend',
       '<div class="meta scrollhint">' + tr('scroll sideways for the remaining columns →') + '</div>');
+    glueLabels(el.nextElementSibling);
     isolateFigures(el.nextElementSibling);
   });
 }

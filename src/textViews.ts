@@ -407,7 +407,9 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     })
   }
   if (vm.projects.rows.length > 0 && vm.projects.note) add({ label: `⚠ ${vm.projects.note}` })
-  if (vm.projects.rows.length > 0 && vm.projects.folded) add({ label: vm.projects.folded.text })
+  // 1.14 Review 2 F8 (the text views, the lead): the folded line only while no project chip is pressed — it counts the
+  // store's folded projects, not the filtered table's rows; the page does the same.
+  if (vm.projects.rows.length > 0 && vm.projects.folded && !vm.projectFilterText) add({ label: vm.projects.folded.text })
   group(t('Sessions'))
   for (const s of vm.sessions.rows) {
     add({
@@ -974,7 +976,8 @@ export function projectsTableLines(vm: ViewModel): string[] {
   }
   L.push('')
   if (vm.projects.note) L.push(`_⚠ ${vm.projects.note}_`, '')
-  if (vm.projects.folded) L.push(`_${vm.projects.folded.text}_`, '')
+  // 1.14 Review 2 F8 (the lead): no folded line while a project filter is on — the page does the same.
+  if (vm.projects.folded && !vm.projectFilterText) L.push(`_${vm.projects.folded.text}_`, '')
   return L
 }
 

@@ -2597,3 +2597,22 @@ test('1.14 Review 2 F9: a project cell escapes every \'_\' — the Projects tabl
   assert.ok(summary.includes('| \\_Caf\\_ | '), summary)
   assert.equal(summary.includes('| _Caf_ |'), false, summary)
 })
+
+test('1.14 Review 2 F8 (the text views, the lead): the folded line under the Projects table is left out while a project filter is on — the Quick Pick, the document and the summary alike, as the page does; without a filter it stands', () => {
+  const { toMarkdownSummary } = require('../src/exporter') as typeof import('../src/exporter')
+  const cfgOn = makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showProjectNames': 'basename' })
+  const built = buildViewModel(makeInput({ cfg: cfgOn, agg: buildAgg('project') }))
+  assert.ok(built.projects.rows.length > 0 && !built.projectFilterText)
+  const FOLD = '3 projects folded into other projects (at most 200 are kept)'
+  const off: ViewModel = { ...built, projects: { ...built.projects, folded: { count: 3, cap: 200, text: FOLD } } }
+  const on: ViewModel = { ...off, projectFilterText: 'project filter: beta' }
+  assert.ok(quickPickItems(off).some((i) => i.label === FOLD), 'the Quick Pick without a filter')
+  assert.ok(markdownDocument(off).includes(`_${FOLD}_`), 'the document without a filter')
+  assert.ok(toMarkdownSummary(off).includes(`_${FOLD}_`), 'the summary without a filter')
+  assert.equal(quickPickItems(on).some((i) => i.label === FOLD), false, 'the Quick Pick under a filter still lists the folded line')
+  assert.equal(markdownDocument(on).includes(FOLD), false, 'the document under a filter still prints the folded line')
+  assert.equal(toMarkdownSummary(on).includes(FOLD), false, 'the summary under a filter still prints the folded line')
+  // The filter line itself stands in both text views.
+  assert.ok(markdownDocument(on).includes('*project filter: beta*'))
+  assert.ok(toMarkdownSummary(on).includes('project filter: beta'))
+})

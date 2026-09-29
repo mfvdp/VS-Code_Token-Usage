@@ -1,0 +1,70 @@
+{
+  "v": 1,
+  "applied": 9,
+  "bundle": {
+    "• Codex — the local \"codex app-server\" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.": {
+      "parts": [
+        "text"
+      ],
+      "state": "review",
+      "why": "T17 (1.14): the English's hard wraps — as many lines as the English, each at most 100 characters — re-wrap, and shorten only where the words do not fit"
+    },
+    "That endpoint is undocumented: it is what Claude Code itself calls, it carries no stability\npromise, and it may change or disappear at any time. Token Pace then shows no quota figures\nrather than guessing any.": {
+      "parts": [
+        "text"
+      ],
+      "state": "review",
+      "why": "T17 (1.14): the English's hard wraps — as many lines as the English, each at most 100 characters — re-wrap, and shorten only where the words do not fit"
+    },
+    "The token is only read, never refreshed, and appears in no log line or error message. The\ntarget address is hard-coded and cannot be configured. Nothing is sent anywhere else, and\nno usage data is collected by this extension.": {
+      "parts": [
+        "text"
+      ],
+      "state": "review",
+      "why": "T17 (1.14): the English's hard wraps — as many lines as the English, each at most 100 characters — re-wrap, and shorten only where the words do not fit"
+    },
+    "After each of its own quota polls it would write the result to these files, one per\nprovider:": {
+      "parts": [
+        "text"
+      ],
+      "state": "review",
+      "why": "T17 (1.14): the English's hard wraps — as many lines as the English, each at most 100 characters — re-wrap, and shorten only where the words do not fit"
+    },
+    "Each of them is the documented exchange format (schema_version 1) other tools read, so a\npanel, a shell prompt and this extension can share one fetch instead of three.": {
+      "parts": [
+        "text"
+      ],
+      "state": "review",
+      "why": "T17 (1.14): the English's hard wraps — as many lines as the English, each at most 100 characters — re-wrap, and shorten only where the words do not fit"
+    },
+    "They contain the provider's quota response — percentages, reset times, plan type. They\nnever contain your access token. An existing file whose fetch time is newer than ours is\nnever overwritten, and the write is atomic (temp file plus rename), so a reader never\nsees half a file.": {
+      "parts": [
+        "text"
+      ],
+      "state": "review",
+      "why": "T17 (1.14): the English's hard wraps — as many lines as the English, each at most 100 characters — re-wrap, and shorten only where the words do not fit"
+    },
+    "To read quota figures without any network access, it can register a small script as Claude\nCode's status line. Claude Code then runs that script on every status-line refresh and pipes\nits status JSON into it; the script keeps of it only the fields Token Pace reads — the quota\nwindows, the plan, the context window, the cost, the model, the prompt cache and the session's\nid — in a file, and prints a status line. The session's name, its working directory, its\ntranscript's path and the rest of the JSON never reach the file.": {
+      "parts": [
+        "text"
+      ],
+      "state": "review",
+      "why": "T17 (1.14): the English's hard wraps — as many lines as the English, each at most 100 characters — re-wrap, and shorten only where the words do not fit"
+    },
+    "An existing status-line command is kept: it is called by the script with the same input and\nits output is passed through unchanged. A settings.json that cannot be parsed is never\ntouched. The script never sends anything anywhere and never logs the piped JSON.": {
+      "parts": [
+        "text"
+      ],
+      "state": "review",
+      "why": "T17 (1.14): the English's hard wraps — as many lines as the English, each at most 100 characters — re-wrap, and shorten only where the words do not fit"
+    },
+    "\"Token Pace: Disconnect Claude Status Line\" restores the previous entry exactly — as long as\nthe entry is still the one we installed. Uninstalling the extension does not remove the entry\nbut deletes the script's copy with the extension's storage, and a status line still connected\nwould then start a script that is gone — so disconnect first if you plan to remove Token Pace.": {
+      "parts": [
+        "text"
+      ],
+      "state": "review",
+      "why": "T17 (1.14): the English's hard wraps — as many lines as the English, each at most 100 characters — re-wrap, and shorten only where the words do not fit"
+    }
+  },
+  "nls": {}
+}

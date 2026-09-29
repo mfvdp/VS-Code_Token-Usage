@@ -139,7 +139,7 @@ node scripts/nls-sources.mjs --check   # every manifest translation matches toda
 node scripts/l10n-rekey.mjs --check    # every entry of the re-key ledger applied to every language (1.10)
 ```
 
-`test/l10n.languages.test.ts` holds every language on disk to the same sixteen rules, T1–T16: the
+`test/l10n.languages.test.ts` holds every language on disk to the same seventeen rules, T1–T17: the
 keys, the parts, the placeholders, the marks (`~`, `⚠`, `≈`, `–`, `%`, `×`, `→`, `·`), the code
 (backtick spans, setting ids, codicons, command targets, links, fences, JSON examples), the page's words
 (no markup character), the tone (no exclamation mark), the tables, no English left (proper names and
@@ -149,8 +149,11 @@ and the heat map's weekday words — the thirteen of 1.9 — and, since 1.10, T1
 ([below](#changing-the-english-the-re-key-ledger-110)) and T15 for the bar's own examples:
 every example a setting of the status bar quotes (`CC 5h 25% · resets 2h14m`, `Σ 3.1M · today`) is what
 that language's bar prints for the fixture the test and the brief document — its words, its decimals, its
-weekday and its 12-hour clock —, the English's included — and, since 1.13, T16 for the direction: no bidi control
-in a value, no digit of another script, no Arabic presentation form, a placeholder only as `{n}` with ASCII digits.
+weekday and its 12-hour clock —, the English's included —, since 1.13, T16 for the direction: no bidi control
+in a value, no digit of another script, no Arabic presentation form, a placeholder only as `{n}` with ASCII digits —
+and, since 1.14, T17 for the wraps: a value whose English is hard-wrapped keeps its number of lines, each at most 100
+characters (`HARD_WRAP_MAX`, counted in grapheme clusters), and a paragraph value or a manifest value with a line break
+inside a paragraph keeps its number of lines.
 Every rule also runs once against a synthetic
 language in a temporary directory — the German under another id, and the English with every word turned
 into 語 (since 1.11 also into शुक्र, under `hi`, and since 1.13 into كلمة with every `→` turned `←`, under `ar`) —
@@ -180,8 +183,9 @@ languages' files can follow it at once:
   why (`why`). One entry per line keeps a diff readable. A `why` never holds `; ` — the script joins the
   reasons of one key with it and splits on it again —, and `--check` refuses one.
 * `l10n/rekey-base.json` — the tree the ledger starts from (1.10's was `e72057a`, the 1.9.0 release: 1123
-  `t()` keys, 295 manifest keys; 1.11's was `b89ff43`, the 1.10.0 release: 1197 and 297; 1.12's is `d39c2df`, the
-  1.11.0 release: 1240 and 309): every `t()` key
+  `t()` keys, 295 manifest keys; 1.11's was `b89ff43`, the 1.10.0 release: 1197 and 297; 1.12's was `d39c2df`, the
+  1.11.0 release: 1240 and 309; 1.13's was `a09a405`, the 1.12.0 release: 1303 and 331; 1.14's is `c036c7c`, the 1.13.0
+  release: 1306 and 334): every `t()` key
   with the German parts it stands in, and the first 16 hex digits of the SHA-256 of every `package.nls.json`
   value.
 * `l10n/pending/<id>.json` — per language beyond English and German: how many entries are applied to its
@@ -221,7 +225,7 @@ value: nothing is invented. A language without a pending list has done everythin
 records its manifest and deletes the list. The next version's first change of the English starts a new
 ledger. `--start` writes the new base and an empty ledger: the entries of the version before are not
 carried over — each is applied, no list of theirs is left, and they stay in the history (1.10's 115 at
-`b89ff43`, 1.11's 67 at `d39c2df`, 1.12's 121 at `a09a405`). 1.11's ledger started at `b89ff43`, before its first English change; 1.12's
+`b89ff43`, 1.11's 67 at `d39c2df`, 1.12's 121 at `a09a405`, 1.13's 11 at `c036c7c`). 1.11's ledger started at `b89ff43`, before its first English change; 1.12's
 at `d39c2df` (`node scripts/l10n-rekey.mjs --start d39c2df`), with a list at cursor 0 for each of the twenty-four
 languages beyond English and German — every one has its files since 1.11. It holds 121 entries: the code packages'
 English changes, each with its German, until the English was frozen; the twenty-four languages then worked through
@@ -236,6 +240,16 @@ packages write them whole from the frozen English, and `--start` passes over a l
 the live ledger's figures until then — the kept-names guard's seventeen notification texts, the 1.12.0 notes' base
 and count, the languages page's count and this page's own — and hold literals of history since
 (`NOTIFY_TEXT_KEYS_1_12`, 121 entries on base `d39c2df`).
+
+1.14's ledger started at the 1.13.0 release (`node scripts/l10n-rekey.mjs --start c036c7c`: 1306 `t()` keys, 334 manifest
+keys) with a list at cursor 0 for each of the twenty-seven languages beyond English and German — Arabic, Hebrew and
+Persian among them for the first time: a language of 1.13 has its files since 1.13's join, so the ledger reaches it from
+1.14 on —, and `PENDING_ALLOWED` is true again until 1.14's join. Two tests read the live ledger's figures until then —
+the 1.13.0 notes' base and count, the languages page's count and this page's own — and hold literals of history since
+(11 entries on base `a09a405`); the ledger's own test pins each base's counts, `c036c7c`'s among them. Its first nine
+entries change no English: they are `review` entries that put nine consent paragraphs on every list, the ones that
+languages of 1.9 and 1.11 wrapped otherwise than the English — T17 holds the wraps from 1.14 on (below), a listed key is
+exempt from it while it is listed, and at the join every value is held.
 
 While lists exist (`PENDING_ALLOWED` in `test/l10n.languages.test.ts` is true), the frame reads them: T1
 and T2 let a key listed `translate` be absent, a manifest key on a list stays out of the rules that
@@ -315,6 +329,24 @@ writes its field ids as code (`` `host` ``, `` `user` ``, `` `from` ``, `` `to` 
 span, and T5 holds each backtick span in every value — the declaration and its guard stay, the guard's cases on a
 synthetic key. At the join the frame needed no new exception: no list of names, no language name and no T16 exception
 was added for the three.
+
+In 1.14 the frame learned two things before a single 1.14 text was written. **T17** holds the hard wraps the brief has
+asked for since 1.12 — a line break where the English has one —, which no test held: a runtime value whose English holds a
+line break and every English line at most `HARD_WRAP_MAX` (100) characters has as many lines as the English, each at most
+100 characters, counted in grapheme clusters as T13 counts; a paragraph value (the Keychain paragraph, whose English lines
+reach 236) and a manifest value with a line break inside a paragraph (the six JSON examples, the walkthrough's list of
+links) have as many lines as the English. German missed it in three values, re-wrapped with the rule (two of them a little
+shorter: their words did not fit in the English's lines of 100); Arabic, Hebrew and Persian keep every count; languages of
+1.9 and 1.11 wrap nine consent paragraphs otherwise, and those stand on every list for review (the ledger, above).
+`CLOCK_STAMP_KEYS` lists the `t()` and `tr()` keys whose placeholder receives a clock stamp (`clockStamp`: `14:20` today,
+`2026-09-26 14:20` another day) — the reset-clock rule for a slot that may hold a date. The reset-clock scan is one scan
+with a spec per kind of clock since then (`CLOCK_SCAN`): the stamp's follows agentTreeBuild's `stamp` wrapper, a clock passed
+into a local function's parameter (the agent hook's sentence) and a function passed as an argument that returns one (the run
+record's `or(…)`), the view model's `startClock` and `lastClock` fields, and names the two fields it does not follow with
+where their value goes (`CLOCK_STAMP_FIELDS`: a details row's `value`, a record's `start`, never a placeholder); it asks
+for exactly the listed keys (`CLOCK_STAMP_EXCEPTED` for a found slot that is none — empty) and pins the calls
+(`CLOCK_STAMP_SOURCES`, the keep-warm host's two English log lines among them). Following a parameter changed none of the
+reset-clock slots. The brief names every key ("1.14: clock stamps").
 
 ## The price table
 

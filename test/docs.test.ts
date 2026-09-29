@@ -2990,7 +2990,7 @@ test('docs/languages.md: the translation statement says who translated, from wha
   assert.ok(nlsDe['config.language.description'].includes('Muttersprachler haben sie nicht geprüft'))
 })
 
-test('docs/development.md says how a language is made and checked: the registry, the parts, the two scripts, the record, the sixteen rules, the freeze (1.9 P3; 1.10 P21: fifteen; 1.13 P1: sixteen)', () => {
+test('docs/development.md says how a language is made and checked: the registry, the parts, the two scripts, the record, the seventeen rules, the freeze (1.9 P3; 1.10 P21: fifteen; 1.13 P1: sixteen; 1.14 P1: seventeen)', () => {
   const dev = flatText(doc.development)
   for (const claim of [
     '## Translating', '`src/languages.ts` (`LANGUAGES`: the id, the `Intl` locale, the native name and the flag, in the picker\'s order)',
@@ -3001,7 +3001,8 @@ test('docs/development.md says how a language is made and checked: the registry,
     '`node scripts/nls-sources.mjs --check` names every language and key whose English changed since',
     // 1.10 P21 (pinned and changed: "thirteen rules, T1–T13"): T14 (the pending lists) and T15 (the bar's examples) joined in 1.10.
     // 1.13 P1 (pinned and changed: "fifteen rules, T1–T15"): T16 (the direction) joined in 1.13.
-    '`test/l10n.languages.test.ts` holds every language on disk to the same sixteen rules, T1–T16',
+    // 1.14 P1 (pinned and changed: "sixteen rules, T1–T16"): T17 (the wraps) joined in 1.14.
+    '`test/l10n.languages.test.ts` holds every language on disk to the same seventeen rules, T1–T17',
     'the list `SAME_IN_EVERY_LANGUAGE` in the test, each word with its reason',
     'the German under another id, and the English with every word turned into 語',
     'The brief a translation works from is `l10n/TRANSLATING.md`',
@@ -4873,10 +4874,13 @@ test('the 1.13.0 release notes: the newest entry, its date set at publish, Added
   const bundles = readdirSync(join(ROOT, 'l10n')).filter((f) => /^bundle\.l10n\.[a-z-]+\.json$/.test(f))
   assert.equal(bundles.length, 28)
   assert.ok(internal.includes('The three languages are three more of Token Pace\'s own translation files, twenty-eight in all'))
-  const ledger = JSON.parse(readDoc('l10n/rekey.json')) as { base: string; entries: unknown[] }
-  assert.equal(ledger.base, 'a09a405')
-  assert.ok(internal.includes(`1.13's holds ${ledger.entries.length} entries since the 1.12.0 release (\`l10n/rekey.json\`, its count read by a test)`), `the 1.13.0 entry does not count the ledger's ${ledger.entries.length} entries`)
-  assert.equal(existsSync(join(ROOT, 'l10n/pending')), false, 'a pending list is on disk: the join is not done')
+  // 1.14 P1 (pinned and changed: the base read from l10n/rekey.json as a09a405, the count from its entries, and no pending
+  // list on disk): `l10n-rekey.mjs --start c036c7c` began 1.14's ledger, emptied the entries and wrote a list at cursor 0
+  // for each of the twenty-seven, so 1.13's figures are history — the 11 entries of l10n/rekey.json at c036c7c (base
+  // a09a405), a literal from here on, as the 1.13.0 notes shipped it; and no list on disk is one of 1.13's ledger.
+  assert.ok(internal.includes('1.13\'s holds 11 entries since the 1.12.0 release (`l10n/rekey.json`, its count read by a test)'), '1.13\'s ledger held 11 entries')
+  const ledgerBase = (JSON.parse(readDoc('l10n/rekey.json')) as { base: string }).base
+  assert.equal(ledgerBase === 'a09a405' && existsSync(join(ROOT, 'l10n/pending')) && readdirSync(join(ROOT, 'l10n/pending')).length > 0, false, 'a pending list of 1.13 is on disk: the join is not done')
   const frame = readDoc('test/l10n.languages.test.ts')
   assert.ok(frame.includes('export const FIELD_IDS_OF_A_KEY: ReadonlyArray<readonly [string, ReadonlyArray<string>, string]> = []'), 'FIELD_IDS_OF_A_KEY is not empty: the notes say it is retired')
   assert.ok(frame.includes('export const RESET_CLOCK_KEYS'))
@@ -4980,12 +4984,15 @@ test('the pages carry the sentences of the 1.13 documentation package, held to t
     assert.equal(Object.values(bundle(id)).some((v) => v.includes('٪')) || Object.values(nls(id)).some((v) => v.includes('٪')), false, `${id} writes ٪`)
   }
   // How the translations were made (A7, B9): the 1.13 paragraph, the quotation marks from the bundles, the open questions.
-  const ledger = JSON.parse(readDoc('l10n/rekey.json')) as { entries: unknown[] }
+  // 1.14 P1 (pinned and changed: the count read from l10n/rekey.json's entries — here and in development.md's "It holds …
+  // entries" below): `--start c036c7c` emptied the ledger, so 1.13's count is history — the 11 entries of l10n/rekey.json
+  // at c036c7c (base a09a405), a literal from here on.
+  const LEDGER_1_13 = 11
   for (const claim of [
     '**In 1.13** Arabic, Hebrew and Persian were each translated whole by an AI agent — Claude Fable 5.1 for Arabic, Claude Opus 5.5 for Hebrew and for Persian — from the English text as it stood when 1.13\'s English was frozen',
     'A reading pass by three further AI agents (Claude Opus 5.5) followed, one per language, none of them a native speaker',
     'Arabic and Persian quote with «…», Hebrew with „…”',
-    `worked through 1.13's ledger of English changes (${ledger.entries.length} entries)`,
+    `worked through 1.13's ledger of English changes (${LEDGER_1_13} entries)`,
     '1.13 answers none of them and leaves its own, again for native speakers', 'In Arabic:', 'In Hebrew:', 'In Persian:', 'In all three:', 'And in the twenty-four:',
     'Arabic writes Modern Standard Arabic', 'Persian the polite *شما* with plural verbs',
     'Of the three of 1.13 Arabic says it in its own word (*الموجّه*), Hebrew and Persian keep the loanword.',
@@ -5031,14 +5038,19 @@ test('the pages carry the sentences of the 1.13 documentation package, held to t
   const dev = flatText(doc.development)
   for (const claim of ['Since 1.13 an entry may carry three more fields, and exactly Arabic, Hebrew and Persian do — a test holds it:',
     'Since 1.13 a ninth check sets `tokenPace.language` to `ar`',
-    `It holds ${ledger.entries.length} entries — the three new language names and native names`,
-    'Four tests read the live ledger\'s figures until then', '`FIELD_IDS_OF_A_KEY` is empty since 1.13',
+    `It holds ${LEDGER_1_13} entries — the three new language names and native names`,
+    // 1.14 P1 (pinned and changed: "Four tests read the live ledger's figures until then" — 1.13's sentence): the page
+    // says 1.14's ledger and the tests that read the live one until 1.14's --start, and each holds a literal of history.
+    '(`node scripts/l10n-rekey.mjs --start c036c7c`: 1306 `t()` keys, 334 manifest keys)',
+    'Two tests read the live ledger\'s figures until then — the 1.13.0 notes\' base and count, the languages page\'s count and this page\'s own —',
+    '`FIELD_IDS_OF_A_KEY` is empty since 1.13',
     'Since 1.13 `src/bidi.ts` is the only module that writes a direction mark (RLI, LRI, PDI, RLM), always as an escape']) {
     assert.ok(dev.includes(claim), `docs/development.md does not say: ${claim}`)
   }
   assert.equal(readDoc('src/languages.ts').split("dir: 'rtl', digits: 'latn', calendar: 'gregory' }").length - 1, 3)
-  // The hard-wrap rule is no test (Review L's common part, finding 2 — 1.14): no page says a test holds it.
-  assert.equal(/hard[- ]wrap[^.]*\btest\b|\btest\b[^.]*hard[- ]wrap/i.test(dev), false, 'docs/development.md says a test holds the hard-wrap rule')
+  // 1.14 P1 (pinned and changed: "the hard-wrap rule is no test (Review L's common part, finding 2 — 1.14): no page says a
+  // test holds it"): T17 holds it since 1.14 P1 (§3 B3), and the page says so.
+  assert.ok(dev.includes('**T17** holds the hard wraps the brief has asked for since 1.12'), 'docs/development.md does not say that T17 holds the hard wraps')
   // The README: the bullet, the three with their English names, the index row, the picture.
   const readme = flatText(README)
   for (const claim of ['Magyar, Română, العربية (Arabic), עברית (Hebrew) or فارسی (Persian), or to VS Code\'s display language; in the three written from right to left the dashboard is mirrored.',

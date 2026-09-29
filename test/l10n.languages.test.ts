@@ -34,6 +34,8 @@
  *       for German, none at all once PENDING_ALLOWED is false
  *   T15 the bar's examples (1.10 B3): every example a setting quotes is what the status bar prints for the fixture
  *   T16 the direction (1.13 A4): no bidi control, no digit of another script, no presentation form, placeholders as {n}
+ *   T17 the wraps (1.14 B3): a hard-wrapped value keeps the English's line count, each line at most HARD_WRAP_MAX (100)
+ *       characters; a paragraph value and a manifest value with a line break inside a paragraph keep the line count
  *
  * 1.10 B1: the English changes while 1.10's code is written, and each change is an entry of the
  * re-key ledger (l10n/rekey.json), which scripts/l10n-rekey.mjs applies to every language's files.
@@ -74,6 +76,15 @@
  * until 1.13's join (P7 set it false). 1.13 B3 (P6): the e-mail channel's setup hint writes its field ids in
  * backticks, which PROTECTED takes out and T5 holds, so FIELD_IDS_OF_A_KEY is empty — the declaration, its guard and
  * its history stay.
+ *
+ * 1.14 E1, B2, B3 (P1): the ledger started at 1.13.0's release commit (l10n-rekey.mjs --start c036c7c) with a list at
+ * cursor 0 for each of the twenty-seven — Arabic, Hebrew and Persian among them for the first time —, and PENDING_ALLOWED
+ * is true until 1.14's join (P8). T17 holds the hard wraps the brief has asked for since 1.12 — a value keeps the
+ * English's lines, each within HARD_WRAP_MAX —, which no test held before: the three German values that missed it are
+ * re-wrapped with the rule, and the consent keys a language of 1.9–1.11 wrapped otherwise stand on every list for review
+ * (the ledger's first entries), exempt from T17 while listed and held to it at the join. CLOCK_STAMP_KEYS lists the keys
+ * whose placeholder receives a clock stamp that may carry a date (`2026-09-26 14:20`), held to the code by the reset-clock
+ * scan, now one scan with a spec per kind of clock (CLOCK_SCAN) that also follows a clock into a function's parameter.
  *
  * Every rule is a function over the files of one language, so it runs over the repository's files
  * and — each once with the mutation it exists to catch — over a synthetic language written into a
@@ -296,8 +307,12 @@ export const NLS_SPANS_READ_AS_WORDS: ReadonlyArray<readonly [string, string]> =
  * 1.13 P7: false — group N wrote Arabic, Hebrew and Persian whole from the frozen English, and O1 worked the twenty-four
  * lists to the ledger's end (11 entries) and deleted them; no list is left, and every rule holds every key of all
  * twenty-seven languages and German again.
+ * 1.14 P1: true again — `l10n-rekey.mjs --start c036c7c` (the 1.13.0 release) started 1.14's ledger with a list at cursor
+ * 0 for each of the twenty-seven languages beyond English and German — Arabic, Hebrew and Persian among them for the
+ * first time: every one has its files since 1.13's join, and a language of 1.13 is on the ledger from 1.14 on; 1.14's
+ * join (P8) sets it false. test/languages.test.ts's join test reads this line.
  */
-export const PENDING_ALLOWED: boolean = false
+export const PENDING_ALLOWED: boolean = true
 
 /**
  * 1.11 A3 rule 11 (b): a language name a language writes as the English does — `[id, English name, reason]`. T10
@@ -445,6 +460,109 @@ export const RESET_CLOCK_SOURCES: ReadonlyArray<readonly [string, string, number
   ['src/time.ts', 'resetClock', 1],
   // The window's `reset` (relative — a countdown) and `resetAbsolute` (absolute — the Quick Pick's "reset at {0}").
   ['src/viewModel.ts', 'formatReset', 2],
+]
+
+/**
+ * 1.14 B2 rule 1 (P1): the t() and tr() keys with a placeholder that receives a clock stamp — `[key, placeholder]`: a value
+ * of `clockStamp(…)` (src/time.ts), which writes `14:20` for a time of today and `2026-09-26 14:20` for one of another day.
+ * The slot holds either, so a translation writes a form that reads with both: a label (`Recorded: {0}`), a colon or
+ * brackets, never a preposition that takes a clock hour only (German *um*, Danish *kl.*, Ukrainian *о*, Greek *στις*) — the
+ * reset-clock slots' rule (RESET_CLOCK_KEYS), for a slot that may hold a date. The brief names every key ("1.14: clock
+ * stamps"); a test finds them by the clock scan (CLOCK_SCAN, 1.13's reset-clock scan made one scan) with the stamp's spec
+ * (CLOCK_STAMP_SPEC), which follows the value through variables, local functions, a function's parameters, a function
+ * passed as an argument, the view model's two clock fields (CLOCK_STAMP_FIELDS' followed ones), conditionals and wrapper
+ * calls into the arguments. A key that takes `formatTime`
+ * — a clock of today, never a date — is not one ("{0} finished a turn at {1}", "Sent at {0}").
+ */
+export const CLOCK_STAMP_KEYS: ReadonlyArray<readonly [string, string]> = [
+  // agentTreeBuild.ts rejectedRows — the details' "Last request" row.
+  ['rejected at {0}', '{0}'],
+  ['rejected at {0} — {1}', '{0}'],
+  // outcomeState — an agent's end as the parent recorded it.
+  ['Stopped — the parent recorded ‘{0}’ at {1}.', '{1}'],
+  ['Failed — the parent recorded the failure at {0}.', '{0}'],
+  ['Completed — the parent recorded the result at {0}.', '{0}'],
+  // agentState — an agent's state inferred from its transcript after, or without, an outcome.
+  ['Running — inferred: the transcript changed {0}, after an outcome was recorded at {1}.', '{1}'],
+  ['Unknown — inferred: the transcript went on after an outcome was recorded at {0}, and has been silent since {1}.', '{0}'],
+  ['Unknown — inferred: the transcript went on after an outcome was recorded at {0}, and has been silent since {1}.', '{1}'],
+  ['Unknown — inferred: no result was recorded; the last request, at {0}, was rejected.', '{0}'],
+  ['Unknown — inferred: no result was recorded; the last request, at {0}, was rejected — {1}.', '{0}'],
+  ['Unknown — inferred: no result was recorded and the transcript has been silent since {0}, after a {1} call; the agent may have been stopped.', '{0}'],
+  ['Unknown — inferred: no result was recorded and the transcript has been silent since {0}; the agent may have been stopped.', '{0}'],
+  // pendingState — an agent the parent launched and whose transcript was never seen.
+  ['Unknown — inferred: the parent recorded the launch at {0} but no result, and the agent\'s transcript was never seen; the agent may have been stopped.', '{0}'],
+  // sessionState — a session's own transcript silent.
+  ['Idle — inferred: the session transcript has been silent since {0}.', '{0}'],
+  // runOutcomeState and runState — a workflow run's recorded and inferred states.
+  ['Stopped — the parent recorded ‘{0}’ for this run at {1}.', '{1}'],
+  ['Failed — the parent recorded the failure of this run at {0}.', '{0}'],
+  ['Completed — the parent recorded the end of this run at {0}.', '{0}'],
+  ['Unknown — inferred: the parent launched this run at {0}, but no agent of it was ever seen.', '{0}'],
+  ['Running — inferred: an agent of this run wrote on after the parent recorded its end at {0}.', '{0}'],
+  // recordRow — the run record's row, Claude Code's own figures, its start through `or(…, (x) => stamp(…))`.
+  ['{0} · started {1} · {2} agents · {3} tokens · {4} tool calls · {5} · default model {6}', '{1}'],
+  // hookSentence — the agent hook's wait, the stamp through the function's parameter.
+  ['The agent hook reported at {0}: waiting for approval.', '{0}'],
+  ['The agent hook reported at {0}: waiting for input.', '{0}'],
+  // hookRows and recordedRows — "waiting for approval at 14:20", "done at 14:20".
+  ['{0} at {1}', '{1}'],
+  // compactionRows — the last compaction.
+  ['{0} · last at {1} (manual, {2} → {3})', '{1}'],
+  ['{0} · last at {1} (auto, {2} → {3})', '{1}'],
+  ['{0} · last at {1} (–, {2} → {3})', '{1}'],
+  // cacheWatch.ts cacheLineText, cacheCostText and codexCacheText — the prompt cache's line, the cold start, the Codex line.
+  ['{0} · prompt cache cold since {1} (1 h TTL)', '{1}'],
+  ['{0} · prompt cache cold since ~{1} (1 h TTL, estimated from the transcript)', '{1}'],
+  ['A cold start after {0} re-writes {1} tokens instead of reading them from the cache.', '{0}'],
+  ['A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input, {3}) instead of reading them from the cache ({4}× input, {5}).', '{0}'],
+  ['A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input) instead of reading them from the cache ({3}× input).', '{0}'],
+  ['Codex prompt cache · last request at {0} · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until {1}, perhaps longer.', '{0}'],
+  ['Codex prompt cache · last request at {0} · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until {1}, perhaps longer.', '{1}'],
+  // time.ts lastFailureText — the failed quota attempt.
+  ['Last attempt at {0} failed: {1}', '{0}'],
+  // The page (src/webview/main.ts) — the view model's startClock and lastClock, the words a screen reader gets.
+  ['silent since {0}', '{0}'],
+  ['since {0}', '{0}'],
+]
+
+/**
+ * 1.14 B2 rule 1: what the scan finds that is no clock-stamp slot — `[key, placeholder, reason]`, each read at its call
+ * site (an exception is per key and with its reason). None at 1.14 P1: every slot the scan finds is one.
+ */
+export const CLOCK_STAMP_EXCEPTED: ReadonlyArray<readonly [string, string, string]> = []
+
+/**
+ * 1.14 B2 rule 1: the calls of `clockStamp` in src/ and of agentTreeBuild.ts's wrapper `stamp` — `[file, callee, count]`,
+ * the definitions not counted. Each call's value goes where the scan follows it; a new call is a stamp to trace.
+ */
+export const CLOCK_STAMP_SOURCES: ReadonlyArray<readonly [string, string, number]> = [
+  // `stamp(ms, now, tcfg)`, the tree's one door to the form.
+  ['src/agentTreeBuild.ts', 'clockStamp', 1],
+  // The tree's stamps: the states' sentences, the details' rows (a row's value), the run record, the hook, `clockOf`.
+  ['src/agentTreeBuild.ts', 'stamp', 21],
+  // The prompt cache's cold line (1), the cold start's time (2), the Codex line's two times (2).
+  ['src/cacheWatch.ts', 'clockStamp', 5],
+  // Two English log lines of the keep-warm host (the Output channel's data, never translated) — no t() slot.
+  ['src/keepWarmHost.ts', 'clockStamp', 2],
+  // The records' sessions: a session's start, a table cell shown as it is (CLOCK_STAMP_FIELDS `start`).
+  ['src/stats.ts', 'clockStamp', 1],
+  // The failed quota attempt's sentence.
+  ['src/time.ts', 'clockStamp', 1],
+]
+
+/**
+ * 1.14 B2 rule 1: the object fields a clock stamp is written into — `[field, followed, reason]`. The scan follows a field
+ * the list names followed into every `.field` it meets (as the reset-clock scan follows `resetAbsolute`); a field whose
+ * name is common to many objects (`value`, `start`) would take every such access for a stamp, so it is followed by hand
+ * and named here with where its value goes. The scan finds every field a stamp is written into; the test asks for
+ * exactly these.
+ */
+export const CLOCK_STAMP_FIELDS: ReadonlyArray<readonly [string, boolean, string]> = [
+  ['lastClock', true, 'agentTreeBuild.ts clockOf — the view model\'s clock of a node\'s last line; the page words it "silent since {0}"'],
+  ['startClock', true, 'agentTreeBuild.ts clockOf — the view model\'s clock of a node\'s start; the page words it "since {0}"'],
+  ['start', false, 'stats.ts, the records\' longest and largest sessions — a table cell (the page\'s recordFigure, the markdown table) and the Quick Pick\'s description joined with " · " (textViews.ts rest), never a t() placeholder'],
+  ['value', false, 'agentTreeBuild.ts, a details row\'s value (Started, Since first line, Last activity) — printed beside its label (the page\'s details panel, the markdown table\'s cell), never a t() placeholder'],
 ]
 
 // ---------------------------------------------------------------------------
@@ -971,6 +1089,13 @@ const shown = (x: string): string => {
   const points = [...x].map((c) => `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`).join(' ')
   return [...x].length === 1 ? points : `${J(x)} (${points})`
 }
+/**
+ * 1.14 B3 rule 1 (P1): T17's line — at most this many characters, counted as a reader sees them (grapheme clusters, as
+ * T13 counts: Hindi's `शुक्र` is two). A key whose every line fits is hard-wrapped, and its value keeps the English's line
+ * count with every line within it; a key with a longer line is a paragraph (the Keychain paragraph's lines reach 236),
+ * whose value keeps the English's line count only.
+ */
+export const HARD_WRAP_MAX = 100
 const BUNDLE = (l: LangFiles): string => `l10n/bundle.l10n.${l.id}.json`
 const NLS = (l: LangFiles): string => `package.nls.${l.id}.json`
 
@@ -1263,6 +1388,33 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
       return out
     },
   },
+  T17: {
+    title: 'the wraps — a hard-wrapped value keeps the English\'s line count, each line at most 100 characters; a paragraph value and a manifest value with a line break inside a paragraph keep the English\'s line count (1.14 B3)',
+    // A key on the pending list is exempt while it is listed: its English changed, or the ledger asks the language to
+    // re-wrap it (1.14 P1's review entries), and its package writes it again.
+    rule: (s, l) => {
+      const out: string[] = []
+      for (const [k, v] of entries(l.bundle)) {
+        if (!k.includes('\n') || pendingKey(l, k) !== null) continue
+        const want = k.split('\n')
+        const have = v.split('\n')
+        const hard = want.every((x) => graphemes(x) <= HARD_WRAP_MAX)
+        if (have.length !== want.length) {
+          out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} has ${have.length} line(s), its key ${want.length} — ${hard ? 'a hard-wrapped value' : 'a paragraph value'} keeps the English's line count`)
+        }
+        if (!hard) continue
+        have.forEach((x, i) => {
+          if (graphemes(x) > HARD_WRAP_MAX) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)}: line ${i + 1} has ${graphemes(x)} characters, more than ${HARD_WRAP_MAX}`)
+        })
+      }
+      for (const [k, en, v] of nlsEntries(s, l)) {
+        if (!en.replace(/\n\n/g, '').includes('\n')) continue
+        const [have, want] = [v, en].map((x) => x.split('\n').length)
+        if (have !== want) out.push(`${l.id}: ${NLS(l)}: ${k} has ${have} line(s), the English ${want} — a line break inside a paragraph (a fenced example, a list of links) stays`)
+      }
+      return out
+    },
+  },
 }
 
 /** T12 runs the script as the gate does, once per directory and mode: its problems, one per line, "<id>: <key> — …". */
@@ -1303,7 +1455,8 @@ test('the frame runs over the languages on disk — German among them — and En
   // 1.10 B1 (pinned and changed: thirteen rules): T14, the pending list, runs over every language too.
   // 1.10 B3 (pinned and changed: fourteen rules): T15, the bar's examples, too — and over the English (below).
   // 1.13 P1 (pinned and changed: fifteen rules): T16, the direction, too.
-  assert.deepEqual(Object.keys(RULES), ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T14', 'T15', 'T16'])
+  // 1.14 P1 (pinned and changed: sixteen rules): T17, the wraps, too.
+  assert.deepEqual(Object.keys(RULES), ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T14', 'T15', 'T16', 'T17'])
   // The references are what they claim to be.
   const s = src()
   assert.ok(s.keys.length >= 1000, `only ${s.keys.length} t() keys`)
@@ -2848,6 +3001,87 @@ test('T16 over the files on disk: none of the twenty-eight carries a bidi contro
   if (!PENDING_ALLOWED) assert.deepEqual(ON_DISK.filter((id) => RTL_LANGUAGES.has(id)), ['ar', 'he', 'fa'])
 })
 
+/** 1.14 B3: a key of src/ with a line break whose English starts so — the one key of each kind T17's tests work on. */
+function wrappedKey(start: string, lines: number): string {
+  return keyWhere((k) => k.startsWith(start) && k.split('\n').length === lines)
+}
+
+test('T17 catches a hard-wrapped value with a line more, a line of 101 characters, a paragraph value with a line more and a manifest value missing a line of its list — on the real files of Hebrew, Persian and Arabic —, lets a line of 100 and a paragraph\'s long line stand, and exempts a listed key only while lists are allowed (1.14 B3 rules 1, 4)', () => {
+  // The four synthetic languages pass it (their lines are the English's), the arab fixture among them.
+  assert.deepEqual(run('T17', fixture('arab', 'ar'), 'ar'), [])
+  const hookUp = wrappedKey('An existing status-line command is kept', 3)
+  const codex = wrappedKey('• Codex — the local "codex app-server" is started, kept running', 2)
+  const keychain = wrappedKey('Claude Code keeps its access token in the Keychain item', 3)
+  assert.ok(hookUp.split('\n').every((x) => graphemes(x) <= HARD_WRAP_MAX) && codex.split('\n').every((x) => graphemes(x) <= HARD_WRAP_MAX))
+  assert.ok(keychain.split('\n').some((x) => graphemes(x) > HARD_WRAP_MAX), 'the Keychain paragraph is no paragraph key')
+  // (a) 1.13 Review L's case: a Hebrew consent value of three lines written in four — the key is on he's 1.14 list (the
+  // ledger's T17 review), so it is exempt while lists are allowed and caught at the join.
+  const heClean = realFiles('he')
+  const he = realFiles('he')
+  const breakOnce = (v: string): string => { const i = v.indexOf(' ', 20); assert.ok(i > 0 && i < v.indexOf('\n')); return `${v.slice(0, i)}\n${v.slice(i + 1)}` }
+  editKey(he, 'he', hookUp, breakOnce)
+  assert.equal(pendingKey(loadLang(he, 'he', true), hookUp)?.state, 'review', 'the key is not on he\'s list')
+  assert.deepEqual(run('T17', he, 'he', true), [])
+  caughtAs(false, 'T17', he, 'he', heClean, `${J(hookUp)} has 4 line(s), its key 3 — a hard-wrapped value keeps the English's line count`)
+  // The same in a paragraph value, which no list names: a line more is caught; a line far past 100 is no problem there.
+  const para = realFiles('he')
+  editKey(para, 'he', keychain, breakOnce)
+  caught('T17', para, 'he', heClean, `${J(keychain)} has 4 line(s), its key 3 — a paragraph value keeps the English's line count`)
+  const long = realFiles('he')
+  editKey(long, 'he', keychain, (v) => { const [a, ...rest] = v.split('\n'); return [`${a} ${'א'.repeat(300)}`, ...rest].join('\n') })
+  assert.deepEqual(run('T17', long, 'he'), [])
+  // (b) A hard-wrapped Persian line of 101 characters is caught, one of exactly 100 stands.
+  const faClean = realFiles('fa')
+  const fa = realFiles('fa')
+  editKey(fa, 'fa', codex, (v) => { const [, ...rest] = v.split('\n'); return ['ب'.repeat(101), ...rest].join('\n') })
+  caught('T17', fa, 'fa', faClean, `${J(codex)}: line 1 has 101 characters, more than 100`)
+  const hundred = realFiles('fa')
+  editKey(hundred, 'fa', codex, (v) => { const [, ...rest] = v.split('\n'); return ['ب'.repeat(100), ...rest].join('\n') })
+  assert.deepEqual(run('T17', hundred, 'fa'), [])
+  // Grapheme clusters, not code points: a Hindi line of 60 × शु (two code points, one character) is 60 characters.
+  const hi = realFiles('fa')
+  editKey(hi, 'fa', codex, (v) => { const [, ...rest] = v.split('\n'); return ['शु'.repeat(60), ...rest].join('\n') })
+  assert.deepEqual(run('T17', hi, 'fa'), [])
+  // (c) A manifest value with a line break inside a paragraph: the walkthrough's links in Arabic, two joined into one line.
+  const arClean = realFiles('ar')
+  const ar = realFiles('ar')
+  const links = 'walkthrough.getStarted.quotaSources.description'
+  edit(ar, 'package.nls.ar.json', (t) => {
+    const at = t[links].indexOf(')\n[')
+    assert.ok(at > 0, t[links])
+    t[links] = `${t[links].slice(0, at + 1)} ${t[links].slice(at + 2)}`
+  })
+  const want = src().english[links].split('\n').length
+  caught('T17', ar, 'ar', arClean, `package.nls.ar.json: ${links} has ${want - 1} line(s), the English ${want}`)
+})
+
+test('T17 over the files on disk: every language, German among them, keeps the English\'s wraps — the German three re-wrapped (R3-N2-113), Arabic, Hebrew and Persian as 1.13 wrote them, and what a language of 1.9 or 1.11 wrapped otherwise on its list for review, held to the rule at the join; the keys counted (1.14 B3 rules 2, 3)', () => {
+  const s = src()
+  const wrapped = s.keys.filter((k) => k.includes('\n'))
+  const hard = wrapped.filter((k) => k.split('\n').every((x) => graphemes(x) <= HARD_WRAP_MAX))
+  const lists = Object.keys(s.english).filter((k) => s.english[k].replace(/\n\n/g, '').includes('\n'))
+  // 1.14 P1: fourteen runtime keys with a line break — thirteen hard-wrapped, the Keychain paragraph — and seven manifest
+  // values with a line break inside a paragraph (six JSON examples, the walkthrough's links); a later key adds to them.
+  assert.ok(hard.length >= 13 && wrapped.length - hard.length >= 1 && lists.length >= 7, `${hard.length} + ${wrapped.length - hard.length} runtime keys, ${lists.length} manifest keys`)
+  const problems: string[] = []
+  for (const id of ON_DISK) problems.push(...RULES.T17.rule(s, loadLang(ROOT, id)))
+  assert.deepEqual(problems, [])
+  // German has no list: it is held now. The three values that missed the rule keep the English's line count.
+  const german = readTable(join(ROOT, 'l10n', 'bundle.l10n.de.json'))
+  const three = [wrappedKey('"Token Pace: Disconnect Claude Status Line" restores', 4), wrappedKey('To read quota figures without any network access', 6),
+    wrappedKey('• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from ~/.claude/.credentials.json.', 4)]
+  assert.deepEqual(three.map((k) => german[k].split('\n').length), [4, 6, 4])
+  assert.ok(three.every((k) => german[k].split('\n').every((x) => graphemes(x) <= HARD_WRAP_MAX)))
+  // Held at the join (no list read): what a language misses is exactly what its list names for review — nothing else.
+  for (const id of ON_DISK) {
+    const listed = loadLang(ROOT, id)
+    const strict = RULES.T17.rule(s, loadLang(ROOT, id, false))
+    const unlisted = strict.filter((p) => !wrapped.some((k) => p.includes(J(k)) && pendingKey(listed, k)?.state === 'review'))
+    assert.deepEqual(unlisted, [], `${id}: a T17 problem its list does not name`)
+    if (RTL_LANGUAGES.has(id) || id === 'de') assert.deepEqual(strict, [], `${id} wrapped otherwise`)
+  }
+})
+
 test('T9 catches three Latin words in a row in the arab fixture under ar — ar is in NON_LATIN — and two Latin names and a code span pass (1.13 A4 rule 2)', () => {
   const clean = fixture('arab', 'ar')
   const key = keyWhere((k) => k === 'Not enough data for a summary yet.')
@@ -2951,26 +3185,63 @@ test('NOTIFY_TEXT_KEYS_1_12 is the seventeen notification texts of 1.12\'s ledge
 })
 
 /** 1.13 B5 rule 1: every t() and tr() call of the scanned files with the arguments a reset clock reaches — read by the TypeScript parser. */
-interface ResetClockScan {
+/** What the clock scan finds (CLOCK_SCAN). */
+interface ClockScan {
   found: Array<{ file: string; fn: 't' | 'tr'; key: string; ph: string; line: number }>
   calls: { t: number; tr: number }
+  /** The fields followed: every field a clock is written into, or — with a `follow` list — those of the list that are. */
   fields: string[]
+  /** 1.14: the fields a clock is written into that the spec's `follow` list does not name, each with its sites. */
+  unfollowed: Record<string, string[]>
   sources: Array<{ file: string; callee: string; line: number }>
 }
 /**
- * The scan: the directories named on its command line (src/ by default), every `.ts` file. A value is a reset clock when it
- * is a call of `resetClock`, or of `formatReset` whose format is not the literal `relative` or `none`; a variable, a local
- * function (its returned value) or an object field (`resetAbsolute:`) bound to one; a conditional, `??` or `||` with one
- * in a branch; a wrapper call with one as an argument (`estimate(…)`, `esc(…)`) or a method of one. A t() or tr() call is
- * a barrier — its result is a sentence, not a clock —, and a text that merely contains a clock (a template, a `+`) is
- * followed into a t() argument only, never into a binding. Scopes are functions (a block's shadowing is ignored).
+ * What a clock is, for the scan: `sources` the callees whose call is one — `clock` always, `formatReset` unless its format
+ * is the literal `relative` or `none` —, `counted` the callees whose calls the scan lists (the SOURCES pins), `follow` the
+ * fields it follows into every `.field` access (null: every field a clock is written into, as 1.13's reset-clock scan did),
+ * and `params` whether a clock passed to a local function is followed into its parameter and a function passed as an
+ * argument that returns one makes the call one (1.14 B2 rule 1).
  */
-const RESET_CLOCK_SCAN = `
+interface ClockScanSpec {
+  sources: Record<string, 'clock' | 'formatReset'>
+  counted: string[]
+  follow: string[] | null
+  params: boolean
+}
+/**
+ * 1.13 B5 rule 3: the reset clock — `resetClock`, `formatReset`'s absolute and `both` forms. 1.14 P1: the scan is CLOCK_SCAN
+ * with this spec; following a clock into a function's parameter and out of a function argument changed none of its slots.
+ */
+const RESET_CLOCK_SPEC: ClockScanSpec = {
+  sources: { resetClock: 'clock', formatReset: 'formatReset' }, counted: ['resetClock', 'formatReset'], follow: null, params: true,
+}
+/**
+ * 1.14 B2 rule 1: the clock stamp — `clockStamp`, and agentTreeBuild.ts's `stamp` wrapper counted beside it (the scan finds
+ * the wrapper as a local function that returns one). The fields followed are CLOCK_STAMP_FIELDS' followed ones.
+ */
+const CLOCK_STAMP_SPEC: ClockScanSpec = {
+  sources: { clockStamp: 'clock' }, counted: ['clockStamp', 'stamp'], follow: CLOCK_STAMP_FIELDS.filter(([, f]) => f).map(([n]) => n), params: true,
+}
+/**
+ * The scan (1.13 B5 rule 3's, generalised by 1.14 P1 for B2 rule 1 — one scan, a spec per kind of clock): its spec as the
+ * first argument (JSON), then the directories (src/ by default), every `.ts` file. A value is a clock when it is a call of
+ * a source; a variable, a local function (its returned value) or an object field bound to one (every field, or the
+ * spec's `follow` list — a field outside it is recorded in `unfollowed` and not followed); a conditional, `??` or `||`
+ * with one in a branch; a wrapper call with one as an argument (`estimate(…)`, `esc(…)`) or a method of one; with
+ * `params`, a call with a function argument that returns one (`or(v, (x) => stamp(x, …))`), and inside a local function
+ * the parameter a clock is passed to (`hookSentence(w, stamp(…))`) — a parameter's clock reaches a t() slot and the
+ * variables bound to it there, never the function's returned value (else every `esc(…)` of the page would be one). A t()
+ * or tr() call is a barrier — its result is a sentence, not a clock —, and a text that merely contains a clock (a
+ * template, a `+`) is followed into a t() argument only, never into a binding. Scopes are functions (a block's shadowing
+ * is ignored).
+ */
+const CLOCK_SCAN = `
 const ts = require('typescript')
 const fs = require('fs')
 const path = require('path')
 const root = process.cwd()
-const dirs = process.argv.length > 1 ? process.argv.slice(1) : [path.join(root, 'src')]
+const spec = JSON.parse(process.argv[1])
+const dirs = process.argv.length > 2 ? process.argv.slice(2) : [path.join(root, 'src')]
 const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name))
   : e.name.endsWith('.ts') && !e.name.endsWith('.d.ts') ? [path.join(d, e.name)] : []).sort()
 const importsT = (sf) => sf.statements.some((s) => ts.isImportDeclaration(s) && ts.isStringLiteral(s.moduleSpecifier)
@@ -2985,31 +3256,38 @@ const files = dirs.flatMap(walk).map((file) => {
 const isScope = (n) => ts.isSourceFile(n) || ts.isFunctionLike(n)
 const scopeOf = (n) => { let p = n.parent; while (p && !isScope(p)) p = p.parent; return p }
 const vars = new Map()
+const pvars = new Map()
 const fns = new Map()
+const decls = new Map()
 const fields = new Set()
+const unfollowed = new Map()
 const add = (m, scope, name) => { if (!m.has(scope)) m.set(scope, new Set()); if (m.get(scope).has(name)) return false; m.get(scope).add(name); return true }
 const bound = (m, node, name) => { for (let p = node.parent; p; p = p.parent) if (isScope(p) && m.has(p) && m.get(p).has(name)) return true; return false }
+const declOf = (node, name) => { for (let p = node.parent; p; p = p.parent) if (isScope(p) && decls.has(p) && decls.get(p).has(name)) return decls.get(p).get(name); return null }
 const isTr = (c) => ts.isIdentifier(c.expression) && (c.expression.text === 't' || c.expression.text === 'tr')
 const relative = (c) => !!c.arguments[2] && ts.isStringLiteral(c.arguments[2]) && (c.arguments[2].text === 'relative' || c.arguments[2].text === 'none')
-function carries(e, texts) {
+const isFnLit = (a) => ts.isArrowFunction(a) || ts.isFunctionExpression(a)
+function carries(e, texts, viaParams) {
   if (!e) return false
-  if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e)) return carries(e.expression, texts)
-  if (ts.isConditionalExpression(e)) return carries(e.whenTrue, texts) || carries(e.whenFalse, texts)
-  if (ts.isBinaryExpression(e) && (e.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken || e.operatorToken.kind === ts.SyntaxKind.BarBarToken)) return carries(e.left, texts) || carries(e.right, texts)
-  if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.PlusToken) return texts && (carries(e.left, texts) || carries(e.right, texts))
-  if (ts.isTemplateExpression(e)) return texts && e.templateSpans.some((s) => carries(s.expression, texts))
-  if (ts.isIdentifier(e)) return bound(vars, e, e.text)
+  if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e)) return carries(e.expression, texts, viaParams)
+  if (ts.isConditionalExpression(e)) return carries(e.whenTrue, texts, viaParams) || carries(e.whenFalse, texts, viaParams)
+  if (ts.isBinaryExpression(e) && (e.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken || e.operatorToken.kind === ts.SyntaxKind.BarBarToken)) return carries(e.left, texts, viaParams) || carries(e.right, texts, viaParams)
+  if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.PlusToken) return texts && (carries(e.left, texts, viaParams) || carries(e.right, texts, viaParams))
+  if (ts.isTemplateExpression(e)) return texts && e.templateSpans.some((s) => carries(s.expression, texts, viaParams))
+  if (ts.isIdentifier(e)) return bound(vars, e, e.text) || (viaParams && bound(pvars, e, e.text))
   if (ts.isPropertyAccessExpression(e)) return fields.has(e.name.text)
   if (ts.isCallExpression(e)) {
     if (isTr(e)) return false
     const c = e.expression
     if (ts.isIdentifier(c)) {
-      if (c.text === 'resetClock') return true
-      if (c.text === 'formatReset') return !relative(e)
+      const kind = spec.sources[c.text]
+      if (kind === 'clock') return true
+      if (kind === 'formatReset') return !relative(e)
       if (bound(fns, e, c.text)) return true
     }
-    if (ts.isPropertyAccessExpression(c) && carries(c.expression, false)) return true
-    return e.arguments.some((a) => carries(a, false))
+    if (ts.isPropertyAccessExpression(c) && carries(c.expression, false, viaParams)) return true
+    if (spec.params && e.arguments.some((a) => isFnLit(a) && returnsOf(a).some((r) => carries(r, false, false)))) return true
+    return e.arguments.some((a) => carries(a, false, viaParams))
   }
   return false
 }
@@ -3020,26 +3298,53 @@ const returnsOf = (fn) => {
   if (fn.body) visit(fn.body)
   return out
 }
+for (const { sf } of files) {
+  const visit = (n) => {
+    if (ts.isFunctionDeclaration(n) && n.name && n.body) { if (!decls.has(scopeOf(n))) decls.set(scopeOf(n), new Map()); decls.get(scopeOf(n)).set(n.name.text, n) }
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && isFnLit(n.initializer)) { if (!decls.has(scopeOf(n))) decls.set(scopeOf(n), new Map()); decls.get(scopeOf(n)).set(n.name.text, n.initializer) }
+    ts.forEachChild(n, visit)
+  }
+  visit(sf)
+}
+const field = (name, sf, n) => {
+  if (fields.has(name)) return false
+  if (spec.follow === null || spec.follow.includes(name)) { fields.add(name); return true }
+  if (!unfollowed.has(name)) unfollowed.set(name, [])
+  const at = path.relative(root, sf.fileName).split(path.sep).join('/') + ':' + (sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1)
+  if (!unfollowed.get(name).includes(at)) unfollowed.get(name).push(at)
+  return false
+}
 for (let changed = true, round = 0; changed && round < 20; round++) {
   changed = false
   for (const { sf } of files) {
     const visit = (n) => {
       if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
         const init = n.initializer
-        if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
-          if (returnsOf(init).some((r) => carries(r, false))) changed = add(fns, scopeOf(n), n.name.text) || changed
-        } else if (carries(init, false)) changed = add(vars, scopeOf(n), n.name.text) || changed
+        if (isFnLit(init)) {
+          if (returnsOf(init).some((r) => carries(r, false, false))) changed = add(fns, scopeOf(n), n.name.text) || changed
+        } else if (carries(init, false, false)) changed = add(vars, scopeOf(n), n.name.text) || changed
+        else if (spec.params && carries(init, false, true)) changed = add(pvars, scopeOf(n), n.name.text) || changed
       }
-      if (ts.isFunctionDeclaration(n) && n.name && returnsOf(n).some((r) => carries(r, false))) changed = add(fns, scopeOf(n), n.name.text) || changed
-      if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(n.left) && carries(n.right, false)) changed = add(vars, scopeOf(n), n.left.text) || changed
-      if (ts.isPropertyAssignment(n) && (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name)) && carries(n.initializer, false) && !fields.has(n.name.text)) { fields.add(n.name.text); changed = true }
-      if (ts.isShorthandPropertyAssignment(n) && bound(vars, n, n.name.text) && !fields.has(n.name.text)) { fields.add(n.name.text); changed = true }
+      if (ts.isFunctionDeclaration(n) && n.name && returnsOf(n).some((r) => carries(r, false, false))) changed = add(fns, scopeOf(n), n.name.text) || changed
+      if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(n.left)) {
+        if (carries(n.right, false, false)) changed = add(vars, scopeOf(n), n.left.text) || changed
+        else if (spec.params && carries(n.right, false, true)) changed = add(pvars, scopeOf(n), n.left.text) || changed
+      }
+      if (ts.isPropertyAssignment(n) && (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name)) && carries(n.initializer, false, false)) changed = field(n.name.text, sf, n) || changed
+      if (ts.isShorthandPropertyAssignment(n) && bound(vars, n, n.name.text)) changed = field(n.name.text, sf, n) || changed
+      if (spec.params && ts.isCallExpression(n) && ts.isIdentifier(n.expression) && !isTr(n)) {
+        const fn = declOf(n, n.expression.text)
+        if (fn) n.arguments.forEach((a, i) => {
+          const p = fn.parameters[i]
+          if (p && ts.isIdentifier(p.name) && carries(a, false, true)) changed = add(pvars, fn, p.name.text) || changed
+        })
+      }
       ts.forEachChild(n, visit)
     }
     visit(sf)
   }
 }
-const out = { found: [], calls: { t: 0, tr: 0 }, fields: [...fields].sort(), sources: [] }
+const out = { found: [], calls: { t: 0, tr: 0 }, fields: [...fields].sort(), unfollowed: Object.fromEntries([...unfollowed.entries()].sort()), sources: [] }
 for (const { label, sf, withT, withTr } of files) {
   const visit = (n) => {
     if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
@@ -3048,9 +3353,9 @@ for (const { label, sf, withT, withTr } of files) {
       const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
       if (((withT && c === 't') || (withTr && c === 'tr')) && first && (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first))) {
         out.calls[c]++
-        n.arguments.slice(1).forEach((a, i) => { if (carries(a, true)) out.found.push({ file: label, fn: c, key: first.text, ph: '{' + i + '}', line }) })
+        n.arguments.slice(1).forEach((a, i) => { if (carries(a, true, true)) out.found.push({ file: label, fn: c, key: first.text, ph: '{' + i + '}', line }) })
       }
-      if (c === 'resetClock' || c === 'formatReset') out.sources.push({ file: label, callee: c, line })
+      if (spec.counted.includes(c)) out.sources.push({ file: label, callee: c, line })
     }
     ts.forEachChild(n, visit)
   }
@@ -3058,20 +3363,25 @@ for (const { label, sf, withT, withTr } of files) {
 }
 process.stdout.write(JSON.stringify(out))
 `
-const RESET_SCANS = new Map<string, ResetClockScan>()
-/** Runs the scan over `dirs` (src/ when none), from the repository root — its TypeScript parser is the checkout's. */
-function resetClockScan(...dirs: string[]): ResetClockScan {
-  const cacheKey = dirs.join('\u0000')
-  const hit = RESET_SCANS.get(cacheKey)
+const CLOCK_SCANS = new Map<string, ClockScan>()
+/** Runs the scan with `spec` over `dirs` (src/ when none), from the repository root — its TypeScript parser is the checkout's. */
+function clockScan(spec: ClockScanSpec, ...dirs: string[]): ClockScan {
+  const arg = JSON.stringify(spec)
+  const cacheKey = [arg, ...dirs].join('\u0000')
+  const hit = CLOCK_SCANS.get(cacheKey)
   if (hit) return hit
-  const r = spawnSync(process.execPath, ['-e', RESET_CLOCK_SCAN, ...dirs], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-  assert.equal(r.status, 0, `the reset-clock scan failed:\n${r.stderr}`)
-  const scan = JSON.parse(r.stdout) as ResetClockScan
-  RESET_SCANS.set(cacheKey, scan)
+  const r = spawnSync(process.execPath, ['-e', CLOCK_SCAN, arg, ...dirs], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  assert.equal(r.status, 0, `the clock scan failed:\n${r.stderr}`)
+  const scan = JSON.parse(r.stdout) as ClockScan
+  CLOCK_SCANS.set(cacheKey, scan)
   return scan
 }
+/** 1.13 B5 rule 3: the reset-clock scan. */
+const resetClockScan = (...dirs: string[]): ClockScan => clockScan(RESET_CLOCK_SPEC, ...dirs)
+/** 1.14 B2 rule 1: the clock-stamp scan. */
+const clockStampScan = (...dirs: string[]): ClockScan => clockScan(CLOCK_STAMP_SPEC, ...dirs)
 /** The scan's slots, `key\u0000{n}`, sorted and each once. */
-const slotsOf = (scan: ResetClockScan): string[] => [...new Set(scan.found.map((f) => `${f.key}\u0000${f.ph}`))].sort()
+const slotsOf = (scan: ClockScan): string[] => [...new Set(scan.found.map((f) => `${f.key}\u0000${f.ph}`))].sort()
 
 test('RESET_CLOCK_KEYS: every key a t() key that holds its placeholder, and exactly the slots a reset clock reaches — found by a scan of every t() call of src/ and tr() call of the page, the exceptions each with its reason, the two functions\' calls pinned (1.13 B5 rules 1, 3)', () => {
   const s = src()
@@ -3186,6 +3496,82 @@ test('RESET_CLOCK_KEYS\' scan follows a clock through a variable, a local functi
   assert.deepEqual(slotsOf(resetClockScan(join(ROOT, 'src'))), listed)
 })
 
+test('CLOCK_STAMP_KEYS: every key a t() or tr() key that holds its placeholder, and exactly the slots a clock stamp reaches — found by the clock scan with the stamp\'s spec over every t() call of src/ and tr() call of the page, the fields followed or named, clockStamp\'s and stamp\'s calls pinned (1.14 B2 rules 1, 5)', () => {
+  const s = src()
+  const listed = CLOCK_STAMP_KEYS.map(([k, ph]) => `${k}\u0000${ph}`)
+  assert.equal(new Set(listed).size, listed.length, 'a slot stands twice in CLOCK_STAMP_KEYS')
+  for (const [key, ph] of [...CLOCK_STAMP_KEYS, ...CLOCK_STAMP_EXCEPTED.map(([k, p]) => [k, p] as const)]) {
+    assert.ok(s.keys.includes(key), `${J(key)} is no t() key of src/ (any more)`)
+    assert.ok(/^\{\d\}$/.test(ph) && key.includes(ph), `${J(key)} does not hold ${ph}`)
+  }
+  // 1.14 P1: 36 slots in 34 keys, none excepted. P2 (B1 rule 2, §7a Q8) adds the passed reset's key.
+  assert.deepEqual([CLOCK_STAMP_KEYS.length, new Set(CLOCK_STAMP_KEYS.map(([k]) => k)).size, CLOCK_STAMP_EXCEPTED.length], [36, 34, 0])
+  for (const [key, , why] of CLOCK_STAMP_EXCEPTED) assert.ok(why.length > 20 && !listed.some((x) => x.startsWith(`${key}\u0000`)), `${J(key)}: no reason, or listed too`)
+  const fields = CLOCK_STAMP_FIELDS.map(([f]) => f)
+  assert.equal(new Set(fields).size, fields.length, 'a field stands twice in CLOCK_STAMP_FIELDS')
+  for (const [field, , why] of CLOCK_STAMP_FIELDS) assert.ok(why.length > 20, `${field}: no reason`)
+  const scan = clockStampScan()
+  assert.ok(scan.calls.t >= 1000 && scan.calls.tr >= 300, `the scan read ${scan.calls.t} t() and ${scan.calls.tr} tr() calls`)
+  // The scan and the lists: the listed slots and the excepted ones, no more, no less.
+  assert.deepEqual(slotsOf(scan), [...listed, ...CLOCK_STAMP_EXCEPTED.map(([k, ph]) => `${k}\u0000${ph}`)].sort())
+  // Every field a stamp is written into: the followed ones followed, the others named with where their value goes.
+  assert.deepEqual(scan.fields, CLOCK_STAMP_FIELDS.filter(([, f]) => f).map(([n]) => n).sort())
+  assert.deepEqual(Object.keys(scan.unfollowed), CLOCK_STAMP_FIELDS.filter(([, f]) => !f).map(([n]) => n).sort())
+  assert.ok(scan.unfollowed.start.length === 1 && scan.unfollowed.start[0].startsWith('src/stats.ts:'), J(scan.unfollowed.start))
+  assert.ok(scan.unfollowed.value.length >= 3 && scan.unfollowed.value.every((x) => x.startsWith('src/agentTreeBuild.ts:')), J(scan.unfollowed.value))
+  // Where clockStamp and the tree's wrapper are called.
+  const counts = new Map<string, number>()
+  for (const x of scan.sources) counts.set(`${x.file} ${x.callee}`, (counts.get(`${x.file} ${x.callee}`) ?? 0) + 1)
+  assert.deepEqual([...counts.entries()].sort(), CLOCK_STAMP_SOURCES.map(([f, c, n]): [string, number] => [`${f} ${c}`, n]).sort())
+  // The two lists are apart: a slot is a reset clock or a clock stamp, never both.
+  const resets = new Set(RESET_CLOCK_KEYS.map(([k, ph]) => `${k}\u0000${ph}`))
+  assert.deepEqual(listed.filter((x) => resets.has(x)), [])
+  // The German: every listed key has one; 24 of the slots write „um" before it today — B2 rule 3 (P2) turns each into a
+  // label or bracket form, and this pin into 0.
+  const german = readTable(join(ROOT, 'l10n', 'bundle.l10n.de.json'))
+  for (const [key] of CLOCK_STAMP_KEYS) assert.equal(typeof german[key], 'string', `${J(key)}: no German`)
+  const um = CLOCK_STAMP_KEYS.filter(([key, ph]) => new RegExp(`(?<!\\p{L})um\\s+${reEsc(ph)}`, 'u').test(german[key]))
+  assert.equal(um.length, 24, J(um))
+})
+
+test('CLOCK_STAMP_KEYS\' scan follows a stamp through a wrapper function, a function\'s parameter, a function passed as an argument and a followed field, names a field it does not follow, and stops at formatTime, at a log line and at a wrapper\'s other calls — and a new t(…, clockStamp(…)) call beside src/ is a slot the list lacks (1.14 B2 rule 5\'s mutation)', () => {
+  const dir = tempDir()
+  mkdirSync(join(dir, 'x'), { recursive: true })
+  writeFileSync(join(dir, 'x', 'host.ts'), [
+    "import { t } from './i18n'",
+    "import { clockStamp, formatTime } from './time'",
+    'declare const cfg: never; declare const log: { info(s: string): void }',
+    'function stamp(ms: number): string { return clockStamp(ms, 0, cfg) }',
+    "export const direct = (): string => t('Direct {0}', stamp(1))",
+    "function sentence(w: string, at: string): string { const when = at; return t('Param {0} at {1}', w, when) }",
+    "export const viaParam = (): string => sentence('x', stamp(1))",
+    "const or = <T>(v: T | null, f: (x: T) => string): string => (v === null ? '–' : f(v))",
+    "export const viaArg = (v: number | null): string => t('Arg {0}', or(v, (x) => stamp(x)))",
+    'export const made = { lastClock: stamp(1), start: stamp(2) }',
+    "export const viaField = (o: typeof made): string => t('Field {0} and {1}', o.lastClock, o.start)",
+    "export const today = (): string => t('Today {0}', formatTime(1))",
+    'export const logged = (): void => log.info(`cache expires at ${clockStamp(1, 0, cfg)}`)',
+    "function esc(x: string): string { return x.replace(/&/g, '&amp;') }",
+    "export const escaped = (): string => t('Esc {0}', esc(stamp(1)))",
+    "export const other = (): string => t('Other {0}', esc('x'))",
+  ].join('\n'))
+  const scan = clockStampScan(join(dir, 'x'))
+  assert.deepEqual(slotsOf(scan), ['Arg {0}\u0000{0}', 'Direct {0}\u0000{0}', 'Esc {0}\u0000{0}', 'Field {0} and {1}\u0000{0}', 'Param {0} at {1}\u0000{1}'])
+  assert.deepEqual(scan.fields, ['lastClock'])
+  assert.deepEqual(Object.keys(scan.unfollowed), ['start'])
+  assert.equal(scan.unfollowed.start.length, 1)
+  assert.deepEqual(scan.sources.map((x) => x.callee).sort(), ['clockStamp', 'clockStamp', 'stamp', 'stamp', 'stamp', 'stamp', 'stamp', 'stamp'])
+  // The reset-clock spec over the same file finds nothing: no reset clock in it.
+  assert.deepEqual(slotsOf(resetClockScan(join(dir, 'x'))), [])
+  // The mutation: src/ as it is, and one more call beside it — the scan finds a slot CLOCK_STAMP_KEYS does not list.
+  const listed = [...CLOCK_STAMP_KEYS, ...CLOCK_STAMP_EXCEPTED.map(([k, ph]) => [k, ph] as const)].map(([k, ph]) => `${k}\u0000${ph}`).sort()
+  const more = tempDir()
+  writeFileSync(join(more, 'mutation.ts'), "import { t } from './i18n'\nimport { clockStamp } from './time'\ndeclare const cfg: never\nexport const m = (): string => t('Recorded at {0}', clockStamp(1, 2, cfg))\n")
+  const mutated = clockStampScan(join(ROOT, 'src'), more)
+  assert.deepEqual(slotsOf(mutated).filter((x) => !listed.includes(x)), ['Recorded at {0}\u0000{0}'])
+  assert.deepEqual(slotsOf(clockStampScan(join(ROOT, 'src'))), listed)
+})
+
 test('the brief\'s 1.13 sections: right to left — the isolates the code\'s, logical order, the arrows, the digits and %, names and code Latin, the quotation marks, ZWNJ, the native names; a new language, whole — ar, he, fa with their register, plurals and weekday words; your pending list — the language names, the count, L1–L4, the reset-clock slots with every key of RESET_CLOCK_KEYS (1.13 E1 rule 4, B5 rule 1)', () => {
   const brief = readFileSync(join(ROOT, 'l10n', 'TRANSLATING.md'), 'utf8')
   const flat = brief.replace(/\s+/g, ' ')
@@ -3238,4 +3624,49 @@ test('the brief\'s 1.13 sections: right to left — the isolates the code\'s, lo
   assert.ok(flat.includes('A key that names a setting\'s fields by their ids writes them as code (1.13): the e-mail channel\'s setup hint has `host`, `user`, `from` and `to` in backticks — keep each in its backticks as it is (T5), and T9 takes the code out before it compares; bare, the four are English words it catches.'))
   assert.equal(flat.includes('P6 empties this list'), false, 'the brief still announces P6')
   assert.equal(flat.includes('FIELD_IDS_OF_A_KEY'), false, 'the brief still names the retired list')
+})
+
+test('the brief\'s 1.14 sections: your pending list — the ledger\'s start, the twenty-seven, the hard wraps, the project words, the list separator, the clock stamps, the reset in the explanation, the bar\'s sentences, the report; clock stamps — every key of CLOCK_STAMP_KEYS with its slot; hard wraps — T17\'s three kinds (1.14 E1 rule 4, B2 rule 2, B3 rule 1)', () => {
+  const brief = readFileSync(join(ROOT, 'l10n', 'TRANSLATING.md'), 'utf8')
+  const flat = brief.replace(/\s+/g, ' ')
+  const list113 = flat.indexOf('## 1.13: your pending list')
+  const list = flat.indexOf('## 1.14: your pending list')
+  const stamps = flat.indexOf('## 1.14: clock stamps')
+  const wraps = flat.indexOf('## 1.14: hard wraps are a rule now')
+  const gates = flat.indexOf('## The gates')
+  assert.ok(list113 >= 0 && list113 < list && list < stamps && stamps < wraps && wraps < gates, 'the brief lacks its three 1.14 sections after 1.13\'s, before the gates')
+  const a = flat.slice(list, stamps)
+  for (const needed of [
+    'the twenty-seven languages beyond English and German', 'Arabic, Hebrew and Persian among them for the first time',
+    'node scripts/l10n-rekey.mjs --start c036c7c', 'node scripts/l10n-rekey.mjs --print <id>', '`translate`', '`review`',
+    '**The hard wraps**', 'the ledger\'s first nine entries', 'all in the `text` part', '[1.14: hard wraps are a rule now](#114-hard-wraps-are-a-rule-now)',
+    'shorten the sentence, never the facts',
+    '**The project words**', '`VS-Code_Tokens`', '`p:8f31c0a4e2b1`', 'never translated, inflected or declined', '`PROJECT_LABEL_KEYS`',
+    '`projects ({0}) ▾`', '`models ({0}) ▾`',
+    '**The list separator**', '`{0}, {1}`', 'Arabic and Persian `،`', 'Chinese and Japanese `、` or `,`', 'Never a direction mark',
+    '**The clock stamps**', '[1.14: clock stamps](#114-clock-stamps)',
+    '**The reset in the explanation**', '`{0} % used — over the limit until the reset at {1}.`', '`{0} % used — exhausted until the reset at {1}.`', '`Thu 06:00`',
+    '**The bar\'s sentences**', '`config.timeProgressStyle.description`', '`walkthrough.getStarted.readTheBar.description`', 'by reaching the marker',
+    'translate anew', 'stay open', 'Not a native speaker: the translations are an AI agent\'s.', 'node scripts/nls-sources.mjs <id>',
+    'test ! -e l10n/pending/<id>.json',
+  ]) assert.ok(a.includes(needed), `the brief's "1.14: your pending list" does not say: ${needed}`)
+  const b = flat.slice(stamps, wraps)
+  for (const needed of [
+    '`14:20`', '`2026-09-26 14:20`', 'The slot may hold `14:20` or `2026-09-26 14:20` — write a form that reads with both',
+    'a label (`Recorded: {0}`), a colon or brackets', 'German *um*', 'Danish *kl.*', 'Ukrainian *о*', 'Greek *στις*',
+    '`CLOCK_STAMP_KEYS`', '`clockStamp`', '`{0} finished a turn at {1}`',
+  ]) assert.ok(b.includes(needed), `the brief's "1.14: clock stamps" does not say: ${needed}`)
+  // Every clock-stamp slot, whole, in backticks, with its placeholder.
+  for (const [key, ph] of CLOCK_STAMP_KEYS) {
+    assert.ok(b.includes(`\`${key}\` (${ph})`) || b.includes(`\`${key}\` (${ph} and`) || b.includes(`\`${key}\` ({0} and ${ph})`), `the brief does not name the slot ${ph} of ${J(key)}`)
+  }
+  const c = flat.slice(wraps, gates)
+  assert.equal(HARD_WRAP_MAX, 100)
+  for (const needed of [
+    '**T17**', 'German included', '**hard-wrapped**', `each at most ${HARD_WRAP_MAX} characters`, 'grapheme clusters', '**paragraph**',
+    'the Keychain paragraph, whose lines reach 236', 'a line break inside a paragraph', 'exempt while it is listed', 'at the join every value is held',
+    'the two spaces before a bullet\'s following lines', 'never break inside a URL, a path, a placeholder or a backtick span',
+  ]) assert.ok(c.includes(needed), `the brief's "1.14: hard wraps are a rule now" does not say: ${needed}`)
+  // T17 in the rules' list.
+  assert.ok(flat.includes('**T17 · Wraps** (1.14)'), 'the brief does not describe T17')
 })

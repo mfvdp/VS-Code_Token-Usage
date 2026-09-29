@@ -495,6 +495,119 @@ and the file deleted (the gates of [1.11: a new language, whole](#111-a-new-lang
    commit, the gates with their exit codes, per language the counts and the three language names, the subject you gave
    the app-server sentence, and anything that looked wrong (reported, not changed).
 
+## 1.14: your pending list
+
+For the twenty-seven languages beyond English and German — Arabic, Hebrew and Persian among them for the first time: a
+language of 1.13 has its files since 1.13's join, so the ledger reaches it from 1.14 on. 1.14's ledger started at the
+1.13.0 release (`node scripts/l10n-rekey.mjs --start c036c7c`) with an empty list for each of you; its entries fill it, and
+you work through it as [the 1.10 section](#working-through-your-pending-list-110) says — `node scripts/l10n-rekey.mjs --print <id>`,
+every `translate` key into the parts it names, every `review` key read against the English and its `why`, every manifest
+key on the list, then `node scripts/merge-l10n.mjs`, `node scripts/nls-sources.mjs <id>` and the file deleted (the gates of
+[1.11: a new language, whole](#111-a-new-language-whole), item 11, ending in `test ! -e l10n/pending/<id>.json`).
+
+1. **The hard wraps** — the ledger's first nine entries, `review`, all in the `text` part: nine consent paragraphs that
+   languages of 1.9 and 1.11 wrapped otherwise than the English (one line for the English's four, a line of 127
+   characters). T17 holds them from 1.14 on ([1.14: hard wraps are a rule now](#114-hard-wraps-are-a-rule-now)): re-wrap
+   each to the English's line count, every line at most 100 characters; where your words do not fit, shorten the
+   sentence, never the facts. A value that keeps the wraps already stays as it is — say so.
+2. **The project words** (`translate`): a project is shown by its label, which is data — its folder's name
+   (`VS-Code_Tokens`) or a pseudonym (`p:8f31c0a4e2b1`) —, never translated, inflected or declined; write the sentence
+   around it so that it reads with either, as with a session's name
+   ([the section on names](#session-names-and-product-names-in-placeholders-112)). The keys whose placeholder receives a
+   label are `PROJECT_LABEL_KEYS` in `test/l10n.languages.test.ts`; the package that adds them lists them here. Your words
+   for project, session, filter and chip stay the ones of 1.11–1.13, and `projects ({0}) ▾` takes your form of
+   `models ({0}) ▾`.
+3. **The list separator** (`{0}, {1}`, `translate`): the comma your language writes between the items of a list of names:
+   Arabic and Persian `،`, Chinese and Japanese `、` or `,` — your choice, named in your report. Never a direction mark
+   (T16).
+4. **The clock stamps** (`review`): the keys of [1.14: clock stamps](#114-clock-stamps) — the English is unchanged; check the
+   word before the slot, keep it or change it, and say which.
+5. **The reset in the explanation** (`review`): `{0} % used — over the limit until the reset at {1}.` and
+   `{0} % used — exhausted until the reset at {1}.` — their slot `{1}` holds the reset's weekday a day or more ahead
+   (`Thu 06:00`) from 1.14 on, as the reset-clock slots of [1.13: your pending list](#113-your-pending-list) do: a label or
+   brackets before it, never a clock-only preposition.
+6. **The bar's sentences** (`review` of two manifest keys, their `why` says "translate anew"):
+   `config.timeProgressStyle.description` and `walkthrough.getStarted.readTheBar.description` read the bar by reaching the
+   marker, no longer by left and right; Arabic, Hebrew and Persian read so since 1.13's fix pass — review and keep.
+7. The questions 1.10's to 1.13's readers left for native speakers stay open: where a key of your list is one of them,
+   keep the value you have where the English's meaning did not change, and say so.
+8. Your report opens with the line "Not a native speaker: the translations are an AI agent's." — then the branch and its
+   commit, the gates with their exit codes, per language the counts, the separator chosen, the clock-stamp slots changed
+   (key, old → new, why) and kept, the hard wraps re-wrapped and shortened, your words for the project filter and
+   `(no project)`, and anything in the English that looked wrong (reported, not changed).
+
+## 1.14: clock stamps
+
+A clock stamp is `14:20` for a time of today and `2026-09-26 14:20` for one of another day — one slot, and the code
+decides which it holds (`clockStamp` in `src/time.ts`). The slot may hold `14:20` or `2026-09-26 14:20` — write a form
+that reads with both: a label (`Recorded: {0}`), a colon or brackets; never a preposition that takes a clock hour only
+(German *um*, Danish *kl.*, Ukrainian *о*, Greek *στις*) — the reset-clock slots' rule, for a slot that may hold a date.
+1.14 turns the German to such forms („abgelehnt ({0})", „aufgezeichnet ({0})"). The slots, `CLOCK_STAMP_KEYS` in
+`test/l10n.languages.test.ts`, which a scan of every `t()` and `tr()` call holds to the code:
+
+* an agent in the tree — its last request, its end as the parent recorded it, its state inferred after or without it:
+  * `rejected at {0}` ({0})
+  * `rejected at {0} — {1}` ({0})
+  * `Stopped — the parent recorded ‘{0}’ at {1}.` ({1})
+  * `Failed — the parent recorded the failure at {0}.` ({0})
+  * `Completed — the parent recorded the result at {0}.` ({0})
+  * `Running — inferred: the transcript changed {0}, after an outcome was recorded at {1}.` ({1})
+  * `Unknown — inferred: the transcript went on after an outcome was recorded at {0}, and has been silent since {1}.` ({0} and {1})
+  * `Unknown — inferred: no result was recorded; the last request, at {0}, was rejected.` ({0})
+  * `Unknown — inferred: no result was recorded; the last request, at {0}, was rejected — {1}.` ({0})
+  * `Unknown — inferred: no result was recorded and the transcript has been silent since {0}, after a {1} call; the agent may have been stopped.` ({0})
+  * `Unknown — inferred: no result was recorded and the transcript has been silent since {0}; the agent may have been stopped.` ({0})
+  * `Unknown — inferred: the parent recorded the launch at {0} but no result, and the agent's transcript was never seen; the agent may have been stopped.` ({0})
+  * `Idle — inferred: the session transcript has been silent since {0}.` ({0})
+* a workflow run — its end as the parent recorded it, its state inferred, the run record's row:
+  * `Stopped — the parent recorded ‘{0}’ for this run at {1}.` ({1})
+  * `Failed — the parent recorded the failure of this run at {0}.` ({0})
+  * `Completed — the parent recorded the end of this run at {0}.` ({0})
+  * `Unknown — inferred: the parent launched this run at {0}, but no agent of it was ever seen.` ({0})
+  * `Running — inferred: an agent of this run wrote on after the parent recorded its end at {0}.` ({0})
+  * `{0} · started {1} · {2} agents · {3} tokens · {4} tool calls · {5} · default model {6}` ({1})
+* the agent hook's wait, a recorded outcome ("done at 14:20"), the last compaction:
+  * `The agent hook reported at {0}: waiting for approval.` ({0})
+  * `The agent hook reported at {0}: waiting for input.` ({0})
+  * `{0} at {1}` ({1})
+  * `{0} · last at {1} (manual, {2} → {3})` ({1})
+  * `{0} · last at {1} (auto, {2} → {3})` ({1})
+  * `{0} · last at {1} (–, {2} → {3})` ({1})
+* the prompt cache — its cold line, the cold start's cost, the Codex line — and the failed quota attempt:
+  * `{0} · prompt cache cold since {1} (1 h TTL)` ({1})
+  * `{0} · prompt cache cold since ~{1} (1 h TTL, estimated from the transcript)` ({1})
+  * `A cold start after {0} re-writes {1} tokens instead of reading them from the cache.` ({0})
+  * `A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input, {3}) instead of reading them from the cache ({4}× input, {5}).` ({0})
+  * `A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input) instead of reading them from the cache ({3}× input).` ({0})
+  * `Codex prompt cache · last request at {0} · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until {1}, perhaps longer.` ({0} and {1})
+  * `Last attempt at {0} failed: {1}` ({0})
+* the page's words a screen reader gets for a row's clock:
+  * `silent since {0}` ({0})
+  * `since {0}` ({0})
+
+A key that takes a clock of today alone is not one — `{0} finished a turn at {1}`, `This channel works: Token Pace can
+reach it. Sent at {0}.` —: its slot never holds a date.
+
+## 1.14: hard wraps are a rule now
+
+Since 1.12 this brief has asked the consents' paragraphs to keep the English's hard wraps — a line break where the
+English has one —, and 1.13 added "each line ≤ 100 characters"; no test held it, and many values of 1.9 and 1.11 wrap
+otherwise. **T17** holds it from 1.14 on, in every language, German included:
+
+* a runtime value whose English holds a line break, every English line at most 100 characters, is **hard-wrapped**: it has
+  exactly as many lines as the English, each at most 100 characters, counted as a reader sees them (grapheme clusters,
+  as T13 counts);
+* a value whose English has a longer line — the Keychain paragraph, whose lines reach 236 — is a **paragraph**: exactly as
+  many lines as the English, no length rule;
+* a manifest value whose English has a line break inside a paragraph — a fenced JSON example, the walkthrough's list of
+  command links — keeps the English's number of lines.
+
+A key on your pending list is exempt while it is listed; at the join every value is held. Break where the English breaks
+where your word order allows, else where a line reaches 100 characters; keep the English's indentation (the two spaces
+before a bullet's following lines); never break inside a URL, a path, a placeholder or a backtick span. The German three
+that missed the rule were re-wrapped with it in 1.14 — two of them a little shorter, since their words did not fit in the
+English's lines of 100.
+
 ## The gates
 
 ```
@@ -584,6 +697,11 @@ each failure names the language, the file and the key:
   the key lacks — the isolates are the code's —, a digit of another script (any decimal digit but `0–9`), an Arabic
   presentation form (U+FB50–U+FDFF, U+FE70–U+FEFF), or a placeholder turned or in other digits (`}0{`, `{٠}`); ZWNJ and
   ZWJ may stand. In every language, not only the three written right to left ([1.13: right to left](#113-right-to-left)).
+* **T17 · Wraps** (1.14) — a value whose English is hard-wrapped (a line break, every English line at most 100
+  characters) has as many lines as the English, each at most 100 characters, counted in grapheme clusters; a paragraph
+  value (an English line longer than that) and a manifest value with a line break inside a paragraph (a fenced example, a
+  list of links) have as many lines as the English. A key on your pending list is exempt until it is done
+  ([1.14: hard wraps are a rule now](#114-hard-wraps-are-a-rule-now)).
 
 A rule that is wrong about a string — English that is right to keep, say — is **reported with its
 key**, not worked around and not edited: the lead extends `SAME_IN_EVERY_LANGUAGE` when the languages

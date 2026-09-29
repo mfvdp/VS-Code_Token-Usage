@@ -139,7 +139,7 @@
   "The largest agent": "הסוכן הגדול ביותר",
   "The text is empty.": "הטקסט ריק.",
   "The title is empty.": "הכותרת ריקה.",
-  "The {0} largest agents": "הסוכנים הגדולים ביותר: {0}",
+  "The {0} largest agents": "{0} הסוכנים הגדולים ביותר",
   "This prompt was deleted in another window; your changes were not saved.": "הפרומפט הזה נמחק בחלון אחר; השינויים לא נשמרו.",
   "Time": "זמן",
   "Time of day": "שעה ביום",
@@ -189,7 +189,7 @@
   "idle session": "סשן במנוחה",
   "last month": "החודש שעבר",
   "less": "פחות",
-  "limit reached": "המגבלה הושגה",
+  "limit reached": "הגעה למגבלה",
   "local": "מקומי",
   "lower bound": "חסם תחתון",
   "models ({0}) ▾": "מודלים ({0}) ▾",
@@ -210,7 +210,7 @@
   "own {0}": "עצמי {0}",
   "peak {0} ({1})": "היום העמוס ביותר {0} ({1})",
   "peak {0}:00 · {1} day(s)": "השעה העמוסה ביותר {0}:00 · ימים: {1}",
-  "priced from a related model (family fallback)": "תומחר לפי מודל קרוב (גיבוי לפי משפחה)",
+  "priced from a related model (family fallback)": "תומחר לפי מודל קרוב (חלופה לפי משפחה)",
   "projected at the reset": "תחזית למועד האיפוס",
   "projected {0} by {1}": "צפוי {0} עד {1}",
   "quota sparkline, 7 days": "קו מגמה של המכסה, 7 ימים",
@@ -265,7 +265,7 @@
   "{0} not shown": "{0} לא מוצגים",
   "{0} of {1}": "{0} מתוך {1}",
   "{0} older session(s) not shown.": "סשנים ישנים יותר שלא מוצגים: {0}.",
-  "{0} tokens over {1} day(s)": "{0} טוקנים במשך ימים: {1}",
+  "{0} tokens over {1} day(s)": "{0} טוקנים, ימים: {1}",
   "{0} · derived": "{0} · נגזר",
   "{0} · recorded": "{0} · נרשם",
   "{0} · {1} · {2} % of the day · {3} total {4}": "{0} · {1} · {2}% מהיום · סך הכול {3} {4}",
@@ -279,5 +279,5 @@
   "~1 of them running": "~1 מהם רץ",
   "~Cost": "~עלות",
   "~{0} of them running": "~{0} מהם רצים",
-  "≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals": "≈ מסמן חסם תחתון: השעות הוותיקות ביותר בטווח כבר סוכמו לסיכומים יומיים"
+  "≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals": "≈ מסמן חסם תחתון: השעות המוקדמות ביותר בטווח כבר סוכמו לסיכומים יומיים"
 }
